@@ -1,6 +1,6 @@
 """
     OpenAI Gym Adapter for the Pinball Domain
-    author: Rafael Rodriguez-Sancez
+    author: Rafael Rodriguez-Sanchez
     date: October 2022 
     email: rrs@brown.edu
 """
@@ -9,7 +9,7 @@ from gym import spaces
 from gym.error import DependencyNotInstalled
 
 import numpy as np
-from pinball import PinballModel, PinballView
+from .pinball import PinballModel, PinballView
 
 class PinballEnv(gym.Env):
     metadata = {
@@ -45,6 +45,14 @@ class PinballEnv(gym.Env):
             self.render()
 
         return np.array(next_state), reward, done, False, {}
+
+
+    def get_obstacles(self):
+        """
+            return list of Pinball Obstacles
+        """
+        return self.pinball.obstacles
+
 
     def reset(self):
         self.pinball = PinballModel(self.configuration)
@@ -94,7 +102,7 @@ class PinballEnv(gym.Env):
 if __name__=="__main__":
     from matplotlib import pyplot as plt
 
-    pinball = PinballEnv("/Users/rrs/Desktop/abs-mdp/src/environments/configs/pinball_simple_single.cfg", render_mode="human")
+    pinball = PinballEnv("/Users/rrs/Desktop/abs-mdp/src/envs/pinball/configs/pinball_no_obstacles.cfg", render_mode="human")
     for _ in range(100):
         a = np.random.randint(5)
         pinball.step(a)

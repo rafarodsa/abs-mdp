@@ -193,15 +193,13 @@ class PinballObstacle:
 
     def _intercept_edge(self, pt_pair, ball):
         """ Compute the projection on and edge and find out
-
-        if it intercept with the ball.
-        :param pt_pair: The pair of points defining an edge
-        :type pt_pair: list of lists
-        :param ball: An instance of :class:`BallModel`
-        :type ball: :class:`BallModel`
-        :returns: True if the ball has hit an edge of the polygon
-        :rtype: bool
-
+            if it intercept with the ball.
+            :param pt_pair: The pair of points defining an edge
+            :type pt_pair: list of lists
+            :param ball: An instance of :class:`BallModel`
+            :type ball: :class:`BallModel`
+            :returns: True if the ball has hit an edge of the polygon
+            :rtype: bool
         """
         # Find the projection on an edge
         obstacle_edge = pt_pair[1] - pt_pair[0]
@@ -360,107 +358,6 @@ class PinballModel:
             self.ball.position[1] = 0.95
         if self.ball.position[1] < 0.0:
             self.ball.position[1] = 0.05
-
-# @register_environment
-# class PinballRLGlue(Environment):
-    # """This class is an RL-Glue adapter for :class:`pinball.PinballModel` """
-
-    # name = "Pinball"
-
-    # def __init__(self, configuration=os.path.join(os.path.dirname(__file__),
-    #                                               'configs', 'pinball', 'pinball_simple_single.cfg')):
-    #     """ This class exposes a Pinball environment over RL-Glue
-
-    #     :param configuration: a configuration file for this environment
-    #     :type configuration: str
-
-    #     """
-    #     self.pinball = None
-    #     self.configuration = configuration
-
-    # def make_taskspec(self):
-    #     """ Create a task specification string for this environment
-
-    #     :returns: a task specfication string
-    #     :rtype: str
-
-    #     """
-    #     ts = TaskSpecRLGlue.TaskSpec(discount_factor=1.0, reward_range=(-5, 10000))
-
-    #     ts.addDiscreteAction((0, 4))
-
-    #     ts.addContinuousObservation((0.0, 1))
-    #     ts.addContinuousObservation((0.0, 1))
-    #     ts.addContinuousObservation((0.0, 1))
-    #     ts.addContinuousObservation((0.0, 1))
-
-    #     ts.setEpisodic()
-    #     ts.setExtra(self.name)
-
-    #     return ts.toTaskSpec()
-
-    # def env_init(self):
-    #     """ Declare the parameters for this environment
-
-    #     :returns: A string describing the environment
-    #     :rtype: str
-
-    #     """
-    #     return self.make_taskspec()
-
-    # def env_start(self):
-    #     """ Instantiate a new :class:`PinballModel` environment
-
-    #     :returns: The initial state
-    #     :rtype: :class:`Observation`
-
-    #     """
-    #     self.pinball = PinballModel(self.configuration)
-    #     obs = Observation()
-    #     obs.doubleArray = self.pinball.get_state()
-    #     return obs
-
-    # def env_step(self, action):
-    #     """ Take a step in the environment
-
-    #     :param action: The action that the agent wants to take
-    #     :returns: The next state, reward and whether the current state is terminal
-    #     :rtype: :class:`Reward_observation_terminal`
-
-    #     """
-    #     returnRO = Reward_observation_terminal()
-
-    #     returnRO.r = self.pinball.take_action(action.intArray[0])
-
-    #     obs = Observation()
-    #     obs.doubleArray = self.pinball.get_state()
-    #     returnRO.o = obs
-
-    #     returnRO.terminal = self.pinball.episode_ended()
-    #     return returnRO
-
-    # def env_cleanup(self):
-    #     """ Do nothing. Called once the episode has terminated """
-    #     pass
-
-    # def env_message(message):
-    #     """ Handle a custom message sent over RL-Glue
-
-    #     :param message: A message containing the action to execute
-    #     :returns: The current configuration filename if the message
-    #     is of the form ``config file=`` or ``config file=``. In the
-    #     later case, the string following the ``=`` symbol is the
-    #     path to a new configuration file.
-    #     :rtype: str
-
-    #     """
-    #     if message == 'config file?':
-    #         return self.configuration
-    #         if message.startswith('config file='):
-    #             self.configuration = message.split('=')[1]
-    #         return self.configuration
-
-    #         return "I don't know how to respond to your message"
 
 class PinballView:
     """ This class displays a :class:`PinballModel`
