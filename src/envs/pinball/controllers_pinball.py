@@ -86,7 +86,7 @@ DEC_X = 2
 DEC_Y = 3
 ACC_NONE = 4
 
-def position_controller(goal, kp_vel, ki_vel, kp_pos, kd_pos):
+def position_controller_discrete(goal, kp_vel, ki_vel, kp_pos, kd_pos):
     """
         Factory for controller to achive goal position
     """
@@ -103,5 +103,19 @@ def position_controller(goal, kp_vel, ki_vel, kp_pos, kd_pos):
             # sample = np.random.choice([0,1], p=probs) # select axis to act
             sample = np.argmax(np.abs(u)) # select axis
             return actions[sample][int(u[sample]>=0)]
+            
+    return __controller
+
+def position_controller_continuous(goal, kp_vel, ki_vel, kp_pos, kd_pos):
+    """
+        Factory for controller to achive goal position
+    """
+    controller_pos = PID(kp=kp_pos, ki= 1, kd=kd_pos)
+    controller_vel = PID(kp=kp_vel, ki=ki_vel)
+    MAX_SPEED = 0.99
+    def __controller(state): 
+        error = goal - state
+        u = controller_pos(error[:2]) + controller_vel(error[2:]) # velocity control signal
+        return u.clip(-MAX_SPEED, MAX_SPEED)
             
     return __controller
