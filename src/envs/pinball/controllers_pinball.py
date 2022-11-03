@@ -8,9 +8,12 @@
 import numpy as np
 from itertools import tee
 from scipy.special import erf, softmax
-
+from src.options.option import Option
+from functools import partial
+from gym import spaces
 ### Control Position
 
+### Initiation Sets and Terminations
 def initiation_set(pinball_environment, distance):
     def __initiation(state):
         if ball_collides(pinball_environment, state[:2], state[:2] + distance):
@@ -64,6 +67,20 @@ def termination(goal_position, std_dev=0.001):
         return tail_prob
     return __termination
 
+def termination_velocity(std_dev=0.001):
+    """
+        Factory for termination probability when velocity is close to zero
+    """
+    def __termination(state):
+        if isinstance(std_dev, float):
+            z = np.linalg.norm(state[..., 2:])/std_dev
+        else:
+            z = np.linalg.norm((state[..., 2:])/std_dev)
+        tail_prob = 1-erf(z/np.sqrt(2))
+        return tail_prob
+    return __termination
+
+### Controllers.
 
 class PID:
     def __init__(self, kp, ki=0., kd=0.):
@@ -119,3 +136,27 @@ def position_controller_continuous(goal, kp_vel, ki_vel, kp_pos, kd_pos):
         return u.clip(-MAX_SPEED, MAX_SPEED)
             
     return __controller
+
+def position_controller_factory(init_state, distance, continuous=True):
+    return position_controller_continuous(init_state + distance, 5, 0.01, 100, 0.) if continuous else position_controller_discrete(init_state+distance, 10, 0.1, 100, 0.)
+
+def create_position_controllers(env, translation_distance=1/10):
+    position_options = []
+    controller_factory = position_controller_factory
+    
+    for x in [-1., 1.]:
+        o = Option(initiation_set(env, np.array([translation_distance, 0.])),
+               partial(controller_factory, distance=np.array([x*translation_distance, 0.]), continuous=isinstance(env.action_space, spaces.Box)),
+               termination_velocity(std_dev=0.001)
+        )
+        position_options.append(o)
+    
+    for y in [-1., 1.]:
+        o = Option(initiation_set(env, np.array([translation_distance, 0.])),
+               partial(controller_factory, distance=np.array([0., y*translation_distance]), continuous=isinstance(env.action_space, spaces.Box)),
+               termination_velocity(std_dev=0.001)
+        )
+        position_options.append(o)
+    return position_options
+    
+
