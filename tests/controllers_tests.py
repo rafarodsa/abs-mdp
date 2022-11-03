@@ -1,5 +1,5 @@
 from src.envs.pinball.pinball_gym import PinballEnvContinuous, PinballEnv
-from src.envs.pinball.controllers_pinball import initiation_set, position_controller_discrete, termination, position_controller_continuous
+from src.envs.pinball.controllers_pinball import initiation_set, position_controller_discrete, termination_velocity, position_controller_continuous
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -61,7 +61,7 @@ def plot_trajectory(trajectory, goal):
 def plot_trajectory_with_termination(trajectory, goal, terminated):
     time = np.arange(len(trajectory))
     states = np.array(trajectory)
-    terminated_time = list(map(lambda t: int(np.random.random(1) < t), terminated)).index(1)
+    terminated_time = list(map(lambda t: int(np.random.random(1) < t), terminated))[1:].index(1)
 
 
     for i in range(4):
@@ -87,7 +87,17 @@ def test_termination():
     
     std_vel = 0.1
     std_pos = 0.001
-    termination_f = termination(result[-1], std_dev=[std_pos, std_pos, std_vel, std_vel])
+    termination_f = termination_velocity(std_dev=std_vel)
+    terminated = list(map(termination_f, result[0]))
+
+    plot_trajectory_with_termination(result[0], result[-1], terminated)
+
+def test_termination_continuous():
+    
+    result = test_run_pid_controller_continuous(np.array([0.1, 0.1, 0, 0]), 5, 0.01, 100, 0.)
+    
+    std_vel = 0.001
+    termination_f = termination_velocity(std_dev=std_vel)
     terminated = list(map(termination_f, result[0]))
 
     plot_trajectory_with_termination(result[0], result[-1], terminated)
@@ -96,8 +106,8 @@ def test_termination():
 
 if __name__ == "__main__":
     test_ball_collision()
-    # test_termination()
-    tune_pid_continuous()    
+    # test_termination_continuous()
+    # tune_pid_continuous()    
 
 
 
