@@ -12,6 +12,7 @@ import numpy as np
 from .pinball import PinballModel, PinballView
 
 from collections import UserDict
+from matplotlib.path import Path
 
 class PinballEnv(gym.Env):
     metadata = {
@@ -19,7 +20,7 @@ class PinballEnv(gym.Env):
         "render_fps": 30,
     }
     
-    def __init__(self, config, width=500, height=500, render_mode=None):
+    def __init__(self, config, start_pos=None, target_pos=None, width=500, height=500, render_mode=None):
         self.action_space = spaces.Discrete(5)
         self.observation_space = spaces.Box(low=np.zeros(4), high=np.ones(4))
         self.gamma = 1
@@ -32,14 +33,18 @@ class PinballEnv(gym.Env):
 
         self.pinball = PinballModel(self.configuration)
         self.state = self.pinball.get_state()
-        
+        self._obstacles = [Path(obstacle.points) for obstacle in self.pinball.obstacles]
+        if start_pos:
+            self.pinball.start_pos = start_pos
+        if target_pos:
+            self.pinball.target_pos = target_pos
+
 
     def step(self, action):
         assert self.action_space.contains(
             action
         ), f"{action!r} ({type(action)}) invalid, action_space {self.action_space}"
 
-        action = tuple(action)
         reward = self.pinball.take_action(action)
         next_state = self.pinball.get_state()
         done = self.pinball.episode_ended()
@@ -55,6 +60,23 @@ class PinballEnv(gym.Env):
             return list of Pinball Obstacles
         """
         return self.pinball.obstacles
+
+    
+    def sample_state_space(self, N):
+        all_points = []
+        total_points = 0
+        while total_points < N:
+            points = self._get_points_outside_obstacles(np.random.uniform(size=(N, 2)))
+            all_points.append(points)
+            total_points += points.shape[0]
+        return np.vstack(all_points)[:N]
+
+    def _get_points_outside_obstacles(self, points):
+        points_mask = np.ones(points.shape[0], dtype=np.bool8)
+        for obstacle in self._obstacles:
+            points_mask = np.logical_and(np.logical_not(obstacle.contains_points(points, radius=0.02)), points_mask)
+
+        return points[points_mask]
 
 
     def reset(self):
@@ -124,7 +146,7 @@ class PinballModelContinuous(PinballModel):
 
 class PinballEnvContinuous(PinballEnv):
     MAX_SPEED = 1
-    def __init__(self, config, width=500, height=500, render_mode=None):
+    def __init__(self, config, start_pos=None, target_pos=None, width=500, height=500, render_mode=None):
         super().__init__(config, width, height, render_mode)
         self.action_space = spaces.Box(low=-self.MAX_SPEED, high=self.MAX_SPEED, shape=(2,), dtype=np.float64)
         self.pinball = PinballModelContinuous(config)
@@ -133,7 +155,9 @@ class PinballEnvContinuous(PinballEnv):
         self.pinball = PinballModelContinuous(self.configuration)
         return np.array(self.pinball.get_state())
 
-
+    def step(self, action):
+        action = tuple(action)
+        return super().step(action)
 
 if __name__=="__main__":
     from matplotlib import pyplot as plt
