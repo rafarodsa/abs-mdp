@@ -9,10 +9,20 @@ from gym import spaces
 from gym.error import DependencyNotInstalled
 
 import numpy as np
-from .pinball import PinballModel, PinballView
+from .pinball import PinballModel, PinballView, BallModel
 
 from collections import UserDict
 from matplotlib.path import Path
+
+
+class GoalPinballModel(PinballModel):
+    def set_target_pos(self, target_pos):
+        self.target_pos = target_pos
+
+    def set_initial_pos(self, start_pos):
+        self.ball = BallModel(start_position=start_pos, radius=0.01)
+
+
 
 class PinballEnv(gym.Env):
     metadata = {
@@ -31,13 +41,13 @@ class PinballEnv(gym.Env):
         self.screen = None  
         self.clock = None
 
-        self.pinball = PinballModel(self.configuration)
+        self.pinball = GoalPinballModel(self.configuration)
         self.state = self.pinball.get_state()
         self._obstacles = [Path(obstacle.points) for obstacle in self.pinball.obstacles]
         if start_pos:
-            self.pinball.start_pos = start_pos
+            self.pinball.set_initial_pos(start_pos)
         if target_pos:
-            self.pinball.target_pos = target_pos
+            self.pinball.set_target_pos(target_pos)
 
 
     def step(self, action):
@@ -62,14 +72,18 @@ class PinballEnv(gym.Env):
         return self.pinball.obstacles
 
     
-    def sample_state_space(self, N):
+    def sample_initial_positions(self, N):
+        """
+            Samples initial positions uniformly with velocity 0.
+        """
         all_points = []
         total_points = 0
+        vels = np.zeros((N, 2))
         while total_points < N:
             points = self._get_points_outside_obstacles(np.random.uniform(size=(N, 2)))
             all_points.append(points)
             total_points += points.shape[0]
-        return np.vstack(all_points)[:N]
+        return np.hstack([np.vstack(all_points)[:N], vels])
 
     def _get_points_outside_obstacles(self, points):
         points_mask = np.ones(points.shape[0], dtype=np.bool8)
@@ -78,9 +92,8 @@ class PinballEnv(gym.Env):
 
         return points[points_mask]
 
-
-    def reset(self):
-        self.pinball = PinballModel(self.configuration)
+    def reset(self, state=None):
+        self.pinball = PinballModel(self.configuration) 
         return np.array(self.pinball.get_state())
 
     def render(self):
@@ -132,7 +145,7 @@ class DummyDict(UserDict):
     def __missing__(self, key):
         return self.default_value_f(key)
 
-class PinballModelContinuous(PinballModel):
+class PinballModelContinuous(GoalPinballModel):
     MAX_SPEED = 1
     
     def __init__(self, configuration):
@@ -151,8 +164,10 @@ class PinballEnvContinuous(PinballEnv):
         self.action_space = spaces.Box(low=-self.MAX_SPEED, high=self.MAX_SPEED, shape=(2,), dtype=np.float64)
         self.pinball = PinballModelContinuous(config)
     
-    def reset(self):
+    def reset(self, state=None):
         self.pinball = PinballModelContinuous(self.configuration)
+        if state is not None:
+            self.pinball.set_initial_pos(state[:2]) 
         return np.array(self.pinball.get_state())
 
     def step(self, action):

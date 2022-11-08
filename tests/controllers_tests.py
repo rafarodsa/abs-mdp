@@ -34,7 +34,8 @@ def test_run_pid_controller(displacement, kp_vel, ki_vel, kp_pos, kd_pos, horizo
 
 def test_run_pid_controller_continuous(displacement, kp_vel, ki_vel, kp_pos, kd_pos, horizon=100):
     env = PinballEnvContinuous("/Users/rrs/Desktop/abs-mdp/src/envs/pinball/configs/pinball_no_obstacles.cfg")
-    s = env.reset()
+    s = env.sample_initial_positions(1)
+    s = env.reset(s[0])
     goal = np.concatenate([s[:2], np.zeros(2)], axis=0) + displacement
     controller = position_controller_continuous(goal, kp_vel, ki_vel, kp_pos, kd_pos)
     trajectory = [s]
@@ -61,14 +62,14 @@ def plot_trajectory(trajectory, goal):
 def plot_trajectory_with_termination(trajectory, goal, terminated):
     time = np.arange(len(trajectory))
     states = np.array(trajectory)
-    terminated_time = list(map(lambda t: int(np.random.random(1) < t), terminated))[1:].index(1)
-
+    # terminated_time = list(map(lambda t: int(np.random.random(1) < t), terminated))[1:].index(1)
+    terminated_time = len(time)
 
     for i in range(4):
         plt.subplot(2,2,i+1)
         plt.plot(time[:terminated_time], states[:terminated_time, i])
         plt.plot(time[:terminated_time], goal[i] * np.ones_like(time[:terminated_time])) 
-        
+        plt.plot(time, terminated)
     
     plt.show()
 
@@ -96,7 +97,7 @@ def test_termination_continuous():
     
     result = test_run_pid_controller_continuous(np.array([0.1, 0.1, 0, 0]), 5, 0.01, 100, 0.)
     
-    std_vel = 0.001
+    std_vel = 0.01
     termination_f = termination_velocity(std_dev=std_vel)
     terminated = list(map(termination_f, result[0]))
 
@@ -106,7 +107,7 @@ def test_termination_continuous():
 
 if __name__ == "__main__":
     test_ball_collision()
-    # test_termination_continuous()
+    test_termination_continuous()
     # tune_pid_continuous()    
 
 
