@@ -16,9 +16,7 @@ from gym import spaces
 ### Initiation Sets and Terminations
 def initiation_set(pinball_environment, distance):
     def __initiation(state):
-        if ball_collides(pinball_environment, state[:2], state[:2] + distance):
-            return False
-        return True
+        return not ball_collides(pinball_environment, state[:2], state[:2] + distance)
     return __initiation
 
 
@@ -48,11 +46,18 @@ def _intersect(edge, initial_position, final_position):
     displacement = np.array(final_position) - np.array(initial_position)
     edge_segment = np.array(edge[1])-np.array(edge[0])
     b = edge[0] - initial_position
-    alpha = (edge_segment[1] * b[0]-b[1])/(displacement[0]*edge_segment[1] - displacement[1])
-    beta = (alpha * displacement[1] - b[1])/edge_segment[1]
+    # den = (displacement[0]*edge_segment[1] - displacement[1])
+    
+    # alpha = (edge_segment[1] * b[0]-b[1])/den if den != 0 else np.float('inf')
+    # beta = (alpha * displacement[1] - b[1])/edge_segment[1] if edge_segment[1] != 0 else np.float('inf')
 
+    A = np.stack([displacement, edge_segment], axis=1)
+    try:
+        coeff = np.linalg.solve(A, b)
+        alpha, beta = coeff[0], coeff[1]
+    except np.linalg.LinAlgError:
+        alpha, beta = np.float('inf'), np.float('inf')
     return alpha, beta
-
 
 def termination(goal_position, std_dev=0.001):
     """

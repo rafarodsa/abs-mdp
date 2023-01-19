@@ -1,0 +1,277 @@
+import torch
+from torch import nn
+from torch.nn import functional as F
+from torch.utils.data import DataLoader
+from torch.utils.data import random_split
+import pytorch_lightning as pl
+
+from src.abstract_mdp.models import encoder_fc, decoder_fc, reward_fc, initiation_classifier, transition_fc_deterministic
+from src.abstract_mdp.abs_mdp import AbstractMDP
+import numpy as np
+import argparse
+
+from collections import defaultdict
+
+### Hyperparameters
+training_hyperparams = {
+	"prediction_loss_const": 1.,
+	"kl_loss_const": 0.1,
+	"reward_loss_const": 0.,
+	"transition_loss_const": 1.,
+	"initiation_classifier_loss_const": 0.,
+	"lr": 0.5e-3,
+	"n_samples": 10
+}
+
+class AbstractMDPTrainer(pl.LightningModule):
+	
+	def __init__(self, obs_dim, latent_dim, n_options, encoder_size, decoder_size, transition_size, init_classifier_size, reward_size, **training_hyperparams):
+		super().__init__()
+		self.save_hyperparameters()
+
+		self.obs_dim = obs_dim
+		self.latent_dim = latent_dim
+		self.n_options = n_options
+		self.encoder = encoder_fc(obs_dim, encoder_size, latent_dim)
+		self.transition = transition_fc_deterministic(latent_dim, n_options, transition_size)
+		self.decoder = decoder_fc(obs_dim, decoder_size, latent_dim)
+		self.reward_fn = reward_fc(latent_dim, reward_size, n_options)
+		self.init_classifier = initiation_classifier(latent_dim, init_classifier_size, n_options)
+		self.training_hyperparams = training_hyperparams
+
+
+	def forward(self, state, action):
+		z, _, _ = self.encoder.sample(state)
+		z_prime, _, _ = self.transition.sample(z, action)
+		s_prime, _, _ = self.decoder.sample(z_prime)
+		return s_prime
+	
+	def _run_step(self, s, a, s_prime, executed):
+		# number of samples to approximate expectations
+		n_samples = self.training_hyperparams['n_samples']
+
+		# encode (s, s')
+		z, q_z, normal_z, _ = self.encoder.sample(s, n_samples)
+		z_prime, q_z_prime, std_normal_z_prime, q_z_prime_no_grad = self.encoder.sample(s_prime)
+		q_z_prime = (q_z_prime, q_z_prime_no_grad)
+
+		# predict next latent state
+		executed_ = executed.unsqueeze(0).unsqueeze(-1).repeat_interleave(n_samples, dim=0)
+		actions = a.unsqueeze(0).repeat_interleave(n_samples, dim=0)
+	
+		z_prime_pred = self.transition(torch.cat([z, actions, executed_], dim=-1)).squeeze()
+		
+		# 
+		std_dev = 1e-3
+		q_z_prime_pred = torch.distributions.Normal(z_prime_pred, std_dev*torch.ones_like(z_prime_pred))
+		q_z_prime_pred_no_grad = torch.distributions.Normal(z_prime_pred.detach(), std_dev*torch.ones_like(z_prime_pred))
+		q_z_prime_pred = (q_z_prime_pred, q_z_prime_pred_no_grad)
+		
+		
+		# decode next latent state
+		s_prime_prediction, q_s_prime, _, q_s_prime_no_grad = self.decoder.sample(z_prime_pred, n_samples)
+
+
+		# reward
+		reward_pred = self.reward(z, a, z_prime_pred)
+		_, q_s, _, _ = self.decoder.sample(z)
+
+		# initiation classifier
+		init_mask_z = self.init_classifier(z)	
+		init_mask_z_prime = self.init_classifier(z_prime_pred)	
+		init_masks = torch.cat([init_mask_z, init_mask_z_prime], dim=0)
+		
+		return q_z, normal_z, q_z_prime_pred, q_z_prime, q_s_prime, reward_pred, init_masks, q_s
+		
+	def reward(self, z, a, z_prime):
+		n_samples = self.training_hyperparams['n_samples']
+		# create batch
+		# z_ = z.unsqueeze(0).repeat_interleave(n_samples, dim=0)
+		z_ = z
+		a_ = a.unsqueeze(0).repeat_interleave(n_samples, dim=0)
+		# a_ = a_.unsqueeze(0).repeat_interleave(n_samples, dim=0)
+		input = torch.cat([z_, a_, z_prime], dim=-1)
+		return self.reward_fn(input).squeeze()
+	
+	def step(self, batch, batch_idx):
+		s, a, s_prime, reward, executed, duration, initiation_target = batch
+		
+		reward = self._prepare_rewards(reward)
+
+		q_z, std_normal_z, q_z_prime_pred, q_z_prime_encoded, s_prime_dist, reward_pred, initiation_pred, s_dist = self._run_step(s, a, s_prime, executed)
+
+		# compute losses
+		prediction_loss = self._prediction_loss(s_prime, s_prime_dist) 
+		kl_loss = self._kl_reg_loss(q_z, std_normal_z) 
+		reward_loss = self._reward_loss(reward_pred, s_dist, s_prime_dist, reward) 
+		init_classifier_loss = self._init_classifier_loss(initiation_pred, initiation_target) 
+		transition_loss = self._transition_loss(q_z_prime_pred, q_z_prime_encoded) 
+
+
+		loss = prediction_loss * self.training_hyperparams['prediction_loss_const']\
+			+ kl_loss * self.training_hyperparams['kl_loss_const']\
+			+ reward_loss * self.training_hyperparams['reward_loss_const'] \
+			+ init_classifier_loss * self.training_hyperparams['initiation_classifier_loss_const']\
+			+ transition_loss * self.training_hyperparams['transition_loss_const']
+
+		logs = {
+			"prediction_loss": prediction_loss,
+			"kl_loss": kl_loss,
+			"reward_loss": reward_loss,
+			"initiation_loss": init_classifier_loss,
+			"transition_loss": transition_loss,
+			"loss": loss
+		}
+		return loss, logs
+
+	def _prepare_rewards(self, rewards):
+		r = list(map(lambda e: torch.stack(e, dim=0), zip(*rewards)))
+		return r
+
+	def _prediction_loss(self, s_prime, q_s_prime_pred):
+		s_prime_ = s_prime.unsqueeze(0).repeat_interleave(self.training_hyperparams['n_samples'], dim=0)
+		# s_prime_ = s_prime_.unsqueeze(0).repeat_interleave(self.training_hyperparams['n_samples'], dim=0)
+		# return -q_s_prime_pred.log_prob(s_prime_).sum(-1).mean(dim=0).mean(dim=0).mean()
+		log_probs = q_s_prime_pred.log_prob(s_prime_).sum(-1)
+		return -log_probs.mean(0).mean()
+		# return torch.nn.functional.mse_loss(s_prime, q_s_prime_pred.mean)
+		
+	def _kl_reg_loss(self, q_z, std_normal_z):
+		kl = torch.distributions.kl_divergence(q_z, std_normal_z).sum(-1).mean()
+		return torch.max(torch.tensor(1.), kl)
+
+	def _reward_loss(self, reward_pred, q_s, q_s_prime, reward_target):
+		# reward_target_ = reward_target.unsqueeze(0).repeat_interleave(self.training_hyperparams['n_samples'], dim=0)
+		weights = (q_s.log_prob(reward_target[0].unsqueeze(1)) + q_s_prime.log_prob(reward_target[1].unsqueeze(1))).sum(-1) # CHECK WEIGHTS ARE CORRECT
+		Z = torch.exp(weights).sum(0, keepdims=True)
+		reward_target_ = ((torch.exp(weights)*reward_target[-1].unsqueeze(1))/Z).sum(0).detach()
+		# Note that I'm detaching the target.
+		return torch.nn.functional.mse_loss(reward_pred, reward_target_, reduction="mean")
+
+	def _init_classifier_loss(self, prediction, target):
+		target_ = target.transpose(0, 1).repeat_interleave(self.training_hyperparams['n_samples'], dim=0)
+		return torch.nn.functional.binary_cross_entropy(prediction, target_, reduction="mean")
+
+
+	def _transition_loss(self, prediction_dist, target_dist, alpha=0.4):
+		# return torch.nn.functional.mse_loss(prediction, target, reduction="mean")
+		target_dist_grad, target_dist_no_grad = target_dist
+		prediction_dist_grad, prediction_dist_no_grad = prediction_dist
+
+		kl_1 = torch.distributions.kl_divergence(prediction_dist_grad, target_dist_no_grad).sum(-1) # samples x minibatch
+		kl_2 = torch.distributions.kl_divergence(prediction_dist_no_grad, target_dist_grad).sum(-1) 
+
+		return (alpha * kl_1 + (1-alpha) * kl_2).mean() # kl balancing
+
+	def training_step(self, batch, batch_idx):
+		loss, logs = self.step(batch, batch_idx)
+		self.log_dict({f"train_{k}": v for k, v in logs.items()}, on_step=True, on_epoch=False)
+		return loss
+	
+	def validation_step(self, batch, batch_idx):
+		loss, logs = self.step(batch, batch_idx)
+		self.log_dict({f"val_{k}": v for k, v in logs.items()})
+		return loss
+
+	def configure_optimizers(self):
+		return torch.optim.Adam(self.parameters(), lr=self.training_hyperparams['lr'])
+
+	@staticmethod
+	def add_model_specific_args(parent_parser):
+		parser = parent_parser.add_argument_group("AbsMDPTrainer")
+		parser.add_argument("--obs_dim", type=int, default=4)
+		parser.add_argument("--latent_dim", type=int, default=2)
+		parser.add_argument("--encoder_size", type=int, default=32)
+		parser.add_argument("--decoder_size", type=int, default=32)
+		parser.add_argument("--transition_size", type=int, default=32)
+		parser.add_argument("--init_classifier_size", type=int, default=32)
+		parser.add_argument("--reward_size", type=int, default=32)
+		parser.add_argument("--n_options", type=int, default=4)
+
+		for k, v in training_hyperparams.items():
+			parser.add_argument(f"--{k}", type=type(v), default=v)
+
+		return parent_parser
+
+def _geometric_return(rewards, gamma):
+	_gammas = gamma **  np.arange(len(rewards))
+	return (np.array(rewards) * gamma).sum()
+
+def preprocess_dataset(gamma=0.99, n_actions=4):
+	def _transform(datum):
+		# s, a, s', r, executed, duration, init_mask
+		datum = list(datum)
+		datum[-1] = datum[-1].astype(float)
+		datum[3] = list(map(lambda r: r[:2] + (_geometric_return(r[-1], gamma),), datum[3]))
+		datum[1] = F.one_hot(torch.Tensor([datum[1]]).long(), n_actions).squeeze()
+		return datum
+	return _transform
+
+		
+class PinballDataset(torch.utils.data.Dataset):
+	def __init__(self, path_to_file, n_reward_samples=5, transform=None):
+		self.data, self.rewards = torch.load(path_to_file)
+		self.n_reward_samples = n_reward_samples
+		self.transform = transform
+
+	def __getitem__(self, index):
+		datum = list(self.data[index])
+		rewards = self._get_rewards(datum[1], n_samples=self.n_reward_samples-1)
+		datum[3] = [(datum[0], datum[2], datum[3])] + rewards
+		datum = self.transform(datum) if self.transform else datum
+		return datum
+
+	def _get_rewards(self, action, n_samples):
+		rewards = self.rewards[action]
+		N = len(rewards)
+		sample = np.random.choice(N, n_samples, replace=False)
+		rewards = [rewards[sample[i]] for i in range(n_samples)]
+		return rewards
+
+	def __len__(self):
+		return len(self.data)
+
+if __name__=="__main__":
+
+	# TODO: Encapsulate Transition Model/Loss.
+	# TODO: Fix Reward Function training.
+
+	# default params
+	latent_dim = 2
+	obs_dim = 4
+	n_actions = 4
+	# data
+	dataset_file_path = '/Users/rrs/Desktop/abs-mdp/data/'
+	dataset_name = 'pinball_no_obstacle.pt'
+
+
+	## Parser
+	parser = argparse.ArgumentParser()
+	parser.add_argument('--dataset_path', type=str, default=dataset_file_path+dataset_name)
+
+	parser = AbstractMDPTrainer.add_model_specific_args(parser)
+	args = parser.parse_args()
+	
+	# TODO use Lightning data module.
+	dataset = PinballDataset(args.dataset_path, transform=preprocess_dataset())
+	pinball_test, pinball_val = random_split(dataset, [0.9, 0.1])
+
+	train_loader = DataLoader(pinball_test, batch_size=32)
+	val_loader = DataLoader(pinball_val, batch_size=32)
+
+
+	# model
+	model = AbstractMDPTrainer(**vars(args)).double()
+	
+	# training
+	trainer = pl.Trainer(accelerator='cpu', max_epochs=30)
+	trainer.fit(model, train_loader, val_loader)
+    
+	# Create abstract MDP & save!
+	path_to_mdp = './pinball_no_obstacle.mdp'
+	abs_mdp = AbstractMDP(model, dataset)
+	abs_mdp.save(path_to_mdp)
+
+	# Load abstract MDP
+
+	abs_mdp_loaded = AbstractMDP.load(path_to_mdp)

@@ -9,9 +9,9 @@ from gym import spaces
 from gym.error import DependencyNotInstalled
 
 import numpy as np
-from .pinball import PinballModel, PinballView, BallModel
+from src.envs.pinball.pinball import PinballModel, PinballView, BallModel
 
-from collections import UserDict
+from collections import UserDict, deque
 from matplotlib.path import Path
 
 
@@ -134,7 +134,7 @@ class PinballEnv(gym.Env):
         elif self.render_mode == "rgb_array":
             self.environment_view.blit()
             return np.transpose(
-                np.array(pygame.surfarray.pixels3d(self.screen)), axes=(1, 0, 2)
+                np.array(pygame.surfarray.pixels3d(self.screen))/255, axes=(1, 0, 2)
             )
 
 class DummyDict(UserDict):
@@ -174,11 +174,50 @@ class PinballEnvContinuous(PinballEnv):
         action = tuple(action)
         return super().step(action)
 
+
+class PinballPixelWrapper(gym.Env):
+    def __init__(self, environment, n_frames=1):
+        self.frames = deque(maxlen=n_frames)
+        self.env = environment
+        self.n_frames = n_frames
+
+    def step(self, *args, **kwargs):
+        ret = self.env.step(*args, **kwargs)
+        frame = self.env.render()
+        if len(self.frames) < self.n_frames:
+            self._init_queue(frame)
+        self.frames.append(frame)
+
+        return np.array(self.frames), *ret
+
+    def _init_queue(self, frame):
+        for i in range(self.n_frames):
+            self.frames.append(np.zeros_like(frame))
+
+    def reset(self, *args, **kwargs):
+        self.frames.clear()
+        self.env.reset(*args, **kwargs)
+        frame = self.env.render()
+        if len(self.frames) < self.n_frames:
+            self._init_queue(frame)
+        self.frames.append(frame)
+        return np.array(self.frames)
+
+
 if __name__=="__main__":
     from matplotlib import pyplot as plt
 
-    pinball = PinballEnv("/Users/rrs/Desktop/abs-mdp/src/envs/pinball/configs/pinball_no_obstacles.cfg", render_mode="human")
-    for _ in range(100):
+    pinball = PinballEnv("/Users/rrs/Desktop/abs-mdp/src/envs/pinball/configs/pinball_no_obstacles.cfg", render_mode="rgb_array")
+    pixel_pinball = PinballPixelWrapper(pinball, n_frames=5)
+    
+    # for _ in range(10):
+    #     a = np.random.randint(5)
+    #     pinball.step(a)
+    #     pinball.render()
+
+    for _ in range(10):
         a = np.random.randint(5)
-        pinball.step(a)
-        pinball.render()
+        frames = pixel_pinball.step(a)
+        print(frames[0].shape)
+        plt.imshow(frames[0][-1])
+        plt.show()
