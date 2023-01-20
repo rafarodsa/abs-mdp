@@ -160,7 +160,7 @@ class PinballModelContinuous(GoalPinballModel):
 class PinballEnvContinuous(PinballEnv):
     MAX_SPEED = 1
     def __init__(self, config, start_pos=None, target_pos=None, width=500, height=500, render_mode=None):
-        super().__init__(config, width, height, render_mode)
+        super().__init__(config, start_pos, target_pos, width, height, render_mode)
         self.action_space = spaces.Box(low=-self.MAX_SPEED, high=self.MAX_SPEED, shape=(2,), dtype=np.float64)
         self.pinball = PinballModelContinuous(config)
     
@@ -188,7 +188,7 @@ class PinballPixelWrapper(gym.Env):
             self._init_queue(frame)
         self.frames.append(frame)
 
-        return np.array(self.frames), *ret
+        return np.array(self.frames), *ret[1:-1], {"next_state": ret[0]}
 
     def _init_queue(self, frame):
         for i in range(self.n_frames):
@@ -203,11 +203,20 @@ class PinballPixelWrapper(gym.Env):
         self.frames.append(frame)
         return np.array(self.frames)
 
+    def sample_initial_positions(self, N):
+        return self.env.sample_initial_positions(N)
+    
+    @property
+    def action_space(self):
+        return self.env.action_space
+
+    def get_obstacles(self):
+        return self.env.get_obstacles()
 
 if __name__=="__main__":
     from matplotlib import pyplot as plt
 
-    pinball = PinballEnv("/Users/rrs/Desktop/abs-mdp/src/envs/pinball/configs/pinball_no_obstacles.cfg", render_mode="rgb_array")
+    pinball = PinballEnvContinuous("/Users/rrs/Desktop/abs-mdp/src/envs/pinball/configs/pinball_no_obstacles.cfg", render_mode="rgb_array")
     pixel_pinball = PinballPixelWrapper(pinball, n_frames=5)
     
     # for _ in range(10):
@@ -217,6 +226,7 @@ if __name__=="__main__":
 
     for _ in range(10):
         a = np.random.randint(5)
+        a = [0.1, 0.1]
         frames = pixel_pinball.step(a)
         print(frames[0].shape)
         plt.imshow(frames[0][-1])
