@@ -5,6 +5,7 @@
 '''
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from functools import partial
 
 
@@ -65,6 +66,17 @@ def encoder_fc(obs_dim, hidden_size, latent_dim):
 
     return GaussianDensity((encoder_feats, encoder_mean, encoder_log_var))
 
+def encoder_fc_det(obs_dim, hidden_size, latent_dim):
+    encoder_feats = nn.Sequential(
+                                nn.Linear(obs_dim, hidden_size),
+                                nn.ReLU(),
+                                nn.Linear(hidden_size, hidden_size),
+                                nn.ReLU(),
+                                nn.Linear(hidden_size, latent_dim)
+                        )
+
+    return encoder_feats
+
 
 class GaussianDensity(nn.Module):
 
@@ -78,10 +90,10 @@ class GaussianDensity(nn.Module):
         mean, log_var = self.mean(feats), self.log_var(feats)
         return mean, log_var
 
-    def sample(self, input, n_samples=1, epsilon=1e-3):
+    def sample(self, input, n_samples=1, epsilon=1e-5):
         mean, log_var = self.forward(input)
+        log_var = epsilon + F.softplus(log_var - epsilon)
         std = torch.exp(log_var / 2)
-        std = std + torch.ones_like(std) * epsilon
         std_normal = torch.distributions.Normal(torch.zeros_like(mean), torch.ones_like(std))
         q = torch.distributions.Normal(mean, std)
         q_no_grad = torch.distributions.Normal(mean.detach(), std.detach())
@@ -93,7 +105,7 @@ class GaussianDensity(nn.Module):
 def constant_var(dim, epsilon, x):
     return torch.ones(dim) * epsilon
 
-def decoder_fc(obs_dim, hidden_size, latent_dim):
+def decoder_fc(obs_dim, hidden_size, latent_dim, min_std=1e-6):
     grounding_feats = nn.Sequential(
                                     nn.Linear(latent_dim, hidden_size),
                                     nn.ReLU(),
@@ -103,8 +115,13 @@ def decoder_fc(obs_dim, hidden_size, latent_dim):
 
     grounding_mean = nn.Linear(hidden_size, obs_dim)
     # grounding_log_var = nn.Linear(hidden_size, obs_dim) # TODO fix variance going to zero.
-    epsilon = 1e-5
-    grounding_log_var =  partial(constant_var, obs_dim, epsilon) #nn.Linear(hidden_size, latent_dim)
+    # epsilon = 1e-5
+    # grounding_log_var =  partial(constant_var, obs_dim, epsilon) #nn.Linear(hidden_size, latent_dim)
+    
+    grounding_log_var = nn.Linear(hidden_size, obs_dim)
+    
+
+    
     return GaussianDensity((grounding_feats, grounding_mean, grounding_log_var))
 
 

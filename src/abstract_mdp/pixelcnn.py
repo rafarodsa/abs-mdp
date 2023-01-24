@@ -16,7 +16,7 @@ from torchvision import transforms
 
 
 import matplotlib.pyplot as plt
-
+import numpy as np
 
 class MaskedConv2d(nn.Module):
     """
@@ -33,11 +33,11 @@ class MaskedConv2d(nn.Module):
         self.in_channels = in_channels
         self.out_channels = out_channels
 
-        x_c, y_c = kernel_size // 2, kernel_size // 2 if isinstance(kernel_size, int) else kernel_size[1] // 2, kernel_size[0] // 2
+        x_c, y_c = (kernel_size // 2, kernel_size // 2) if isinstance(kernel_size, int) else (kernel_size[1] // 2, kernel_size[0] // 2)
 
 
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
-        self.mask = torch.ones_like(self.conv.weight)
+        self.mask = np.ones(self.conv.weight.size())
         
         for o in range(self.data_channels):
             for i in range(o+1, self.data_channels):
@@ -45,8 +45,10 @@ class MaskedConv2d(nn.Module):
         
         if mask_type == 'A':
             for c in range(data_channels):
+                print(self._color_mask(c, c))
                 self.mask[self._color_mask(c, c), y_c, x_c] = 0
 
+        self.mask = torch.from_numpy(self.mask).float()
         
 
     def _color_mask(self, in_c, out_c):
@@ -54,10 +56,10 @@ class MaskedConv2d(nn.Module):
             Indices for masking weights.
             For RGB: B is conditioned (G,B), G is conditioned on R.
         """
-        a = torch.arange(self.out_channels) % self.data_channels == out_c
-        b = torch.arange(self.in_channels) % self.data_channels == in_c
+        a = np.arange(self.out_channels) % self.data_channels == out_c
+        b = np.arange(self.in_channels) % self.data_channels == in_c
 
-        return a.unsqueeze(1) * b.unsqueeze(0)
+        return a[:, None] * b[None, :]
 
 
     def forward(self, x):
@@ -69,7 +71,7 @@ class GatedPixelCNNLayer(nn.Module):
     """
         PixelCNN layer.
     """
-    def __init__(self, in_channels, out_channels=32, kernel_size=3):
+    def __init__(self, in_channels, out_channels=32, kernel_size=3, data_channels=1, mask_type='A'):
         super().__init__()
         self.kernel_size = kernel_size
         self.out_channels = out_channels
@@ -81,6 +83,8 @@ class GatedPixelCNNLayer(nn.Module):
         self.skip = nn.Conv2d(out_channels, out_channels, kernel_size=1, stride=1, padding='same')
         self.residual = nn.Conv2d(out_channels, out_channels, kernel_size=1, stride=1, padding='same')
         self.conditional = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding='same')
+        self.channels_conv = MaskedConv2d(in_channels, 2 * out_channels, kernel_size, stride=1, padding='same', data_channels=data_channels, mask_type=mask_type)
+
 
     def forward(self, vertical, horizontal, conditional=None):
         _cond = self.conditional(conditional) if conditional is not None else 0.
@@ -91,8 +95,9 @@ class GatedPixelCNNLayer(nn.Module):
         _horizontal = self.__translate_and_crop(_horizontal, -self.kernel_size // 2, 0)
         
         _link = self.link(_vertical)
-        _horizontal = _horizontal + _link
-
+        _color_channels = self.channels_conv(horizontal)
+        _horizontal = _horizontal + _link + _color_channels
+        
         _vertical = torch.sigmoid(_vertical[:, :self.out_channels, :, :] + _cond) * torch.tanh(_vertical[:, self.out_channels:, :, :] + _cond)
         _horizontal = torch.sigmoid(_horizontal[:, :self.out_channels, :, :] + _cond) * torch.tanh(_horizontal[:, self.out_channels:, :, :] + _cond)
         

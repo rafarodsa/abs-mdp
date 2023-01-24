@@ -150,9 +150,9 @@ class PinballModelContinuous(GoalPinballModel):
     
     def __init__(self, configuration):
         super().__init__(configuration)
-        self.action_effects = DummyDict(self.__action_effects)
+        self.action_effects = DummyDict(self._action_effects)
 
-    def __action_effects(self, action):
+    def _action_effects(self, action):
         _action = np.clip(action, -self.MAX_SPEED, self.MAX_SPEED)
         return _action[0], _action[1]
 

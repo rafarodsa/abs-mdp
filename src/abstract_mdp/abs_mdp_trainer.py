@@ -7,6 +7,9 @@ import pytorch_lightning as pl
 
 from src.abstract_mdp.models import encoder_fc, decoder_fc, reward_fc, initiation_classifier, transition_fc_deterministic
 from src.abstract_mdp.abs_mdp import AbstractMDP
+from src.utils.symlog import symlog, symexp
+
+
 import numpy as np
 import argparse
 
@@ -72,6 +75,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		s_prime_prediction, q_s_prime, _, q_s_prime_no_grad = self.decoder.sample(z_prime_pred, n_samples)
 
 
+
 		# reward
 		reward_pred = self.reward(z, a, z_prime_pred)
 		_, q_s, _, _ = self.decoder.sample(z)
@@ -96,7 +100,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 	def step(self, batch, batch_idx):
 		s, a, s_prime, reward, executed, duration, initiation_target = batch
 		
-		reward = self._prepare_rewards(reward)
+		# reward = self._prepare_rewards(reward)
 
 		q_z, std_normal_z, q_z_prime_pred, q_z_prime_encoded, s_prime_dist, reward_pred, initiation_pred, s_dist = self._run_step(s, a, s_prime, executed)
 
@@ -141,17 +145,19 @@ class AbstractMDPTrainer(pl.LightningModule):
 		return torch.max(torch.tensor(1.), kl)
 
 	def _reward_loss(self, reward_pred, q_s, q_s_prime, reward_target):
-		# reward_target_ = reward_target.unsqueeze(0).repeat_interleave(self.training_hyperparams['n_samples'], dim=0)
-		weights = (q_s.log_prob(reward_target[0].unsqueeze(1)) + q_s_prime.log_prob(reward_target[1].unsqueeze(1))).sum(-1) # CHECK WEIGHTS ARE CORRECT
-		Z = torch.exp(weights).sum(0, keepdims=True)
-		reward_target_ = ((torch.exp(weights)*reward_target[-1].unsqueeze(1))/Z).sum(0).detach()
+		obs, next_obs, rewards = reward_target  # batch x n_samples x obs_dim
+		obs, next_obs = obs.transpose(0, 1).unsqueeze(1), next_obs.transpose(0, 1).unsqueeze(1)  # n_samples x batch x obs_dim
+		
+		_reward_target = symlog(rewards).transpose(0, 1).unsqueeze(1) # batch x n_samples x 1
+		weights = torch.exp((q_s.log_prob(obs) + q_s_prime.log_prob(next_obs)).sum(-1))
+		Z = weights.sum(0, keepdims=True)
+		reward_target_ = (weights*_reward_target/Z).sum(0).detach()
 		# Note that I'm detaching the target.
 		return torch.nn.functional.mse_loss(reward_pred, reward_target_, reduction="mean")
 
 	def _init_classifier_loss(self, prediction, target):
 		target_ = target.transpose(0, 1).repeat_interleave(self.training_hyperparams['n_samples'], dim=0)
 		return torch.nn.functional.binary_cross_entropy(prediction, target_, reduction="mean")
-
 
 	def _transition_loss(self, prediction_dist, target_dist, alpha=0.4):
 		# return torch.nn.functional.mse_loss(prediction, target, reduction="mean")
@@ -194,15 +200,15 @@ class AbstractMDPTrainer(pl.LightningModule):
 		return parent_parser
 
 def _geometric_return(rewards, gamma):
-	_gammas = gamma **  np.arange(len(rewards))
-	return (np.array(rewards) * gamma).sum()
+	_gammas = gamma **  np.arange(rewards.shape[-1])
+	return (np.array(rewards) * _gammas[None, :]).sum(-1)
 
 def preprocess_dataset(gamma=0.99, n_actions=4):
 	def _transform(datum):
 		# s, a, s', r, executed, duration, init_mask
 		datum = list(datum)
 		datum[-1] = datum[-1].astype(float)
-		datum[3] = list(map(lambda r: r[:2] + (_geometric_return(r[-1], gamma),), datum[3]))
+		datum[3] = datum[3][:2] + (_geometric_return(datum[3][-1], gamma),)
 		datum[1] = F.one_hot(torch.Tensor([datum[1]]).long(), n_actions).squeeze()
 		return datum
 	return _transform
@@ -216,33 +222,34 @@ class PinballDataset(torch.utils.data.Dataset):
 
 	def __getitem__(self, index):
 		datum = list(self.data[index])
-		rewards = self._get_rewards(datum[1], n_samples=self.n_reward_samples-1)
-		datum[3] = [(datum[0], datum[2], datum[3])] + rewards
+		rewards = self._get_rewards(datum, n_samples=self.n_reward_samples-1)
+		datum[3] = rewards
 		datum = self.transform(datum) if self.transform else datum
 		return datum
 
-	def _get_rewards(self, action, n_samples):
-		rewards = self.rewards[action]
-		N = len(rewards)
+	def _get_rewards(self, datum, n_samples):
+		current_obs, action, current_next_obs, current_rewards, _, _, _ = datum
+		obs, next_obs, rews = self.rewards[action] # tuple of arrays (obs, next_obs, rewards).
+		N = rews.shape[0]
 		sample = np.random.choice(N, n_samples, replace=False)
-		rewards = [rewards[sample[i]] for i in range(n_samples)]
-		return rewards
-
+		# append current datum
+		obs = np.concatenate([current_obs[np.newaxis, :], obs[sample]], axis=0)
+		next_obs = np.concatenate([current_next_obs[None, :], next_obs[sample]], axis=0)
+		current_rewards = np.array(current_rewards)[None, :]
+		rewards = np.concatenate([current_rewards, rews[sample]], axis=0)
+		return (obs, next_obs, rewards)
+	
 	def __len__(self):
 		return len(self.data)
 
 if __name__=="__main__":
-
-	# TODO: Encapsulate Transition Model/Loss.
-	# TODO: Fix Reward Function training.
-
 	# default params
 	latent_dim = 2
 	obs_dim = 4
 	n_actions = 4
 	# data
 	dataset_file_path = '/Users/rrs/Desktop/abs-mdp/data/'
-	dataset_name = 'pinball_no_obstacle.pt'
+	dataset_name = 'pinball_no_obstacle_rewards.pt'
 
 
 	## Parser
