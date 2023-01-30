@@ -10,6 +10,8 @@ from torchvision import transforms
 from src.abstract_mdp.pixelcnn import GatedPixelCNNLayer, PixelCNNStack, encoder_conv_continuous
 
 
+import argparse
+
 class PixelCNN_VAE_Binary(pl.LightningModule):
     def __init__(self, in_channels, out_channels, kernel_size=3, n_layers=5, latent_dim=10):
         super().__init__()
@@ -59,18 +61,29 @@ if __name__ == "__main__":
         # Plot image
         return img
 
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--gpus', type=int, default=0)
+    parser.add_argument('--cpus', type=int, default=0)
+    parser.add_argument('--accelerator', type=str, default='cpu')
+    parser.add_argument('--max_epochs', type=int, default=1)
+    parser.add_argument('--batch_size', type=int, default=32)
+
+    args = parser.parse_args()
+
+
     # Load Binarized MNIST
     transform = transforms.Compose([transforms.ToTensor(), binarize])
     train_dataset = MNIST(root='data', train=True, download=True, transform=transform)
     val_dataset = MNIST(root='data', train=False, download=True, transform=transform)
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
 
 
     # Train
     model = PixelCNN_VAE_Binary(in_channels=1, out_channels=32, kernel_size=5, n_layers=5, latent_dim=5)
 
-    trainer = pl.Trainer(max_epochs=1, accelerator='cpu')
+    trainer = pl.Trainer(max_epochs=args.max_epochs, accelerator=args.accelerator)
     trainer.fit(model, train_loader, val_loader)
 
     # Save model
