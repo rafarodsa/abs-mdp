@@ -13,13 +13,13 @@ from src.abstract_mdp.pixelcnn import GatedPixelCNNLayer, PixelCNNStack, encoder
 import argparse
 
 class PixelCNN_VAE_Binary(pl.LightningModule):
-    def __init__(self, in_channels, out_channels, kernel_size=3, n_layers=5, latent_dim=10):
+    def __init__(self, in_channels, out_channels, kernel_size=3, n_layers=5, latent_dim=10, lr=1e-3):
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_size = kernel_size
         self.n_layers = n_layers
-        
+        self.lr = lr
 
         width, height = 28, 28
         self.encoder = encoder_conv_continuous(width, height, in_channels, kernel_size, latent_dim=latent_dim).float()
@@ -50,7 +50,7 @@ class PixelCNN_VAE_Binary(pl.LightningModule):
         return loss
    
     def configure_optimizers(self) -> torch.optim.Optimizer:
-        return torch.optim.Adam(self.parameters(), lr=5e-3)
+        return torch.optim.Adam(self.parameters(), lr=self.lr)
 
 
 if __name__ == "__main__":
@@ -68,6 +68,11 @@ if __name__ == "__main__":
     parser.add_argument('--accelerator', type=str, default='cpu')
     parser.add_argument('--max_epochs', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--lr', type=float, default=1e-3)
+
+    parser.add_argument('--latent_dim', type=int, default=10)
+    )
+
 
     args = parser.parse_args()
 
@@ -81,7 +86,7 @@ if __name__ == "__main__":
 
 
     # Train
-    model = PixelCNN_VAE_Binary(in_channels=1, out_channels=32, kernel_size=5, n_layers=5, latent_dim=5)
+    model = PixelCNN_VAE_Binary(in_channels=1, out_channels=32, kernel_size=5, n_layers=5, latent_dim=args.latent_dim, lr=args.lr)
 
     trainer = pl.Trainer(max_epochs=args.max_epochs, accelerator=args.accelerator)
     trainer.fit(model, train_loader, val_loader)
