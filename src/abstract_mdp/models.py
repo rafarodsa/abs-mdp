@@ -9,45 +9,6 @@ import torch.nn.functional as F
 from functools import partial
 
 
-##  Pixel Models
-
-class ConvResidual(nn.Module):
-    def __init__(self, in_width, in_height, in_channels, out_channels):
-        super().__init__()
-        self.conv_1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, padding='same')
-        self.norm_1 = nn.LayerNorm([out_channels, in_width, in_height])
-        self.conv_2 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, padding='same')
-        self.norm_2 = nn.LayerNorm([out_channels, in_width, in_height])
-        self.relu = nn.ReLU()
-
-    def forward(self, x):
-        conv_1 = self.relu(self.norm_1(self.conv_1(x)))
-        conv_2 = self.relu(self.norm_2(self.conv_2(conv_1)))
-        return conv_2 + x
-
-
-def conv_out_dim(in_dim, kernel_size, stride, padding):
-    return int((in_dim - kernel_size + 2 * padding) / stride + 1)
-
-
-def encoder_conv_continuous(in_width, in_height, hidden_dim=128, latent_dim=2):
-    encoder_feats = nn.Sequential(
-                                nn.Conv2d(3, 16, kernel_size=3, stride=2, padding='valid'),
-                                nn.LayerNorm([16, conv_out_dim(in_width, kernel_size=3, padding=0, stride=2), conv_out_dim(in_height, kernel_size=3, padding=0, stride=2)]),
-                                nn.ReLU(),
-                                nn.Conv2d(16, 32, kernel_size=3, stride=2, padding='valid'),
-                                nn.LayerNorm([32, conv_out_dim(in_width, kernel_size=3, padding=0, stride=2), conv_out_dim(in_height, kernel_size=3, padding=0, stride=2)]),
-                                ConvResidual(conv_out_dim(in_width, kernel_size=3, padding=0, stride=2), conv_out_dim(in_height, kernel_size=3, padding=0, stride=2), 32, 32),    
-                                nn.Flatten(),
-                                nn.Linear(32 * conv_out_dim(in_width, kernel_size=3, padding=0, stride=2) * conv_out_dim(in_height, kernel_size=3, padding=0, stride=2), hidden_dim),
-                                nn.ReLU()
-                    )
-
-    encoder_mean = nn.Linear(32 * 3 * 3, latent_dim)
-
-    encoder_log_var = nn.Linear(32 * 3 * 3, latent_dim)
-
-    return GaussianDensity((encoder_feats, encoder_mean, encoder_log_var))
 
 ##  Single Vector Models
 

@@ -10,7 +10,8 @@ def predict_next_states(mdp, states, actions, executed):
     next_z = []
     for action in actions:
         actions_ = action * torch.ones(states.shape[0])
-        next_z_ = mdp.transition(mdp.encoder(states), actions_.long(), executed)
+        z = mdp.encoder(states)
+        next_z_ = mdp.transition(z, actions_.long(), executed)
         next_s.append(mdp.ground(next_z_))
         next_z.append(next_z_)
     return next_s, next_z
@@ -26,7 +27,7 @@ def test_grounding(mdp, states):
 
 # Arguments
 path_to_model = './pinball_no_obstacle.mdp'
-n_samples = 10000
+n_samples = 1000
 
 # Load
 mdp = AbstractMDP.load(path_to_model)
@@ -39,6 +40,7 @@ executed = torch.ones(n_samples) # TODO check that this flag is correct in datas
 
 actions = mdp.get_actions()
 s = states_to_plot(states)
+
 next_states, next_z = predict_next_states(mdp, s/10, actions, executed)
 
 

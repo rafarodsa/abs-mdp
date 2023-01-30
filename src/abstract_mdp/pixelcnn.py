@@ -18,6 +18,9 @@ from torchvision import transforms
 import matplotlib.pyplot as plt
 import numpy as np
 
+
+from src.abstract_mdp.models import GaussianDensity
+
 class MaskedConv2d(nn.Module):
     """
         Implements Masked CNN for 3D inputs.
@@ -45,7 +48,7 @@ class MaskedConv2d(nn.Module):
         
         if mask_type == 'A':
             for c in range(data_channels):
-                print(self._color_mask(c, c))
+                # print(self._color_mask(c, c))
                 self.mask[self._color_mask(c, c), y_c, x_c] = 0
 
         self.mask = torch.from_numpy(self.mask).float()
@@ -189,6 +192,59 @@ class PixelCNNDecoderBinary(pl.LightningModule):
    
     def configure_optimizers(self) -> torch.optim.Optimizer:
         return torch.optim.Adam(self.parameters(), lr=5e-3)
+
+
+
+##  Pixel Encoder Models
+
+class ConvResidual(nn.Module):
+    def __init__(self, in_width, in_height, in_channels, out_channels, kernel_size=3):
+        super().__init__()
+        self.conv_1 = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=1, padding='same')
+        self.norm_1 = nn.LayerNorm([out_channels, in_width, in_height])
+        self.conv_2 = nn.Conv2d(out_channels, in_channels, kernel_size=kernel_size, stride=1, padding='same')
+        self.norm_2 = nn.LayerNorm([in_channels, in_width, in_height])
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        conv_1 = self.relu(self.norm_1(self.conv_1(x)))
+        conv_2 = self.relu(self.norm_2(self.conv_2(conv_1)))
+        return conv_2 + x
+
+
+def conv_out_dim(in_dim, kernel_size, stride, padding=0):
+    return int((in_dim - kernel_size + 2 * padding) / stride + 1)
+
+
+def encoder_conv_continuous(in_width, in_height, in_channels, kernel_size=3, stride=1, hidden_dim=128, latent_dim=2):
+    out_channels_1, out_channels_2 = 32, 16
+    out_width_1, out_height_1 = conv_out_dim(in_width, kernel_size=kernel_size, stride=stride), conv_out_dim(in_height, kernel_size=kernel_size, padding=0, stride=stride)
+    out_width_2, out_height_2 = conv_out_dim(out_width_1, kernel_size=kernel_size, padding=0, stride=stride), conv_out_dim(out_height_1, kernel_size=kernel_size, padding=0, stride=stride)
+
+    encoder_feats_1 = nn.Sequential(
+                                nn.Conv2d(in_channels, out_channels_1, kernel_size=kernel_size, stride=stride, padding='valid'),
+                                nn.LayerNorm([out_channels_1, out_width_1, out_height_1]),
+                                nn.ReLU(),
+                                nn.Conv2d(out_channels_1, out_channels_2, kernel_size=kernel_size, stride=stride, padding='valid'),
+                                nn.LayerNorm([out_channels_2, out_width_2, out_height_2])
+                    )
+
+    encoder_feats = nn.Sequential(
+                                encoder_feats_1,
+                                ConvResidual(out_width_2, out_height_2, out_channels_2, 32),    
+                                nn.Flatten(),
+                                nn.Linear(out_channels_2 * out_width_2 * out_height_2, hidden_dim),
+                                nn.ReLU()
+    )
+
+    encoder_mean = nn.Linear(hidden_dim, latent_dim)
+
+    encoder_log_var = nn.Linear(hidden_dim, latent_dim)
+
+    return GaussianDensity((encoder_feats, encoder_mean, encoder_log_var))
+
+
+
 
 
 if __name__ == "__main__":
