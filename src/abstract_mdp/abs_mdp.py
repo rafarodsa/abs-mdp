@@ -43,7 +43,6 @@ class AbstractMDP:
         self.initial_states = np.array([d[0] for d in self.data])
 
     def transition(self, state, action, executed):
-        
         if len(state.size()) > 1:
             actions_ = torch.nn.functional.one_hot(action, self.trainer.n_options)
             executed_ = executed.unsqueeze(1)
@@ -61,8 +60,9 @@ class AbstractMDP:
 
     def encoder(self, ground_state):
         with torch.no_grad():
-            return self.trainer.encoder(ground_state)[0].squeeze()
-
+            # return self.trainer.encoder(ground_state)[0].squeeze()
+            return self.trainer.encoder(ground_state)
+            
     def ground(self, abstract_state):
         with torch.no_grad():
             return self.trainer.decoder(abstract_state)[0].squeeze()

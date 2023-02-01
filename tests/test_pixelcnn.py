@@ -48,3 +48,6 @@ if __name__ == "__main__":
         plt.imshow(samples[img, 0]*255, cmap='gray')
 
     plt.show()
+
+
+    # TODO: Test Color Channel Masking on GPU
