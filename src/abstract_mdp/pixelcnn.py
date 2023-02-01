@@ -48,10 +48,10 @@ class MaskedConv2d(nn.Module):
         
         if mask_type == 'A':
             for c in range(data_channels):
-                # print(self._color_mask(c, c))
                 self.mask[self._color_mask(c, c), y_c, x_c] = 0
-
-        self.mask = torch.from_numpy(self.mask).float()
+        
+        self.device = self.conv.weight.get_device()
+        self.mask = torch.from_numpy(self.mask)
         
 
     def _color_mask(self, in_c, out_c):
@@ -66,8 +66,18 @@ class MaskedConv2d(nn.Module):
 
 
     def forward(self, x):
+        self._get_device()
+        self.mask = self.mask.to(self.device).type(self.conv.weight.dtype)
         self.conv.weight = nn.Parameter(self.conv.weight * self.mask)
         return self.conv(x)
+
+    def _get_device(self):
+        try:
+            self.device = self.conv.weight.get_device()
+            if self.device < 0:
+                self.device = torch.device('cpu', 0)
+        except RuntimeError:
+            self.device = torch.device('cpu', 0)
 
 
 class GatedPixelCNNLayer(nn.Module):
@@ -86,7 +96,7 @@ class GatedPixelCNNLayer(nn.Module):
         self.skip = nn.Conv2d(out_channels, out_channels, kernel_size=1, stride=1, padding='same')
         self.residual = nn.Conv2d(out_channels, out_channels, kernel_size=1, stride=1, padding='same')
         self.conditional = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding='same')
-        self.channels_conv = MaskedConv2d(in_channels, 2 * out_channels, kernel_size, stride=1, padding='same', data_channels=data_channels, mask_type=mask_type)
+        self.channels_conv = MaskedConv2d(in_channels, 2 * out_channels, kernel_size=1, stride=1, padding='same', data_channels=data_channels, mask_type=mask_type)
 
 
     def forward(self, vertical, horizontal, conditional=None):
@@ -98,7 +108,7 @@ class GatedPixelCNNLayer(nn.Module):
         _horizontal = self.__translate_and_crop(_horizontal, -self.kernel_size // 2, 0)
         
         _link = self.link(_vertical)
-        _color_channels = self.channels_conv(horizontal)
+        _color_channels = 0.#self.channels_conv(horizontal)
         _horizontal = _horizontal + _link + _color_channels
         
         _vertical = torch.sigmoid(_vertical[:, :self.out_channels, :, :] + _cond) * torch.tanh(_vertical[:, self.out_channels:, :, :] + _cond)
@@ -179,7 +189,7 @@ class PixelCNNDecoderBinary(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         x, label = batch
         out = self(x, label)
-        loss = F.cross_entropy(out.reshape(x.shape[0], 2, -1), x.reshape(x.shape[0], -1).long())
+        loss = F.cross_entropy(out.reshape(x.shape[0], 2, -1), x.reshape(x.shape[0], -1).long(), reduction='sum')/x.shape[0]
         self.log('train_loss', loss)
         return loss
     
@@ -217,7 +227,7 @@ def conv_out_dim(in_dim, kernel_size, stride, padding=0):
 
 
 def encoder_conv_continuous(in_width, in_height, in_channels, kernel_size=3, stride=1, hidden_dim=128, latent_dim=2):
-    out_channels_1, out_channels_2 = 32, 16
+    out_channels_1, out_channels_2 = 64, 32
     out_width_1, out_height_1 = conv_out_dim(in_width, kernel_size=kernel_size, stride=stride), conv_out_dim(in_height, kernel_size=kernel_size, padding=0, stride=stride)
     out_width_2, out_height_2 = conv_out_dim(out_width_1, kernel_size=kernel_size, padding=0, stride=stride), conv_out_dim(out_height_1, kernel_size=kernel_size, padding=0, stride=stride)
 
@@ -235,7 +245,7 @@ def encoder_conv_continuous(in_width, in_height, in_channels, kernel_size=3, str
                                 nn.Flatten(),
                                 nn.Linear(out_channels_2 * out_width_2 * out_height_2, hidden_dim),
                                 nn.ReLU()
-    )
+                    )
 
     encoder_mean = nn.Linear(hidden_dim, latent_dim)
 
@@ -259,15 +269,15 @@ if __name__ == "__main__":
     transform = transforms.Compose([transforms.ToTensor(), binarize])
     train_dataset = MNIST(root='data', train=True, download=True, transform=transform)
     val_dataset = MNIST(root='data', train=False, download=True, transform=transform)
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=128, shuffle=False)
 
 
     # Train
-    model = PixelCNNDecoderBinary(10, 1, 32, 5, 5)
+    model = PixelCNNDecoderBinary(10, 1, 64, 7, 5)
 
-    trainer = pl.Trainer(max_epochs=1, accelerator='cpu')
+    trainer = pl.Trainer(max_epochs=5, accelerator='gpu')
     trainer.fit(model, train_loader, val_loader)
 
     # Save model
-    torch.save(model.state_dict(), 'pixelcnn.pt')
+    torch.save(model.state_dict(), 'cond_pixelcnn.pt')
