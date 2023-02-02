@@ -5,8 +5,6 @@
 	author: Rafael Rodriguez-Sanchez (rrs@brown.edu)
 	date: January 2023
 """
-
-
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -16,40 +14,51 @@ import pytorch_lightning as pl
 
 from src.abstract_mdp.models import encoder_fc, decoder_fc, reward_fc, initiation_classifier, transition_fc_deterministic
 from src.abstract_mdp.abs_mdp import AbstractMDP
-from src.utils.symlog import symlog, symexp
+from src.utils.symlog import symlog
 
 
 import numpy as np
 import argparse
+from argparse import Namespace
 
-from collections import defaultdict
 
 ### Hyperparameters
 training_hyperparams = {
-	"prediction_loss_const": 10.,
+	"grounding_loss_const": 10.,
 	"kl_loss_const": 0.1,
 	"reward_loss_const": 1.,
 	"transition_loss_const": 0.1,
 	"init_loss_const": 0.,
 	"lr": 0.5e-3,
-	"n_samples": 1
+	"n_samples": 1,
+	"obs_dim": 4, 
+	"latent_dim": 2, 
+	"n_options": 4,
+	"encoder_size": 64, 
+	"decoder_size": 64, 
+	"transition_size": 128,
+	"init_classifier_size": 64,
+	"reward_size": 64,
+	"batch_size": 128
 }
 
 class AbstractMDPTrainer(pl.LightningModule):
 	
-	def __init__(self, obs_dim, latent_dim, n_options, encoder_size, decoder_size, transition_size, init_classifier_size, reward_size, **training_hyperparams):
+	def __init__(self, config=training_hyperparams, data_path='data/pinball_no_obstacle_rewards.pt'):
 		super().__init__()
 		self.save_hyperparameters()
-
-		self.obs_dim = obs_dim
-		self.latent_dim = latent_dim
-		self.n_options = n_options
-		self.encoder = encoder_fc(obs_dim, encoder_size, latent_dim)
-		self.transition = transition_fc_deterministic(latent_dim, n_options, transition_size)
-		self.decoder = decoder_fc(obs_dim, decoder_size, latent_dim)
-		self.reward_fn = reward_fc(latent_dim, reward_size, n_options)
-		self.init_classifier = initiation_classifier(latent_dim, init_classifier_size, n_options)
-		self.training_hyperparams = training_hyperparams
+		config = Namespace(**config)
+		self.data_path = data_path
+		self.obs_dim = config.obs_dim
+		self.latent_dim = config.latent_dim
+		self.n_options = config.n_options
+		self.encoder = encoder_fc(self.obs_dim, config.encoder_size, self.latent_dim)
+		self.transition = transition_fc_deterministic(self.latent_dim, self.n_options, config.transition_size)
+		self.decoder = decoder_fc(self.obs_dim, config.decoder_size, self.latent_dim)
+		self.reward_fn = reward_fc(self.latent_dim, config.reward_size, self.n_options)
+		self.init_classifier = initiation_classifier(self.latent_dim, config.init_classifier_size, self.n_options)
+		self.training_hyperparams = config
+		print(self.hparams)
 
 
 	def forward(self, state, action):
@@ -60,7 +69,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 	
 	def _run_step(self, s, a, s_prime, executed):
 		# number of samples to approximate expectations
-		n_samples = self.training_hyperparams['n_samples']
+		n_samples = self.training_hyperparams.n_samples
 
 		# sample encoding of (s, s')
 		z, q_z, q_z_std, _ = self.encoder.sample(s)
@@ -93,7 +102,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		return q_z, q_z_std, q_z_prime_pred, q_z_prime_encoder, q_s_prime, reward_pred, init_masks, q_s
 		
 	def reward(self, z, a, z_prime):
-		n_samples = self.training_hyperparams['n_samples']
+		n_samples = self.training_hyperparams.n_samples
 		# create batch
 		if n_samples > 1:
 			z_ = z.unsqueeze(0).repeat_interleave(n_samples, dim=0)
@@ -117,11 +126,11 @@ class AbstractMDPTrainer(pl.LightningModule):
 		transition_loss = self._transition_loss(q_z_prime_encoded, q_z_prime_pred) 
 
 
-		loss = prediction_loss * self.training_hyperparams['prediction_loss_const']\
-			+ kl_loss * self.training_hyperparams['kl_loss_const']\
-			+ reward_loss * self.training_hyperparams['reward_loss_const'] \
-			+ init_classifier_loss * self.training_hyperparams['init_loss_const']\
-			+ transition_loss * self.training_hyperparams['transition_loss_const']
+		loss = prediction_loss * self.training_hyperparams.grounding_loss_const\
+			+ kl_loss * self.training_hyperparams.kl_loss_const\
+			+ reward_loss * self.training_hyperparams.reward_loss_const \
+			+ init_classifier_loss * self.training_hyperparams.init_loss_const\
+			+ transition_loss * self.training_hyperparams.transition_loss_const
 
 		logs = {
 			"grounding_loss": prediction_loss,
@@ -134,10 +143,11 @@ class AbstractMDPTrainer(pl.LightningModule):
 		return loss, logs
 
 	def _prediction_loss(self, s_prime, q_s_prime_pred, s, q_s_pred):
-		s_prime_ = s_prime.unsqueeze(0).repeat_interleave(self.training_hyperparams['n_samples'], dim=0)
+		n_samples = self.training_hyperparams.n_samples
+		s_prime_ = s_prime.unsqueeze(0).repeat_interleave(n_samples, dim=0)
 		log_probs = q_s_prime_pred.log_prob(s_prime_).sum(-1)
 
-		s_ = s.unsqueeze(0).repeat_interleave(self.training_hyperparams['n_samples'], dim=0)
+		s_ = s.unsqueeze(0).repeat_interleave(n_samples, dim=0)
 		log_probs_s = q_s_pred.log_prob(s_).sum(-1)
 
 		return -(log_probs + log_probs_s).mean()
@@ -191,24 +201,27 @@ class AbstractMDPTrainer(pl.LightningModule):
 		return loss
 
 	def configure_optimizers(self):
-		return torch.optim.Adam(self.parameters(), lr=self.training_hyperparams['lr'])
+		return torch.optim.Adam(self.parameters(), lr=self.training_hyperparams.lr)
 
 	@staticmethod
 	def add_model_specific_args(parent_parser):
 		parser = parent_parser.add_argument_group("AbsMDPTrainer")
-		parser.add_argument("--obs_dim", type=int, default=4)
-		parser.add_argument("--latent_dim", type=int, default=2)
-		parser.add_argument("--encoder_size", type=int, default=32)
-		parser.add_argument("--decoder_size", type=int, default=32)
-		parser.add_argument("--transition_size", type=int, default=32)
-		parser.add_argument("--init_classifier_size", type=int, default=32)
-		parser.add_argument("--reward_size", type=int, default=32)
-		parser.add_argument("--n_options", type=int, default=4)
-
 		for k, v in training_hyperparams.items():
 			parser.add_argument(f"--{k}", type=type(v), default=v)
 
 		return parent_parser
+
+	def prepare_data(self):
+		dataset = PinballDataset(self.data_path, transform=preprocess_dataset())
+		self.pinball_test, self.pinball_val = random_split(dataset, [0.9, 0.1])
+	
+	def train_dataloader(self):
+		return DataLoader(self.pinball_test, batch_size=int(self.training_hyperparams.batch_size))
+
+	def val_dataloader(self):
+		return DataLoader(self.pinball_val, batch_size=int(self.training_hyperparams.batch_size))
+
+
 
 def _geometric_return(rewards, gamma):
 	_gammas = gamma **  np.arange(rewards.shape[-1])
@@ -259,37 +272,30 @@ if __name__=="__main__":
 	obs_dim = 4
 	n_actions = 4
 	# data
-	dataset_file_path = '/Users/rrs/Desktop/abs-mdp/data/'
+	dataset_file_path = 'data/'
 	dataset_name = 'pinball_no_obstacle_rewards.pt'
 
 	## Parser
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--dataset_path', type=str, default=dataset_file_path+dataset_name)
-	parser.add_argument('--num-epochs', type=int, default=10)
-	parser.add_argument('--accelerator', type=str, default='cpu')
+	parser.add_argument('--epochs', type=int, default=10)
+	parser.add_argument('--accelerator', type=str, default='gpu')
 	parser.add_argument('--batch-size', type=int, default=32)
 	parser.add_argument('--save-path', type=str, default='mdps/abs_mdp.pt')
 
 	parser = AbstractMDPTrainer.add_model_specific_args(parser)
 	args = parser.parse_args()
-	
-	# TODO use Lightning data module.
-	dataset = PinballDataset(args.dataset_path, transform=preprocess_dataset())
-	pinball_test, pinball_val = random_split(dataset, [0.9, 0.1])
-
-	train_loader = DataLoader(pinball_test, batch_size=args.batch_size)
-	val_loader = DataLoader(pinball_val, batch_size=args.batch_size)
 
 	# model
-	model = AbstractMDPTrainer(**vars(args)).double()
+	model = AbstractMDPTrainer(vars(args)).double()
 	
 	# training
-	trainer = pl.Trainer(accelerator=args.accelerator, max_epochs=args.num_epochs)
-	trainer.fit(model, train_loader, val_loader)
+	trainer = pl.Trainer(accelerator=args.accelerator, max_epochs=args.epochs, auto_lr_find=True, auto_scale_batch_size=True)
+	trainer.fit(model)
     
-	# Create abstract MDP & save
-	abs_mdp = AbstractMDP(model, dataset)
-	abs_mdp.save(args.save_path)
+	# # Create abstract MDP & save
+	# abs_mdp = AbstractMDP(model, dataset)
+	# abs_mdp.save(args.save_path)
 
 
 	
