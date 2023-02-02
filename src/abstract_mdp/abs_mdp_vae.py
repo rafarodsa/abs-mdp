@@ -39,13 +39,14 @@ training_hyperparams = {
 	"transition_size": 128,
 	"init_classifier_size": 64,
 	"reward_size": 64,
-	"batch_size": 128
+	"batch_size": 256
 }
 
 class AbstractMDPTrainer(pl.LightningModule):
 	
 	def __init__(self, config=training_hyperparams, data_path='data/pinball_no_obstacle_rewards.pt'):
 		super().__init__()
+		config = self._get_default_hparams(config)
 		self.save_hyperparameters()
 		config = Namespace(**config)
 		self.data_path = data_path
@@ -58,14 +59,13 @@ class AbstractMDPTrainer(pl.LightningModule):
 		self.reward_fn = reward_fc(self.latent_dim, config.reward_size, self.n_options)
 		self.init_classifier = initiation_classifier(self.latent_dim, config.init_classifier_size, self.n_options)
 		self.training_hyperparams = config
-		print(self.hparams)
 
-
-	def forward(self, state, action):
-		z, _, _ = self.encoder.sample(state)
-		z_prime, _, _ = self.transition.sample(z, action)
-		s_prime, _, _ = self.decoder.sample(z_prime)
-		return s_prime
+	
+	def forward(self, state, action, executed):
+		_, q_z, _, _ = self.encoder.sample(state)
+		z_prime = self.transition(torch.cat([q_z.mean, action, executed.unsqueeze(-1)], dim=-1))
+		_, q_s_prime, _, _ = self.decoder.sample(z_prime)
+		return q_s_prime
 	
 	def _run_step(self, s, a, s_prime, executed):
 		# number of samples to approximate expectations
@@ -164,10 +164,10 @@ class AbstractMDPTrainer(pl.LightningModule):
 		obs, next_obs, rewards = reward_target  # batch x n_samples x obs_dim
 		obs, next_obs = obs.transpose(0, 1).unsqueeze(1), next_obs.transpose(0, 1).unsqueeze(1)  # n_samples x batch x obs_dim
 		
-		_reward_target = symlog(rewards).transpose(0, 1).unsqueeze(1) # batch x n_samples x 1
+		_reward_target = symlog(rewards).transpose(0, 1).unsqueeze(1) # n_samples x 1 x batch
 		weights = torch.exp((q_s.log_prob(obs) + q_s_prime.log_prob(next_obs)).sum(-1))
 		Z = weights.sum(0, keepdims=True)
-		reward_target_ = (weights*_reward_target/Z).sum(0).detach()
+		reward_target_ = (weights*_reward_target/Z).sum(0).squeeze().detach()
 
 		# Note that I'm detaching the target. we don't want to backprop to the grounding function
 		return torch.nn.functional.mse_loss(reward_pred, reward_target_, reduction="mean")
@@ -194,12 +194,14 @@ class AbstractMDPTrainer(pl.LightningModule):
 		loss, logs = self.step(batch, batch_idx)
 		self.log_dict({f"train_{k}": v for k, v in logs.items()}, on_step=True, on_epoch=False)
 		return loss
-	
-	def validation_step(self, batch, batch_idx):
-		loss, logs = self.step(batch, batch_idx)
-		self.log_dict({f"val_{k}": v for k, v in logs.items()})
-		return loss
 
+	def validation_step(self, batch, batch_idx):
+		s, a, s_prime, reward, executed, duration, initiation_target = batch
+		q_s_prime = self.forward(s, a, executed)
+		loss = -q_s_prime.log_prob(s_prime).sum(-1).mean()
+		self.log_dict({'val_NLL': loss})
+		return loss
+		
 	def configure_optimizers(self):
 		return torch.optim.Adam(self.parameters(), lr=self.training_hyperparams.lr)
 
@@ -221,7 +223,16 @@ class AbstractMDPTrainer(pl.LightningModule):
 	def val_dataloader(self):
 		return DataLoader(self.pinball_val, batch_size=int(self.training_hyperparams.batch_size))
 
-
+	def _get_default_hparams(self, config):
+		config_ = {}
+		# add missing hparams
+		for k, v in training_hyperparams.items():
+			if k not in config:
+				config_[k] = v
+		# add params in config
+		for k, v in config.items():
+			config_[k]= v
+		return config_
 
 def _geometric_return(rewards, gamma):
 	_gammas = gamma **  np.arange(rewards.shape[-1])
@@ -290,7 +301,7 @@ if __name__=="__main__":
 	model = AbstractMDPTrainer(vars(args)).double()
 	
 	# training
-	trainer = pl.Trainer(accelerator=args.accelerator, max_epochs=args.epochs, auto_lr_find=True, auto_scale_batch_size=True)
+	trainer = pl.Trainer(accelerator=args.accelerator, max_epochs=args.epochs, gpus=1, auto_scale_batch_size=True)
 	trainer.fit(model)
     
 	# # Create abstract MDP & save
