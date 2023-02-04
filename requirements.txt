@@ -5,6 +5,7 @@ torchvision==0.14
 pygame==2.1
 numpy==1.23
 matplotlib==3.6
-pytorch-lightning==1.8
+pytorch-lightning==1.5
 scikit-learn==1.1
 gym==0.26
+optuna==3.1

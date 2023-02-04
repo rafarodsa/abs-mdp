@@ -1,0 +1,35 @@
+# Config file for Pinball environment
+# Full State observation
+# Gridworld abstraction
+experiment_cwd: 'experiments/pinball_simple'
+lr: 1e-4
+batch_size: 32
+epochs: 10
+accelerator: cpu
+devices: 1
+save_path: mdps
+loss:
+  grounding_const: 10
+  kl_const:  0.1
+  reward_const: 1.
+  transition_const: 0.1
+  init_class_const: 1.
+  n_samples: 1
+data:
+  data_path: ${experiment_cwd}/data/pinball_no_obstacle_rewards.pt
+  batch_size: 32
+  num_workers: 4
+  train_split: 0.9
+  val_split: 0.1
+  test_split: 0.
+  shuffle: True  
+model:
+  n_options: 4
+  obs_dims: 4
+  latent_dim: 2
+  encoder: ${loadcfg:${experiment_cwd}/config/models/encoder_mlp.yaml}
+  decoder: ${loadcfg:${experiment_cwd}/config/models/decoder_mlp.yaml}
+  transition: ${loadcfg:${experiment_cwd}/config/models/transition_mlp.yaml}
+  init_class: ${loadcfg:${experiment_cwd}/config/models/init_class_mlp.yaml}
+  reward: ${loadcfg:${experiment_cwd}/config/models/reward_mlp.yaml}
+  gamma: ${loadcfg:${experiment_cwd}/config/models/reward_mlp.yaml}

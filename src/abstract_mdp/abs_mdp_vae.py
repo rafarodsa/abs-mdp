@@ -12,53 +12,32 @@ from torch.utils.data import DataLoader
 from torch.utils.data import random_split
 import pytorch_lightning as pl
 
-from src.abstract_mdp.models import encoder_fc, decoder_fc, reward_fc, initiation_classifier, transition_fc_deterministic
+from src.models.factories import build_distribution, build_model
 from src.abstract_mdp.abs_mdp import AbstractMDP
 from src.utils.symlog import symlog
-
+from src.abstract_mdp.configs import TrainerConfig
 
 import numpy as np
 import argparse
-from argparse import Namespace
 
-
-### Hyperparameters
-training_hyperparams = {
-	"grounding_loss_const": 10.,
-	"kl_loss_const": 0.1,
-	"reward_loss_const": 1.,
-	"transition_loss_const": 0.1,
-	"init_loss_const": 0.,
-	"lr": 0.5e-3,
-	"n_samples": 1,
-	"obs_dim": 4, 
-	"latent_dim": 2, 
-	"n_options": 4,
-	"encoder_size": 64, 
-	"decoder_size": 64, 
-	"transition_size": 128,
-	"init_classifier_size": 64,
-	"reward_size": 64,
-	"batch_size": 256
-}
+from omegaconf import OmegaConf as oc
 
 class AbstractMDPTrainer(pl.LightningModule):
 	
-	def __init__(self, config=training_hyperparams, data_path='data/pinball_no_obstacle_rewards.pt'):
+	def __init__(self, cfg: TrainerConfig):
 		super().__init__()
-		config = self._get_default_hparams(config)
 		self.save_hyperparameters()
-		config = Namespace(**config)
-		self.data_path = data_path
-		self.obs_dim = config.obs_dim
-		self.latent_dim = config.latent_dim
-		self.n_options = config.n_options
-		self.encoder = encoder_fc(self.obs_dim, config.encoder_size, self.latent_dim)
-		self.transition = transition_fc_deterministic(self.latent_dim, self.n_options, config.transition_size)
-		self.decoder = decoder_fc(self.obs_dim, config.decoder_size, self.latent_dim)
-		self.reward_fn = reward_fc(self.latent_dim, config.reward_size, self.n_options)
-		self.init_classifier = initiation_classifier(self.latent_dim, config.init_classifier_size, self.n_options)
-		self.training_hyperparams = config
+		self.data_cfg = cfg.data
+		self.obs_dim = cfg.model.obs_dims
+		self.latent_dim = cfg.model.latent_dim
+		self.n_options = cfg.model.n_options
+		self.encoder = build_distribution(cfg.model.encoder)
+		self.transition = build_distribution(cfg.model.transition)
+		self.decoder = build_distribution(cfg.model.decoder)
+		self.reward_fn = build_model(cfg.model.reward)
+		self.init_classifier = build_model(cfg.model.init_class)
+		self.lr = cfg.lr
+		self.training_hyperparams = cfg.loss
 
 	
 	def forward(self, state, action, executed):
@@ -126,11 +105,11 @@ class AbstractMDPTrainer(pl.LightningModule):
 		transition_loss = self._transition_loss(q_z_prime_encoded, q_z_prime_pred) 
 
 
-		loss = prediction_loss * self.training_hyperparams.grounding_loss_const\
-			+ kl_loss * self.training_hyperparams.kl_loss_const\
-			+ reward_loss * self.training_hyperparams.reward_loss_const \
-			+ init_classifier_loss * self.training_hyperparams.init_loss_const\
-			+ transition_loss * self.training_hyperparams.transition_loss_const
+		loss = prediction_loss * self.training_hyperparams.grounding_const\
+			+ kl_loss * self.training_hyperparams.kl_const\
+			+ reward_loss * self.training_hyperparams.reward_const \
+			+ init_classifier_loss * self.training_hyperparams.init_class_const\
+			+ transition_loss * self.training_hyperparams.transition_const
 
 		logs = {
 			"grounding_loss": prediction_loss,
@@ -174,7 +153,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 
 	def _init_classifier_loss(self, prediction, target):
 		target_ = target.transpose(0, 1)
-		return torch.nn.functional.binary_cross_entropy(prediction, target_, reduction="mean")
+		return torch.nn.functional.binary_cross_entropy_with_logits(prediction, target_, reduction="mean")
 
 	def _transition_loss(self, encoder_dist, transition_dist, alpha=0.01):
 
@@ -203,36 +182,27 @@ class AbstractMDPTrainer(pl.LightningModule):
 		return loss
 		
 	def configure_optimizers(self):
-		return torch.optim.Adam(self.parameters(), lr=self.training_hyperparams.lr)
-
-	@staticmethod
-	def add_model_specific_args(parent_parser):
-		parser = parent_parser.add_argument_group("AbsMDPTrainer")
-		for k, v in training_hyperparams.items():
-			parser.add_argument(f"--{k}", type=type(v), default=v)
-
-		return parent_parser
+		return torch.optim.Adam(self.parameters(), lr=self.lr)
 
 	def prepare_data(self):
-		dataset = PinballDataset(self.data_path, transform=preprocess_dataset())
-		self.pinball_test, self.pinball_val = random_split(dataset, [0.9, 0.1])
+		dataset = PinballDataset(self.data_cfg.data_path, transform=preprocess_dataset())
+		self.pinball_test, self.pinball_val = random_split(dataset, [self.data_cfg.train_split, self.data_cfg.val_split])
 	
 	def train_dataloader(self):
-		return DataLoader(self.pinball_test, batch_size=int(self.training_hyperparams.batch_size))
+		return DataLoader(self.pinball_test, batch_size=self.data_cfg.batch_size, shuffle=self.data_cfg.shuffle)
 
 	def val_dataloader(self):
-		return DataLoader(self.pinball_val, batch_size=int(self.training_hyperparams.batch_size))
+		return DataLoader(self.pinball_val, batch_size=self.data_cfg.batch_size)
 
-	def _get_default_hparams(self, config):
-		config_ = {}
-		# add missing hparams
-		for k, v in training_hyperparams.items():
-			if k not in config:
-				config_[k] = v
-		# add params in config
-		for k, v in config.items():
-			config_[k]= v
-		return config_
+	@staticmethod
+	def load_config(path):
+		try:
+			with open(path, "r") as f:
+				cfg = oc.merge(oc.structured(TrainerConfig), oc.load(f))
+				return cfg
+		except FileNotFoundError:
+			raise ValueError(f"Could not find config file at {path}")
+		
 
 def _geometric_return(rewards, gamma):
 	_gammas = gamma **  np.arange(rewards.shape[-1])
@@ -248,7 +218,9 @@ def preprocess_dataset(gamma=0.99, n_actions=4):
 		return datum
 	return _transform
 
-		
+
+# TODO: Refactor this into a separate file
+# TODO: Add dtype to preprocessing
 class PinballDataset(torch.utils.data.Dataset):
 	def __init__(self, path_to_file, n_reward_samples=5, transform=None):
 		self.data, self.rewards = torch.load(path_to_file)
@@ -276,39 +248,3 @@ class PinballDataset(torch.utils.data.Dataset):
 	
 	def __len__(self):
 		return len(self.data)
-
-if __name__=="__main__":
-	# default params
-	latent_dim = 2
-	obs_dim = 4
-	n_actions = 4
-	# data
-	dataset_file_path = 'data/'
-	dataset_name = 'pinball_no_obstacle_rewards.pt'
-
-	## Parser
-	parser = argparse.ArgumentParser()
-	parser.add_argument('--dataset_path', type=str, default=dataset_file_path+dataset_name)
-	parser.add_argument('--epochs', type=int, default=10)
-	parser.add_argument('--accelerator', type=str, default='gpu')
-	parser.add_argument('--batch-size', type=int, default=32)
-	parser.add_argument('--save-path', type=str, default='mdps/abs_mdp.pt')
-
-	parser = AbstractMDPTrainer.add_model_specific_args(parser)
-	args = parser.parse_args()
-
-	# model
-	model = AbstractMDPTrainer(vars(args)).double()
-	
-	# training
-	trainer = pl.Trainer(accelerator=args.accelerator, max_epochs=args.epochs, gpus=1, auto_scale_batch_size=True)
-	trainer.fit(model)
-    
-	# # Create abstract MDP & save
-	# abs_mdp = AbstractMDP(model, dataset)
-	# abs_mdp.save(args.save_path)
-
-
-	
-	
-	

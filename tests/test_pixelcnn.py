@@ -17,7 +17,7 @@ from torchvision import transforms
 
 import matplotlib.pyplot as plt
 
-from src.abstract_mdp.pixelcnn import PixelCNNDecoderBinary
+from src.models.pixelcnn import PixelCNNDecoderBinary
 
 if __name__ == "__main__":
     # Sample Pixel CNN

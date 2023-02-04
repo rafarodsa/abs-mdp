@@ -7,7 +7,7 @@ import pytorch_lightning as pl
 from torchvision.datasets import MNIST
 from torchvision import transforms
 
-from src.abstract_mdp.pixelcnn import GatedPixelCNNLayer, PixelCNNStack, encoder_conv_continuous
+from src.models.pixelcnn import GatedPixelCNNLayer, PixelCNNStack, encoder_conv_continuous
 
 
 import argparse

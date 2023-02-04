@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-from src.abstract_mdp.models import GaussianDensity
+from src.models.factories import DiagonalGaussian
 
 class MaskedConv2d(nn.Module):
     """
@@ -251,7 +251,7 @@ def encoder_conv_continuous(in_width, in_height, in_channels, kernel_size=3, str
 
     encoder_log_var = nn.Linear(hidden_dim, latent_dim)
 
-    return GaussianDensity((encoder_feats, encoder_mean, encoder_log_var))
+    return DiagonalGaussianModule((encoder_feats, encoder_mean, encoder_log_var))
 
 
 
