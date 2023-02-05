@@ -16,9 +16,7 @@ from src.models.factories import build_distribution, build_model
 from src.abstract_mdp.abs_mdp import AbstractMDP
 from src.utils.symlog import symlog
 from src.abstract_mdp.configs import TrainerConfig
-
-import numpy as np
-import argparse
+from src.abstract_mdp.datasets import PinballDataset, compute_return, one_hot_actions
 
 from omegaconf import OmegaConf as oc
 
@@ -41,6 +39,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 
 	
 	def forward(self, state, action, executed):
+		
 		_, q_z, _, _ = self.encoder.sample(state)
 		z_prime = self.transition(torch.cat([q_z.mean, action, executed.unsqueeze(-1)], dim=-1))
 		_, q_s_prime, _, _ = self.decoder.sample(z_prime)
@@ -94,7 +93,6 @@ class AbstractMDPTrainer(pl.LightningModule):
 	def step(self, batch, batch_idx):
 		s, a, s_prime, reward, executed, duration, initiation_target = batch
 		
-
 		q_z, q_z_std, q_z_prime_pred, q_z_prime_encoded, s_prime_dist, reward_pred, initiation_pred, s_dist = self._run_step(s, a, s_prime, executed)
 
 		# compute losses
@@ -185,7 +183,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		return torch.optim.Adam(self.parameters(), lr=self.lr)
 
 	def prepare_data(self):
-		dataset = PinballDataset(self.data_cfg.data_path, transform=preprocess_dataset())
+		dataset = PinballDataset(self.data_cfg.data_path, transforms=[compute_return(), one_hot_actions()])
 		self.pinball_test, self.pinball_val = random_split(dataset, [self.data_cfg.train_split, self.data_cfg.val_split])
 	
 	def train_dataloader(self):
@@ -203,48 +201,3 @@ class AbstractMDPTrainer(pl.LightningModule):
 		except FileNotFoundError:
 			raise ValueError(f"Could not find config file at {path}")
 		
-
-def _geometric_return(rewards, gamma):
-	_gammas = gamma **  np.arange(rewards.shape[-1])
-	return (np.array(rewards) * _gammas[None, :]).sum(-1)
-
-def preprocess_dataset(gamma=0.99, n_actions=4):
-	def _transform(datum):
-		# s, a, s', r, executed, duration, init_mask
-		datum = list(datum)
-		datum[-1] = datum[-1].astype(float)
-		datum[3] = datum[3][:2] + (_geometric_return(datum[3][-1], gamma),)
-		datum[1] = F.one_hot(torch.Tensor([datum[1]]).long(), n_actions).squeeze()
-		return datum
-	return _transform
-
-
-# TODO: Refactor this into a separate file
-# TODO: Add dtype to preprocessing
-class PinballDataset(torch.utils.data.Dataset):
-	def __init__(self, path_to_file, n_reward_samples=5, transform=None):
-		self.data, self.rewards = torch.load(path_to_file)
-		self.n_reward_samples = n_reward_samples
-		self.transform = transform
-
-	def __getitem__(self, index):
-		datum = list(self.data[index])
-		rewards = self._get_rewards(datum, n_samples=self.n_reward_samples-1)
-		datum[3] = rewards
-		datum = self.transform(datum) if self.transform else datum
-		return datum
-
-	def _get_rewards(self, datum, n_samples):
-		current_obs, action, current_next_obs, current_rewards, _, _, _ = datum
-		obs, next_obs, rews = self.rewards[action] # tuple of arrays (obs, next_obs, rewards).
-		N = rews.shape[0]
-		sample = np.random.choice(N, n_samples, replace=False)
-		# append current datum
-		obs = np.concatenate([current_obs[np.newaxis, :], obs[sample]], axis=0)
-		next_obs = np.concatenate([current_next_obs[None, :], next_obs[sample]], axis=0)
-		current_rewards = np.array(current_rewards)[None, :]
-		rewards = np.concatenate([current_rewards, rews[sample]], axis=0)
-		return (obs, next_obs, rewards)
-	
-	def __len__(self):
-		return len(self.data)

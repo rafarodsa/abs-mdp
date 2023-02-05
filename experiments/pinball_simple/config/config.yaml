@@ -7,7 +7,7 @@ batch_size: 32
 epochs: 10
 accelerator: cpu
 devices: 1
-save_path: mdps
+save_path: ${experiment_cwd}/mdps
 loss:
   grounding_const: 10
   kl_const:  0.1
