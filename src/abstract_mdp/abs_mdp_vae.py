@@ -24,6 +24,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 	
 	def __init__(self, cfg: TrainerConfig):
 		super().__init__()
+		oc.resolve(cfg)
 		self.save_hyperparameters()
 		self.data_cfg = cfg.data
 		self.obs_dim = cfg.model.obs_dims
@@ -40,10 +41,16 @@ class AbstractMDPTrainer(pl.LightningModule):
 	
 	def forward(self, state, action, executed):
 		
-		_, q_z, _, _ = self.encoder.sample(state)
+		z, q_z, _, _ = self.encoder.sample(state)
+		z = z.squeeze()
 		z_prime = self.transition(torch.cat([q_z.mean, action, executed.unsqueeze(-1)], dim=-1))
 		_, q_s_prime, _, _ = self.decoder.sample(z_prime)
-		return q_s_prime
+		_, q_s, _, _ = self.decoder.sample(z)
+
+		reward = self.reward(z, action, z_prime)
+		init_class_z = self.init_classifier(z)
+		init_class_z_prime = self.init_classifier(z_prime)
+		return q_s, q_s_prime, reward, torch.stack([init_class_z, init_class_z_prime])
 	
 	def _run_step(self, s, a, s_prime, executed):
 		# number of samples to approximate expectations
@@ -174,9 +181,12 @@ class AbstractMDPTrainer(pl.LightningModule):
 
 	def validation_step(self, batch, batch_idx):
 		s, a, s_prime, reward, executed, duration, initiation_target = batch
-		q_s_prime = self.forward(s, a, executed)
-		loss = -q_s_prime.log_prob(s_prime).sum(-1).mean()
-		self.log_dict({'val_NLL': loss})
+		qs, q_s_prime, reward_pred, initiation = self.forward(s, a, executed)
+		nll_loss = -q_s_prime.log_prob(s_prime).sum(-1).mean()
+		init_loss = self._init_classifier_loss(initiation, initiation_target)
+		rew_loss = self._reward_loss(reward_pred, qs, q_s_prime, reward)
+		loss = nll_loss + init_loss + rew_loss
+		self.log_dict({'val_loss': loss})
 		return loss
 		
 	def configure_optimizers(self):

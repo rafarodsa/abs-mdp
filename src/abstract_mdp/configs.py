@@ -38,9 +38,10 @@ class DataConfig:
 
 @dataclass
 class AbstractMDPConfig:
-    encoder: Optional[DistributionConfig]
-    decoder: Optional[DistributionConfig]
-    transition: Optional[DistributionConfig]
+    #TODO allow to load from path into structure config
+    encoder: Optional[Any]
+    decoder: Optional[Any]
+    transition: Optional[Any]
     reward: Optional[Any]
     init_class: Optional[Any]
     gamma: Optional[Any]

@@ -7,7 +7,7 @@ from omegaconf import OmegaConf as oc, MISSING
 def load_module_params(path, *, _parent_):
     try:
         with open(path, 'r') as f:
-            cfg = oc.load(f)
+            cfg = oc.structured(oc.load(f))
         cfg._set_parent(_parent_)
         return cfg
     except FileNotFoundError:

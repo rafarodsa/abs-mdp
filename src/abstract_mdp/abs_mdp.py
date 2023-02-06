@@ -32,7 +32,7 @@ class AbstractMDP:
         return list(range(self.trainer.n_options)) 
 
     def get_initial_states(self, n_samples=1):
-        if not self.initial_states:
+        if self.initial_states is None:
              self._prepare_initial_states()
         # sample
         sample = np.random.choice(len(self.data), n_samples, replace=True)
@@ -40,7 +40,7 @@ class AbstractMDP:
         return sample
 
     def _prepare_initial_states(self):
-        self.initial_states = np.array([d[0] for d in self.data])
+        self.initial_states = torch.stack([d[0] for d in self.data])
 
     def transition(self, state, action, executed):
         if len(state.size()) > 1:
@@ -60,8 +60,8 @@ class AbstractMDP:
 
     def encoder(self, ground_state):
         with torch.no_grad():
-            # return self.trainer.encoder(ground_state)[0].squeeze()
-            return self.trainer.encoder(ground_state)
+            return self.trainer.encoder(ground_state)[0].squeeze()
+            # return self.trainer.encoder(ground_state)
             
     def ground(self, abstract_state):
         with torch.no_grad():
