@@ -8,4 +8,6 @@ gym-minigrid
 *.ckpt
 *tfevents*
 *mdps/lightning_logs/
+lightning_logs/
 *.db
+.ipynb_checkpoints
