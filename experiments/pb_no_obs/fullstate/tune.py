@@ -34,8 +34,8 @@ def objective(cfg, trial):
     grounding_const = trial.suggest_float('grounding_const', 0.1, 100)
     kl_const = trial.suggest_float('kl_const', 1e-4, 10)
     transition_const = trial.suggest_float('transition_const', 1e-4, 10)
-    init_class_const = trial.suggest_float('init_class_const', 1e-3, 10)
-    reward_const = trial.suggest_float('reward_const', 1e-3, 10)
+    init_class_const = 1. #trial.suggest_float('init_class_const', 1e-3, 10)
+    reward_const = 1. #trial.suggest_float('reward_const', 1e-3, 10)
 
     cfg = prepare_config(cfg, lr, grounding_const, kl_const, transition_const, reward_const, init_class_const)
     model = AbstractMDPTrainer(cfg) 
@@ -44,13 +44,13 @@ def objective(cfg, trial):
                         accelerator=cfg.accelerator,
                         gpus=cfg.devices if cfg.accelerator == "gpu" else None,
                         max_epochs=cfg.epochs, 
-                        callbacks=[PyTorchLightningPruningCallback(trial, monitor="val_loss")],
+                        callbacks=[PyTorchLightningPruningCallback(trial, monitor="nll_loss")],
                         default_root_dir=cfg.save_path + f'/{trial.number}'
                     )
     
     trainer.logger.log_hyperparams(model.hparams)
     trainer.fit(model)
-    return trainer.callback_metrics["val_NLL"].item()
+    return trainer.callback_metrics["nll_loss"].item()
 
 def tune():
     default_config_path = "experiments/pb_no_obs/fullstate/config/config.yaml"

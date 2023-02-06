@@ -186,7 +186,10 @@ class AbstractMDPTrainer(pl.LightningModule):
 		init_loss = self._init_classifier_loss(initiation, initiation_target)
 		rew_loss = self._reward_loss(reward_pred, qs, q_s_prime, reward)
 		loss = nll_loss + init_loss + rew_loss
-		self.log_dict({'val_loss': loss})
+		self.log_dict({'val_loss': loss,
+					   'nll_loss': nll_loss,
+					   'init_loss': init_loss,
+					   'rew_loss': rew_loss})
 		return loss
 		
 	def configure_optimizers(self):

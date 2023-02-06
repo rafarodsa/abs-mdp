@@ -16,7 +16,7 @@ loss:
   init_class_const: 1.
   n_samples: 1
 data:
-  data_path: ${experiment_cwd}/data/pinball_no_obstacle_rewards.pt
+  data_path: ${experiment_cwd}/data/obstacles.pt
   batch_size: 32
   num_workers: 4
   train_split: 0.9
