@@ -7,4 +7,5 @@ gym-minigrid
 *.pt
 *.ckpt
 *tfevents*
-lightning_logs/
+*mdps/lightning_logs/
+*.db
