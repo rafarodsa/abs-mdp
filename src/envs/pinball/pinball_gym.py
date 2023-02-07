@@ -85,10 +85,23 @@ class PinballEnv(gym.Env):
             total_points += points.shape[0]
         return np.hstack([np.vstack(all_points)[:N], vels])
 
+    def sample_init_states(self, N):
+        """
+            Samples states uniformly 
+        """
+        all_points = []
+        total_points = 0
+        vels = np.random.uniform(size=(N, 2))
+        while total_points < N:
+            points = self._get_points_outside_obstacles(np.random.uniform(size=(N, 2)))
+            all_points.append(points)
+            total_points += points.shape[0]
+        return np.hstack([np.vstack(all_points)[:N], vels])
+
     def _get_points_outside_obstacles(self, points):
         points_mask = np.ones(points.shape[0], dtype=np.bool8)
         for obstacle in self._obstacles:
-            points_mask = np.logical_and(np.logical_not(obstacle.contains_points(points, radius=0.02)), points_mask)
+            points_mask = np.logical_and(np.logical_not(obstacle.contains_points(points, radius=0.0)), points_mask)
 
         return points[points_mask]
 
@@ -215,8 +228,12 @@ class PinballPixelWrapper(gym.Env):
 
 if __name__=="__main__":
     from matplotlib import pyplot as plt
-
-    pinball = PinballEnvContinuous("/Users/rrs/Desktop/abs-mdp/src/envs/pinball/configs/pinball_simple_single.cfg", render_mode="rgb_array")
+    size = 100
+    pinball = PinballEnvContinuous(
+                                    config="/Users/rrs/Desktop/abs-mdp/src/envs/pinball/configs/pinball_simple_single.cfg", 
+                                    width=size, 
+                                    height=size, 
+                                    render_mode="rgb_array")
     pixel_pinball = PinballPixelWrapper(pinball, n_frames=5)
     pinball.reset([0.5, 0.5])
     imgs = []

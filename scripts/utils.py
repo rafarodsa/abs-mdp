@@ -46,7 +46,7 @@ def execute_option(env, initial_state, option, obs_type='simple'):
     duration = t
     next_o = env.render() if obs_type == 'pixel' else next_s
 
-    info = {'state': initial_state, 'next_state': next_s if 'next_state' in info else next_s}
+    info = {'state': s, 'next_state': next_s}
     return o, next_o, rewards, can_execute, duration, info
 
 
@@ -55,15 +55,18 @@ def compute_initiation_masks(state, options):
 
 def run_option(env, init_state, options, obs_type='simple', max_exec_time=200):
     dataset = []
+    infos = []
     for option_n, option in enumerate(options):
         rewards_per_action = defaultdict(list)
         s = np.array(init_state)
         o, next_o, rewards, executed, duration, info = execute_option(env, s, option, obs_type=obs_type)
         next_s = info['next_state']
         s = info['state']
+        infos.append(info)
         initiation_mask_s = compute_initiation_masks(s, options)
         initiation_mask_s_prime = compute_initiation_masks(next_s, options)
         rewards = rewards + [0] * (max_exec_time - len(rewards))
         rewards_per_action[option_n].append((s, next_s, rewards))
         dataset.append((o, option_n, next_o, rewards, executed, duration, np.array([initiation_mask_s, initiation_mask_s_prime])))
-    return tuple(dataset)
+
+    return tuple(dataset), infos

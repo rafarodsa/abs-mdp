@@ -46,10 +46,6 @@ def _intersect(edge, initial_position, final_position):
     displacement = np.array(final_position) - np.array(initial_position)
     edge_segment = np.array(edge[1])-np.array(edge[0])
     b = edge[0] - initial_position
-    # den = (displacement[0]*edge_segment[1] - displacement[1])
-    
-    # alpha = (edge_segment[1] * b[0]-b[1])/den if den != 0 else np.float('inf')
-    # beta = (alpha * displacement[1] - b[1])/edge_segment[1] if edge_segment[1] != 0 else np.float('inf')
 
     A = np.stack([displacement, edge_segment], axis=1)
     try:
