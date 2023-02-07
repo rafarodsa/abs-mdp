@@ -216,18 +216,14 @@ class PinballPixelWrapper(gym.Env):
 if __name__=="__main__":
     from matplotlib import pyplot as plt
 
-    pinball = PinballEnvContinuous("/Users/rrs/Desktop/abs-mdp/src/envs/pinball/configs/pinball_no_obstacles.cfg", render_mode="rgb_array")
+    pinball = PinballEnvContinuous("/Users/rrs/Desktop/abs-mdp/src/envs/pinball/configs/pinball_simple_single.cfg", render_mode="rgb_array")
     pixel_pinball = PinballPixelWrapper(pinball, n_frames=5)
-    
-    # for _ in range(10):
-    #     a = np.random.randint(5)
-    #     pinball.step(a)
-    #     pinball.render()
-
-    for _ in range(10):
+    pinball.reset([0.5, 0.5])
+    imgs = []
+    for i in range(10):
         a = np.random.randint(5)
-        a = [0.1, 0.1]
-        frames = pixel_pinball.step(a)
-        print(frames[0].shape)
-        plt.imshow(frames[0][-1])
-        plt.show()
+        a = [0.5, 0.]
+        next_s, _, _, _, _ = pinball.step(a)
+        imgs.append(pinball.render())
+    plt.imshow(np.array(imgs).mean(0))
+    plt.show()
