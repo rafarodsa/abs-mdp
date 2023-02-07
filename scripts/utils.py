@@ -33,7 +33,7 @@ def execute_option(env, initial_state, option, obs_type='simple'):
     s = env.reset(initial_state)
     next_s = s
 
-    o = env.render() if obs_type == 'pixel' else s
+    o = np.array(env.render()) if obs_type == 'pixel' else s
     info = {}
     if can_execute:
         while option.is_executing() and not done and t < 1000:
@@ -44,7 +44,7 @@ def execute_option(env, initial_state, option, obs_type='simple'):
             rewards.append(r)
             t += 1
     duration = t
-    next_o = env.render() if obs_type == 'pixel' else next_s
+    next_o = np.array(env.render()) if obs_type == 'pixel' else next_s
 
     info = {'state': s, 'next_state': next_s}
     return o, next_o, rewards, can_execute, duration, info
@@ -57,7 +57,6 @@ def run_option(env, init_state, options, obs_type='simple', max_exec_time=200):
     dataset = []
     infos = []
     for option_n, option in enumerate(options):
-        rewards_per_action = defaultdict(list)
         s = np.array(init_state)
         o, next_o, rewards, executed, duration, info = execute_option(env, s, option, obs_type=obs_type)
         next_s = info['next_state']
@@ -66,7 +65,7 @@ def run_option(env, init_state, options, obs_type='simple', max_exec_time=200):
         initiation_mask_s = compute_initiation_masks(s, options)
         initiation_mask_s_prime = compute_initiation_masks(next_s, options)
         rewards = rewards + [0] * (max_exec_time - len(rewards))
-        rewards_per_action[option_n].append((s, next_s, rewards))
+ 
         dataset.append((o, option_n, next_o, rewards, executed, duration, np.array([initiation_mask_s, initiation_mask_s_prime])))
 
     return tuple(dataset), infos

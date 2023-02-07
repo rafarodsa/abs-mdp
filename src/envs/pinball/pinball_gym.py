@@ -21,6 +21,10 @@ class GoalPinballModel(PinballModel):
 
     def set_initial_pos(self, start_pos):
         self.ball = BallModel(start_position=start_pos, radius=0.01)
+    
+    def set_initial_state(self, state):
+        self.set_initial_pos(state[:2])
+        self.ball.add_impulse(state[2]*5, state[3]*5)
 
 
 
@@ -101,7 +105,7 @@ class PinballEnv(gym.Env):
     def _get_points_outside_obstacles(self, points):
         points_mask = np.ones(points.shape[0], dtype=np.bool8)
         for obstacle in self._obstacles:
-            points_mask = np.logical_and(np.logical_not(obstacle.contains_points(points, radius=0.0)), points_mask)
+            points_mask = np.logical_and(np.logical_not(obstacle.contains_points(points, radius=0.05)), points_mask)
 
         return points[points_mask]
 
@@ -178,9 +182,8 @@ class PinballEnvContinuous(PinballEnv):
         self.pinball = PinballModelContinuous(config)
     
     def reset(self, state=None):
-        self.pinball = PinballModelContinuous(self.configuration)
         if state is not None:
-            self.pinball.set_initial_pos(state[:2]) 
+            self.pinball.set_initial_state(state)
         return np.array(self.pinball.get_state())
 
     def step(self, action):
@@ -235,12 +238,13 @@ if __name__=="__main__":
                                     height=size, 
                                     render_mode="rgb_array")
     pixel_pinball = PinballPixelWrapper(pinball, n_frames=5)
-    pinball.reset([0.5, 0.5])
+    pinball.reset([0.5, 0.5, 0., 0.])
     imgs = []
     for i in range(10):
-        a = np.random.randint(5)
-        a = [0.5, 0.]
+        a = [0.9, 0.9]
         next_s, _, _, _, _ = pinball.step(a)
         imgs.append(pinball.render())
+        _s = pinball.reset(next_s)
+        
     plt.imshow(np.array(imgs).mean(0))
     plt.show()

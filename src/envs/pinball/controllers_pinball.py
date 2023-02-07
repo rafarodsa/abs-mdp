@@ -145,6 +145,13 @@ def create_position_controllers(env, translation_distance=1/10):
     position_options = []
     controller_factory = position_controller_factory
     std_dev_vel = 0.01
+    for y in [-1., 1.]:
+        o = Option(initiation_set(env, np.array([0., y*translation_distance])),
+               partial(controller_factory, distance=np.array([0., y*translation_distance, 0., 0.]), continuous=isinstance(env.action_space, spaces.Box)),
+               termination_velocity(std_dev=std_dev_vel),
+               name=f"{'+' if y > 0 else '-'}Y"
+        )
+        position_options.append(o)
     for x in [-1., 1.]:
         o = Option(initiation_set(env, np.array([x*translation_distance, 0.])),
                partial(controller_factory, distance=np.array([x*translation_distance, 0., 0., 0.]), continuous=isinstance(env.action_space, spaces.Box)),
@@ -153,13 +160,7 @@ def create_position_controllers(env, translation_distance=1/10):
         )
         position_options.append(o)
     
-    for y in [-1., 1.]:
-        o = Option(initiation_set(env, np.array([0., y*translation_distance])),
-               partial(controller_factory, distance=np.array([0., y*translation_distance, 0., 0.]), continuous=isinstance(env.action_space, spaces.Box)),
-               termination_velocity(std_dev=std_dev_vel),
-               name=f"{'+' if y > 0 else '-'}Y"
-        )
-        position_options.append(o)
+    
     return position_options
     
 
