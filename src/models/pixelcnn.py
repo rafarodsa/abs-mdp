@@ -19,7 +19,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-from src.models.factories import DiagonalGaussian
+from src.models import DiagonalGaussianModule
+
+from functools import partial
 
 class MaskedConv2d(nn.Module):
     """
@@ -168,7 +170,91 @@ class PixelCNNStack(nn.Module):
         return vertical, horizontal, skip
 
 
+# PixelCNN decoder
+class DeconvBlock(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.mlp = nn.Linear(cfg.input_dim, cfg.in_channels)
+        self.deconv = nn.ConvTranspose2d(cfg.in_channels, cfg.out_channels, (cfg.out_width, cfg.out_height), stride=1, padding='same')
+
+    def forward(self, x):
+        x = self.mlp(x)
+        x = x.reshape(x.shape[0], -1, 1, 1)
+        x = self.deconv(x)
+        return x
+
+
+class PixelCNNDecoder(nn.Module):
+    def __init__(self, features, cfg):
+        super().__init__()
+        self.features = features
+        self.causal_block = GatedPixelCNNLayer(cfg.in_channels, cfg.feats_maps, cfg.kernel_size)
+        self.stack = PixelCNNStack(cfg.feats_maps, cfg.kernel_size, cfg.n_layers-1)
+        self.output = nn.Conv2d(cfg.feats_maps, 256, kernel_size=1, stride=1, padding='same')
+
+    def forward(self, x, h):
+        '''
+            x: input image/generating image
+            h: embedding/latent feature maps, 
+        '''
+        cond = self.features(h)
+        vertical, horizontal, _ = self.causal_block(x, x, None)
+        vertical, horizontal, skip = self.stack(vertical, horizontal, cond)
+        return self.output(F.relu(skip))
+
+def PixelCNNDecoderDist(cfg):
+    return partial(PixelCNNDecoder, cfg=cfg)
+
+##  Pixel Encoder Models
+class ConvResidualLayer(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.conv_1 = nn.Conv2d(cfg.in_channels, cfg.out_channels, kernel_size=cfg.kernel_size, stride=1, padding='same')
+        self.norm_1 = nn.LayerNorm([cfg.out_channels, cfg.in_width, cfg.in_height])
+        self.conv_2 = nn.Conv2d(cfg.out_channels,  cfg.in_channels, kernel_size=cfg.kernel_size, stride=1, padding='same')
+        self.norm_2 = nn.LayerNorm([cfg.in_channels, cfg.in_width, cfg.in_height])
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        conv_1 = self.relu(self.norm_1(self.conv_1(x)))
+        conv_2 = self.relu(self.norm_2(self.conv_2(conv_1)))
+        return conv_2 + x
+
+class ResidualStack(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.layers = nn.ModuleList([ConvResidualLayer(cfg) for _ in range(cfg.n_layers)])
+    
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+class ResidualConvEncoder(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.conv_1 = nn.Conv2d(cfg.color_channels, cfg.feat_maps, kernel_size=cfg.kernel_size, stride=1, padding='same')
+        self.norm_1 = nn.LayerNorm([cfg.feat_maps, cfg.in_width, cfg.in_height])
+        self.max_pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=1) # 2x2 max pooling
+        self.relu = nn.ReLU()
+        cfg.residual.in_width, cfg.residual.in_height = cfg.in_width // 2, cfg.in_height // 2
+        self.residual_stack = ResidualStack(cfg.residual)
+        self.linear = nn.Linear(cfg.residual.in_channels * cfg.residual.in_width * cfg.residual.in_height, cfg.out_dim)
+
+    def forward(self, x):
+        
+        x = self.relu(self.norm_1(self.conv_1(x)))
+        x = self.max_pool(x)
+        x = self.residual_stack(x)
+        x = x.reshape(x.shape[0], -1)
+        x = self.linear(x)
+        return x
+
+# TODO refactor. move to tests/
 class PixelCNNDecoderBinary(pl.LightningModule):
+    '''
+        PixelCNN for binary images (Binarized MNIST)
+    '''
     def __init__(self, n_classes, in_channels, out_channels, kernel_size=3, n_layers=5):
         super().__init__()
         self.in_channels = in_channels
@@ -204,24 +290,6 @@ class PixelCNNDecoderBinary(pl.LightningModule):
         return torch.optim.Adam(self.parameters(), lr=5e-3)
 
 
-
-##  Pixel Encoder Models
-
-class ConvResidual(nn.Module):
-    def __init__(self, in_width, in_height, in_channels, out_channels, kernel_size=3):
-        super().__init__()
-        self.conv_1 = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=1, padding='same')
-        self.norm_1 = nn.LayerNorm([out_channels, in_width, in_height])
-        self.conv_2 = nn.Conv2d(out_channels, in_channels, kernel_size=kernel_size, stride=1, padding='same')
-        self.norm_2 = nn.LayerNorm([in_channels, in_width, in_height])
-        self.relu = nn.ReLU()
-
-    def forward(self, x):
-        conv_1 = self.relu(self.norm_1(self.conv_1(x)))
-        conv_2 = self.relu(self.norm_2(self.conv_2(conv_1)))
-        return conv_2 + x
-
-
 def conv_out_dim(in_dim, kernel_size, stride, padding=0):
     return int((in_dim - kernel_size + 2 * padding) / stride + 1)
 
@@ -241,7 +309,7 @@ def encoder_conv_continuous(in_width, in_height, in_channels, kernel_size=3, str
 
     encoder_feats = nn.Sequential(
                                 encoder_feats_1,
-                                ConvResidual(out_width_2, out_height_2, out_channels_2, 32),    
+                                ConvResidualLayer(out_width_2, out_height_2, out_channels_2, 32),    
                                 nn.Flatten(),
                                 nn.Linear(out_channels_2 * out_width_2 * out_height_2, hidden_dim),
                                 nn.ReLU()
