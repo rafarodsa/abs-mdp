@@ -1,5 +1,5 @@
 import pytorch_lightning as pl
-from src.abstract_mdp.abs_mdp_vae import AbstractMDPTrainer
+from src.absmdp.trainer import AbstractMDPTrainer
 
 from omegaconf import OmegaConf as oc
 import argparse

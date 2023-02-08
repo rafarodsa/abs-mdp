@@ -1,0 +1,16 @@
+features:
+  type: deconv
+  input_dim: ${model.latent_dim}
+  in_channels: 64
+  out_width: 100
+  out_height: 100
+  out_channels: 8
+dist:
+  type: pixelcnn
+  in_channels:  3
+  color_channels: 3 # 3 for RGB, 1 for grayscale
+  feats_maps: ${model.decoder.features.out_channels}
+  out_width: 100 
+  out_height: 100
+  kernel_size: 7
+  n_layers: 10

@@ -11,7 +11,7 @@ import optuna
 from optuna.integration import PyTorchLightningPruningCallback
 import pytorch_lightning as pl
 
-from src.abstract_mdp.abs_mdp_vae import AbstractMDPTrainer
+from src.absmdp.trainer import AbstractMDPTrainer
 
 
 def prepare_config(cfg, lr, grounding_const, kl_const, transition_const, reward_const, init_class_const):

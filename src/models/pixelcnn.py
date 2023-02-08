@@ -202,6 +202,27 @@ class PixelCNNDecoder(nn.Module):
         vertical, horizontal, skip = self.stack(vertical, horizontal, cond)
         return self.output(F.relu(skip))
 
+    def sample(self, h, n=1):
+        '''
+            h: embedding/latent feature maps, 
+        '''
+        cond = self.features(h)
+        width, height = cond.shape[-2:]
+        zeros = torch.zeros(n, 3, width, height)
+        for 
+    
+    def distribution(self, h):
+        '''
+            return function to evaluate the distribution q(x|h).
+            h: embedding/latent feature maps, 
+        '''
+        # return torch distribution? partial implementation of distribution interface?
+        # log_prob, sample, kl_div
+
+        pass
+
+
+
 def PixelCNNDecoderDist(cfg):
     return partial(PixelCNNDecoder, cfg=cfg)
 
@@ -237,7 +258,7 @@ class ResidualConvEncoder(nn.Module):
         self.norm_1 = nn.LayerNorm([cfg.feat_maps, cfg.in_width, cfg.in_height])
         self.max_pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=1) # 2x2 max pooling
         self.relu = nn.ReLU()
-        cfg.residual.in_width, cfg.residual.in_height = cfg.in_width // 2, cfg.in_height // 2
+        cfg.residual.in_width, cfg.residual.in_height = cfg.in_width // 2 + 1, cfg.in_height // 2 + 1
         self.residual_stack = ResidualStack(cfg.residual)
         self.linear = nn.Linear(cfg.residual.in_channels * cfg.residual.in_width * cfg.residual.in_height, cfg.out_dim)
 

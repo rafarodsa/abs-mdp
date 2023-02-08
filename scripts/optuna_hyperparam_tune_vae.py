@@ -10,7 +10,7 @@ from optuna.integration import PyTorchLightningPruningCallback
 from packaging import version
 import pytorch_lightning as pl
 
-from src.abstract_mdp.abs_mdp_vae import AbstractMDPTrainer
+from src.absmdp.trainer import AbstractMDPTrainer
 
 if version.parse(pl.__version__) < version.parse("1.0.2"):
     raise RuntimeError("PyTorch Lightning>=1.0.2 is required for this example.")

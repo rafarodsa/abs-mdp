@@ -6,7 +6,7 @@ from torch.utils.data import random_split
 import pytorch_lightning as pl
 
 from src.models.factories import encoder_fc, decoder_fc, reward_fc, initiation_classifier, transition_fc_deterministic
-from src.abstract_mdp.abs_mdp import AbstractMDP
+from src.deprecated.abs_mdp import AbstractMDP
 from src.utils.symlog import symlog, symexp
 
 
