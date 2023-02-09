@@ -2,18 +2,20 @@ import argparse
 import torch
 
 import numpy as np
-
+from tqdm import tqdm
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset-path', type=str, default='data/pinball_no_obstacle.pt')
-    parser.add_argument('--save-path', type=str, default='data/pinball_no_obstacle_rewards.pt')
+    parser.add_argument('--save-path', type=str, default=None)
 
     args = parser.parse_args()
 
     # load dataset
+    
     dataset = torch.load(args.dataset_path)
+    print(f'Dataset at {args.dataset_path} loaded')
     o, j, next_o, rewards, executed, duration, initiation_masks = zip(*dataset)
 
     rewards_per_action = {i: [] for i in range(max(j))}
@@ -27,10 +29,13 @@ if __name__ == "__main__":
     rewards = np.array(list(rewards))
 
 
-    for i in range(max(j)+1):
+    for i in tqdm(range(max(j)+1)):
         rewards_per_action[i] = (o[options == i], next_o[options == i], rewards[options == i])
 
     dataset = list(zip(o, j, next_o, rewards, executed, duration, initiation_masks))
 
+    if args.save_path is None:
+        print(f'Overwriting original file at {args.dataset_path}')
+        args.save_path = args.dataset_path
 
     torch.save((dataset, rewards_per_action), args.save_path)

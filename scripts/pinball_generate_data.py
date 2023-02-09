@@ -14,13 +14,10 @@ from tqdm import tqdm
 import argparse
 
 from functools import reduce
-from collections import defaultdict
-import matplotlib.pyplot as plt
 
 from joblib import Parallel, delayed
 
 from scripts.utils import run_option
-from functools import partial
 import os
 
 if __name__== "__main__":
@@ -43,6 +40,7 @@ if __name__== "__main__":
     parser.add_argument('--observation', type=str, default=observation_type)
     parser.add_argument('--n-jobs', type=int, default=1)
     parser.add_argument('--max-exec-time', type=int, default=1000)
+    parser.add_argument('--image-size', type=int, default=100)
     args = parser.parse_args()
 
 
@@ -50,7 +48,7 @@ if __name__== "__main__":
 
     dataset = []  # (o, a, o', rewards, executed, duration, initiation_masks, info)
 
-    grid_size = 100
+    grid_size = args.image_size
 
     env = Pinball(config=args.env_config, width=grid_size, height=grid_size, render_mode='rgb_array') 
 
@@ -102,7 +100,7 @@ if __name__== "__main__":
             'state_change_mean': state_change_mean
         }
 
-        print(f"--------Option {i} {options_desc[i]}---------")
+        print(f'--------Option-{i}: {options_desc[i]}---------')
         print(f"Executed {n_executions}/{args.n_samples} times")
         print(f"Average duration {avg_duration}")
         print(f"Average reward {option_rewards.mean()}. Max reward: {option_rewards.max()}. Min reward: {option_rewards.min()}")

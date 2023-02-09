@@ -94,9 +94,10 @@ class AbstractMDPTrainer(pl.LightningModule):
 		return q_z, q_z_std, q_z_prime_pred, q_z_prime_encoder, q_s_prime, reward_pred, init_masks, q_s
 		
 	def reward(self, z, a, z_prime):
-		n_samples = self.hparams.n_samples
+		n_samples = self.hyperparams.n_samples
 		# create batch
 		if n_samples > 1:
+			#TODO: check this is correct.
 			z_ = z.unsqueeze(0).repeat_interleave(n_samples, dim=0)
 			a_ = a.unsqueeze(0).repeat_interleave(n_samples, dim=0)
 		else:
@@ -134,7 +135,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		return loss, logs
 
 	def _prediction_loss(self, s_prime, q_s_prime_pred, s, q_s_pred):
-		n_samples = self.hparams.n_samples
+		n_samples = self.hyperparams.n_samples
 		s_prime_ = s_prime.unsqueeze(0).repeat_interleave(n_samples, dim=0)
 		log_probs = q_s_prime_pred.log_prob(s_prime_)
 

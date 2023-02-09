@@ -37,19 +37,19 @@ class MaskedConv2d(nn.Module):
 
 
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
-        self.mask = np.ones(self.conv.weight.size())
+        self._mask = np.ones(self.conv.weight.size())
         
         for o in range(self.data_channels):
             for i in range(o+1, self.data_channels):
-                self.mask[self._color_mask(i, o), y_c, x_c] = 0
+                self._mask[self._color_mask(i, o), y_c, x_c] = 0
         
         if mask_type == 'A':
             for c in range(data_channels):
-                self.mask[self._color_mask(c, c), y_c, x_c] = 0
+                self._mask[self._color_mask(c, c), y_c, x_c] = 0
         
         self.device = self.conv.weight.get_device()
-        self.mask = torch.from_numpy(self.mask)
-        
+        self._mask = torch.from_numpy(self._mask)
+        self.register_buffer('mask', self._mask)
 
     def _color_mask(self, in_c, out_c):
         """
@@ -63,8 +63,8 @@ class MaskedConv2d(nn.Module):
 
 
     def forward(self, x):
-        self._get_device()
-        self.mask = self.mask.to(self.device).type(self.conv.weight.dtype)
+        # self._get_device()
+        # self.mask = self.mask.to(self.device).type(self.conv.weight.dtype)
         self.conv.weight = nn.Parameter(self.conv.weight * self.mask)
         return self.conv(x)
 
