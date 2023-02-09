@@ -9,7 +9,7 @@ from gym import spaces
 from gym.error import DependencyNotInstalled
 
 import numpy as np
-from src.envs.pinball.pinball import PinballModel, PinballView, BallModel
+from envs.pinball.pinball import PinballModel, PinballView, BallModel
 
 from collections import UserDict, deque
 from matplotlib.path import Path

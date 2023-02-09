@@ -4,9 +4,9 @@
     date: January 2023
 """
 
-from src.envs.pinball.pinball_gym import PinballEnvContinuous as Pinball
-from src.envs.pinball.pinball_gym import PinballPixelWrapper
-from src.envs.pinball.controllers_pinball import create_position_controllers as OptionFactory
+from envs.pinball.pinball_gym import PinballEnvContinuous as Pinball
+from envs.pinball.pinball_gym import PinballPixelWrapper
+from envs.pinball.controllers_pinball import create_position_controllers as OptionFactory
 
 import numpy as np
 import torch
@@ -27,7 +27,7 @@ if __name__== "__main__":
 
     ######## Parameters
     np.set_printoptions(precision=3)
-    configuration_file = "/Users/rrs/Desktop/abs-mdp/src/envs/pinball/configs/pinball_simple_single.cfg"
+    configuration_file = "/Users/rrs/Desktop/abs-mdp/envs/pinball/configs/pinball_simple_single.cfg"
     n_samples = 100
     observation_type = 'simple'
 
