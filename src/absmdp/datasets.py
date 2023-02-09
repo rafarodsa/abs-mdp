@@ -54,6 +54,12 @@ class PinballDataset_(torch.utils.data.Dataset):
         # append current datum
         obs = np.concatenate([current_obs[np.newaxis, :], obs[sample]], axis=0)
         next_obs = np.concatenate([current_next_obs[None, :], next_obs[sample]], axis=0)
+
+        # transpose if images
+        if self.obs_type == 'pixels':
+            obs = obs.transpose(0, 3, 1, 2)
+            next_obs = next_obs.transpose(0, 3, 1, 2)
+
         current_rewards = np.array(current_rewards)[None, :]
         rewards = np.concatenate([current_rewards, rews[sample]], axis=0)
         return [torch.from_numpy(obs).to(self.dtype), torch.from_numpy(next_obs).to(self.dtype), rewards]
@@ -73,7 +79,7 @@ class PinballDataset(pl.LightningDataModule):
         self.num_workers = cfg.num_workers
         self.obs_type = cfg.obs_type
         self.train_split, self.val_split, self.test_split = cfg.train_split, cfg.val_split, cfg.test_split
-        self.shuffe = cfg.shuffle
+        self.shuffle = cfg.shuffle
         self.transforms = [partial(compute_return, cfg.gamma), partial(one_hot_actions, cfg.n_options)]
 
     def setup(self, stage=None):

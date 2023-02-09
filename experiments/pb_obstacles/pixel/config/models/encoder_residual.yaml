@@ -3,14 +3,14 @@ features:
   in_width: 100
   in_height: 100
   color_channels: 3
-  feat_maps: 64
-  kernel_size: 7
+  feat_maps: 2
+  kernel_size: 3
   out_dim:  ${eval:2*${model.latent_dim}}
   residual:
     n_layers: 2
     in_channels: ${model.encoder.features.feat_maps}
-    out_channels: 32
-    kernel_size: 7
+    out_channels: 2
+    kernel_size: 3
 dist:
   type: diag_gaussian
   output_dim: ${model.latent_dim}

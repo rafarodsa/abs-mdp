@@ -8,20 +8,15 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
 
-import pytorch_lightning as pl
-from torchvision.datasets import MNIST
-from torchvision import transforms
-
-
-import matplotlib.pyplot as plt
 import numpy as np
-
-
-from src.models import DiagonalGaussianModule
-
 from functools import partial
+
+import logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+from itertools import product
 
 class MaskedConv2d(nn.Module):
     """
@@ -86,19 +81,22 @@ class GatedPixelCNNLayer(nn.Module):
     """
         PixelCNN layer.
     """
-    def __init__(self, in_channels, out_channels=32, kernel_size=3, data_channels=1, mask_type='A'):
+    def __init__(self, in_channels, out_channels=32, kernel_size=3, data_channels=1, mask_type='A', residual=True):
         super().__init__()
         self.kernel_size = kernel_size
+        self.in_channels = in_channels * data_channels
         self.out_channels = out_channels
         vertical_kernel = (kernel_size // 2, kernel_size)
         horizontal_kernel = (1, kernel_size // 2)
-        self.vertical_stack = nn.Conv2d(in_channels, 2 * out_channels, vertical_kernel, stride=1, padding='same')
-        self.horizontal_stack = nn.Conv2d(in_channels, 2 * out_channels, horizontal_kernel, stride=1, padding='same')
-        self.link = nn.Conv2d(2 * out_channels, 2 * out_channels, kernel_size=1, stride=1, padding='same')
-        self.skip = nn.Conv2d(out_channels, out_channels, kernel_size=1, stride=1, padding='same')
-        self.residual = nn.Conv2d(out_channels, out_channels, kernel_size=1, stride=1, padding='same')
-        self.conditional = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding='same')
-        self.channels_conv = MaskedConv2d(in_channels, 2 * out_channels, kernel_size=1, stride=1, padding='same', data_channels=data_channels, mask_type=mask_type)
+        self.out_channels = data_channels * out_channels
+        _out_channels = self.out_channels * 2
+        self.vertical_stack = nn.Conv2d(self.in_channels, _out_channels, vertical_kernel, stride=1, padding='same')
+        self.horizontal_stack = nn.Conv2d(self.in_channels, _out_channels, horizontal_kernel, stride=1, padding='same')
+        self.link = nn.Conv2d(_out_channels, _out_channels , kernel_size=1, stride=1, padding='same')
+        self.skip = nn.Conv2d(_out_channels // 2, _out_channels // 2, kernel_size=1, stride=1, padding='same')
+        self.residual = nn.Conv2d(_out_channels // 2, _out_channels // 2, kernel_size=1, stride=1, padding='same') if residual else None
+        self.conditional = nn.Conv2d(self.in_channels, _out_channels // 2, kernel_size=1, stride=1, padding='same')
+        self.channels_conv = MaskedConv2d(self.in_channels, _out_channels, kernel_size=1, stride=1, padding='same', data_channels=data_channels, mask_type=mask_type)
 
 
     def forward(self, vertical, horizontal, conditional=None):
@@ -110,15 +108,16 @@ class GatedPixelCNNLayer(nn.Module):
         _horizontal = self.__translate_and_crop(_horizontal, -self.kernel_size // 2, 0)
         
         _link = self.link(_vertical)
-        _color_channels = 0.#self.channels_conv(horizontal)
+        _color_channels = self.channels_conv(horizontal) # TODO: check masked conv is working
         _horizontal = _horizontal + _link + _color_channels
         
         _vertical = torch.sigmoid(_vertical[:, :self.out_channels, :, :] + _cond) * torch.tanh(_vertical[:, self.out_channels:, :, :] + _cond)
         _horizontal = torch.sigmoid(_horizontal[:, :self.out_channels, :, :] + _cond) * torch.tanh(_horizontal[:, self.out_channels:, :, :] + _cond)
         
         _skip = self.skip(_horizontal)
-        _residual = self.residual(_horizontal)
-        _horizontal = horizontal + _residual
+        if self.residual is not None:
+            _residual = self.residual(_horizontal) # out_channels
+            _horizontal = horizontal + _residual
 
         return _vertical, _horizontal, _skip
 
@@ -155,12 +154,12 @@ class GatedPixelCNNLayer(nn.Module):
             
 
 class PixelCNNStack(nn.Module):
-    def __init__(self, out_channels, kernel_size=3, n_layers=10):
+    def __init__(self, out_channels, kernel_size=3, n_layers=10, data_channels=3):
         super().__init__()
         self.out_channels = out_channels
         self.kernel_size = kernel_size
         self.n_layers = n_layers
-        self.layers = nn.ModuleList([GatedPixelCNNLayer(out_channels, out_channels, kernel_size) for _ in range(n_layers)])
+        self.layers = nn.ModuleList([GatedPixelCNNLayer(out_channels, out_channels, kernel_size, data_channels=data_channels) for _ in range(n_layers)])
     
     def forward(self, vertical, horizontal, conditional=None):
         skip = 0.
@@ -175,22 +174,71 @@ class DeconvBlock(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.mlp = nn.Linear(cfg.input_dim, cfg.in_channels)
-        self.deconv = nn.ConvTranspose2d(cfg.in_channels, cfg.out_channels, (cfg.out_width, cfg.out_height), stride=1, padding='same')
+        self.deconv = nn.ConvTranspose2d(cfg.in_channels, cfg.out_channels * cfg.color_channels, (cfg.out_width, cfg.out_height), stride=1, padding=0)
 
     def forward(self, x):
         x = self.mlp(x)
-        x = x.reshape(x.shape[0], -1, 1, 1)
+        x = x.reshape(x.shape[-2], -1, 1, 1)
         x = self.deconv(x)
         return x
 
 
+class PixelCNNDistribution(nn.Module):
+        def __init__(self, decoder, h):
+            super().__init__()
+            self.decoder = decoder
+            self.h = h
+
+        def log_prob(self, x):
+            logger.debug(f'x.shape: {x.shape}, h.shape: {self.h.shape}')
+            if len(x.shape) == len(self.h.shape):
+                assert x.shape[0] == self.h.shape[0]
+                assert x.shape[-2:] == self.h.shape[-2:]
+                log_prob = F.log_softmax(self.decoder(x, self.h), dim=1)
+                logger.debug(f'log_prob.shape: {log_prob.shape}, x.shape: {x.shape}')
+                log_prob = torch.gather(log_prob, dim=1, index=(255 * x.unsqueeze(1)).long())
+                logger.debug(f'log_prob.shape: {log_prob.shape}')
+                log_prob = log_prob.reshape(x.shape[0], -1).sum(-1)
+            elif len(x.shape) > len(self.h.shape):
+                assert x.shape[-len(self.h.shape)] == self.h.shape[0]
+                assert x.shape[-2:] == self.h.shape[-2:] 
+                
+                batch_dims = x.shape[:-len(self.h.shape)]
+                B = self.h.shape[0]
+                N = np.prod(batch_dims)
+                repeats = (len(self.h.shape)-1) * [1] 
+                _h = self.h.repeat(N, *repeats)
+                _x = x.reshape(-1, *x.shape[-len(self.h.shape)+1:])
+                logger.debug(f'Flattened batch -> x.shape: {_x.shape}, h.shape: {_h.shape}')
+                
+                log_prob = F.log_softmax(self.decoder(_x, _h), dim=1) # N x 256 x 3 x w x h
+                logger.debug(f'log_prob.shape: {log_prob.shape}, _x.shape: {_x.shape}')
+                log_prob = torch.gather(log_prob, dim=1, index=(255 * _x.unsqueeze(1)).long()).squeeze(1)
+                
+                # iters = product(*list(map(lambda x: list(range(x)), batch_dims)))
+                # log_prob_test = torch.zeros(*batch_dims, B, x.shape[-3], x.shape[-2], x.shape[-1])
+                # for idx in iters:
+                #     log_prob_test[idx] = F.log_softmax(self.decoder(x[idx], self.h), dim=1).gather(dim=1, index=(255 * x[idx].unsqueeze(1)).long()).squeeze(1)
+                
+                # assert torch.allclose(log_prob.reshape(*batch_dims, B, -1), log_prob_test.reshape(*batch_dims, B, -1))
+                # logger.debug('log_prob_test passed!')
+
+                log_prob = log_prob.reshape(*batch_dims, B, -1).sum(-1)
+                logger.debug(f'final log_prob.shape: {log_prob.shape}')
+            return log_prob
+
 class PixelCNNDecoder(nn.Module):
     def __init__(self, features, cfg):
+        
         super().__init__()
         self.features = features
-        self.causal_block = GatedPixelCNNLayer(cfg.in_channels, cfg.feats_maps, cfg.kernel_size)
-        self.stack = PixelCNNStack(cfg.feats_maps, cfg.kernel_size, cfg.n_layers-1)
-        self.output = nn.Conv2d(cfg.feats_maps, 256, kernel_size=1, stride=1, padding='same')
+        self.data_channels = cfg.color_channels
+        # self.conv = nn.Conv2d(cfg.in_channels, cfg.feats_maps * self.data_channels, kernel_size=1, stride=1, padding='same')
+        
+        #self.causal_block = GatedPixelCNNLayer(1, cfg.feats_maps, kernel_size=1, data_channels=self.data_channels)
+        self.causal_block = MaskedConv2d(cfg.in_channels, cfg.feats_maps * self.data_channels, kernel_size=1, stride=1, padding='same', data_channels=self.data_channels, mask_type='A') 
+        self.stack = PixelCNNStack(cfg.feats_maps, cfg.kernel_size, cfg.n_layers-1, data_channels=self.data_channels)
+        self.output = MaskedConv2d(cfg.feats_maps * self.data_channels, 256 * self.data_channels, kernel_size=1, stride=1, padding='same', data_channels=self.data_channels, mask_type='A')
 
     def forward(self, x, h):
         '''
@@ -198,175 +246,56 @@ class PixelCNNDecoder(nn.Module):
             h: embedding/latent feature maps, 
         '''
         cond = self.features(h)
-        vertical, horizontal, _ = self.causal_block(x, x, None)
-        vertical, horizontal, skip = self.stack(vertical, horizontal, cond)
-        return self.output(F.relu(skip))
+        return self._pixelcnn_stack(x, cond)
+    
+    def _pixelcnn_stack(self, x, cond):
+        width, height = cond.shape[-2:]
+        x_= self.causal_block(x)
+        _, _, skip = self.stack(x_, x_, cond)
+        out = self.output(F.relu(skip))
+        out = out.reshape(x.shape[0], 256, self.data_channels, width, height) # (batch_size, 256, data_channels, width, height)
+        return out 
 
     def sample(self, h, n=1):
         '''
-            h: embedding/latent feature maps, 
+            h: embedding/latent feature maps.
         '''
         cond = self.features(h)
         width, height = cond.shape[-2:]
-        zeros = torch.zeros(n, 3, width, height)
-        for 
-    
+        sample = torch.zeros(n, self.data_channels, width, height)
+        for i in range(width):
+            for j in range(height):
+                for c in range(self.data_channels):
+                    out = self.forward(sample, h)
+                    out = out[:, c, i, j]
+                    out = torch.softmax(out, dim=1)
+                    sample = torch.multinomial(out, 1)
+                    sample[:, c, i, j] = sample
+        return sample
+
+
     def distribution(self, h):
         '''
-            return function to evaluate the distribution q(x|h).
+            return function to evaluate the distribution log q(x|h).
             h: embedding/latent feature maps, 
         '''
-        # return torch distribution? partial implementation of distribution interface?
-        # log_prob, sample, kl_div
+        cond = self.features(h)
 
-        pass
+        return PixelCNNDistribution(self._pixelcnn_stack, cond)
 
-
-
-def PixelCNNDecoderDist(cfg):
-    return partial(PixelCNNDecoder, cfg=cfg)
-
-##  Pixel Encoder Models
-class ConvResidualLayer(nn.Module):
-    def __init__(self, cfg):
-        super().__init__()
-        self.conv_1 = nn.Conv2d(cfg.in_channels, cfg.out_channels, kernel_size=cfg.kernel_size, stride=1, padding='same')
-        self.norm_1 = nn.LayerNorm([cfg.out_channels, cfg.in_width, cfg.in_height])
-        self.conv_2 = nn.Conv2d(cfg.out_channels,  cfg.in_channels, kernel_size=cfg.kernel_size, stride=1, padding='same')
-        self.norm_2 = nn.LayerNorm([cfg.in_channels, cfg.in_width, cfg.in_height])
-        self.relu = nn.ReLU()
-
-    def forward(self, x):
-        conv_1 = self.relu(self.norm_1(self.conv_1(x)))
-        conv_2 = self.relu(self.norm_2(self.conv_2(conv_1)))
-        return conv_2 + x
-
-class ResidualStack(nn.Module):
-    def __init__(self, cfg):
-        super().__init__()
-        self.layers = nn.ModuleList([ConvResidualLayer(cfg) for _ in range(cfg.n_layers)])
     
-    def forward(self, x):
-        for layer in self.layers:
-            x = layer(x)
-        return x
 
-class ResidualConvEncoder(nn.Module):
-    def __init__(self, cfg):
-        super().__init__()
-        self.conv_1 = nn.Conv2d(cfg.color_channels, cfg.feat_maps, kernel_size=cfg.kernel_size, stride=1, padding='same')
-        self.norm_1 = nn.LayerNorm([cfg.feat_maps, cfg.in_width, cfg.in_height])
-        self.max_pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=1) # 2x2 max pooling
-        self.relu = nn.ReLU()
-        cfg.residual.in_width, cfg.residual.in_height = cfg.in_width // 2 + 1, cfg.in_height // 2 + 1
-        self.residual_stack = ResidualStack(cfg.residual)
-        self.linear = nn.Linear(cfg.residual.in_channels * cfg.residual.in_width * cfg.residual.in_height, cfg.out_dim)
-
-    def forward(self, x):
-        
-        x = self.relu(self.norm_1(self.conv_1(x)))
-        x = self.max_pool(x)
-        x = self.residual_stack(x)
-        x = x.reshape(x.shape[0], -1)
-        x = self.linear(x)
-        return x
-
-# TODO refactor. move to tests/
-class PixelCNNDecoderBinary(pl.LightningModule):
-    '''
-        PixelCNN for binary images (Binarized MNIST)
-    '''
-    def __init__(self, n_classes, in_channels, out_channels, kernel_size=3, n_layers=5):
-        super().__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.kernel_size = kernel_size
-        self.n_layers = n_layers
-        self.embed = nn.Embedding(n_classes, out_channels)
-        self.causal_block = GatedPixelCNNLayer(in_channels, out_channels, kernel_size)
-        self.stack = PixelCNNStack(out_channels, kernel_size, n_layers-1)
-        self.output = nn.Conv2d(out_channels, 2, kernel_size=1, stride=1, padding='same')
-
-    def forward(self, x, label):
-        conditional = self.embed(label).reshape(x.shape[0],-1, 1, 1)
-        vertical, horizontal, _ = self.causal_block(x, x, None)
-        vertical, horizontal, skip = self.stack(vertical, horizontal, conditional)
-        return self.output(F.relu(skip))
-
-    def training_step(self, batch, batch_idx):
-        x, label = batch
-        out = self(x, label)
-        loss = F.cross_entropy(out.reshape(x.shape[0], 2, -1), x.reshape(x.shape[0], -1).long(), reduction='sum')/x.shape[0]
-        self.log('train_loss', loss)
-        return loss
     
-    def validation_step(self, batch, batch_idx):
-        x, label = batch
-        out = self(x, label)
-        loss = F.cross_entropy(out.reshape(x.shape[0], 2, -1), x.reshape(x.shape[0], -1).long())
-        self.log('val_loss', loss)
-        return loss
-   
-    def configure_optimizers(self) -> torch.optim.Optimizer:
-        return torch.optim.Adam(self.parameters(), lr=5e-3)
+    def log_prob(self, x, h):
+        '''
+            x: input image/generating image
+            h: embedding/latent feature maps, 
+        '''
+        out = self.forward(x, h)
+        return F.log_softmax(out, dim=1) # TODO: how to batch this. batch computation over batch of distributions
 
+    @staticmethod
+    def PixelCNNDecoderDist(cfg):
+        return partial(PixelCNNDecoder, cfg=cfg)
 
-def conv_out_dim(in_dim, kernel_size, stride, padding=0):
-    return int((in_dim - kernel_size + 2 * padding) / stride + 1)
-
-
-def encoder_conv_continuous(in_width, in_height, in_channels, kernel_size=3, stride=1, hidden_dim=128, latent_dim=2):
-    out_channels_1, out_channels_2 = 64, 32
-    out_width_1, out_height_1 = conv_out_dim(in_width, kernel_size=kernel_size, stride=stride), conv_out_dim(in_height, kernel_size=kernel_size, padding=0, stride=stride)
-    out_width_2, out_height_2 = conv_out_dim(out_width_1, kernel_size=kernel_size, padding=0, stride=stride), conv_out_dim(out_height_1, kernel_size=kernel_size, padding=0, stride=stride)
-
-    encoder_feats_1 = nn.Sequential(
-                                nn.Conv2d(in_channels, out_channels_1, kernel_size=kernel_size, stride=stride, padding='valid'),
-                                nn.LayerNorm([out_channels_1, out_width_1, out_height_1]),
-                                nn.ReLU(),
-                                nn.Conv2d(out_channels_1, out_channels_2, kernel_size=kernel_size, stride=stride, padding='valid'),
-                                nn.LayerNorm([out_channels_2, out_width_2, out_height_2])
-                    )
-
-    encoder_feats = nn.Sequential(
-                                encoder_feats_1,
-                                ConvResidualLayer(out_width_2, out_height_2, out_channels_2, 32),    
-                                nn.Flatten(),
-                                nn.Linear(out_channels_2 * out_width_2 * out_height_2, hidden_dim),
-                                nn.ReLU()
-                    )
-
-    encoder_mean = nn.Linear(hidden_dim, latent_dim)
-
-    encoder_log_var = nn.Linear(hidden_dim, latent_dim)
-
-    return DiagonalGaussianModule((encoder_feats, encoder_mean, encoder_log_var))
-
-
-
-
-
-if __name__ == "__main__":
-
-    def binarize(img):
-        # Binarize MNIST
-        img =  (img > 0.7).float()
-        # Plot image
-        return img
-
-    # Load Binarized MNIST
-    transform = transforms.Compose([transforms.ToTensor(), binarize])
-    train_dataset = MNIST(root='data', train=True, download=True, transform=transform)
-    val_dataset = MNIST(root='data', train=False, download=True, transform=transform)
-    train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=128, shuffle=False)
-
-
-    # Train
-    model = PixelCNNDecoderBinary(10, 1, 64, 7, 5)
-
-    trainer = pl.Trainer(max_epochs=5, accelerator='gpu')
-    trainer.fit(model, train_loader, val_loader)
-
-    # Save model
-    torch.save(model.state_dict(), 'cond_pixelcnn.pt')
+    

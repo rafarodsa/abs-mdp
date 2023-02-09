@@ -5,7 +5,7 @@ experiment_cwd: 'experiments/pb_no_obs/fullstate'
 lr: 1e-4
 batch_size: 128
 epochs: 10
-accelerator: gpu
+accelerator: cpu
 devices: 1
 save_path: ${experiment_cwd}/mdps
 loss:
@@ -22,7 +22,11 @@ data:
   train_split: 0.9
   val_split: 0.1
   test_split: 0.
-  shuffle: True  
+  shuffle: True
+  obs_type: simple
+  n_reward_samples: 5
+  gamma: 0.99
+  n_options: ${model.n_options}
 model:
   n_options: 4
   obs_dims: 4

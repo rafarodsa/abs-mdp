@@ -11,7 +11,7 @@ from functools import partial
 from typing import Any, Dict, List, Optional, Tuple
 from src.models.configs import DiagGaussianConfig, MLPConfig, DistributionConfig, ModuleConfig
 from src.models import MLP, DiagonalGaussian, DynamicsMLP, RewardMLP, Deterministic
-from src.models import ResidualConvEncoder, PixelCNNDecoderDist, DeconvBlock
+from src.models import ResidualConvEncoder, DeconvBlock, PixelCNNDecoder
 
 class ModuleFactory:
     factories ={
@@ -21,7 +21,7 @@ class ModuleFactory:
         "reward_mlp": RewardMLP,
         "deterministic": Deterministic,
         "conv_residual": ResidualConvEncoder,
-        "pixelcnn": PixelCNNDecoderDist,
+        "pixelcnn": PixelCNNDecoder.PixelCNNDecoderDist,
         "deconv": DeconvBlock
     }
     

@@ -24,6 +24,7 @@ class VAELossConfig:
     transition_const: float = 0.1
     init_class_const: float = 1.
     n_samples: int = 1
+    kl_balance: float = 0.01
 
 @dataclass
 class DataConfig:
