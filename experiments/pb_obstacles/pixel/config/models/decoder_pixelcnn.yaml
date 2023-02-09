@@ -4,7 +4,7 @@ features:
   in_channels: 64
   out_width: 100
   out_height: 100
-  out_channels: 8
+  out_channels: 3
   color_channels: 3 # 3 for RGB, 1 for grayscale
 dist:
   type: pixelcnn

@@ -7,7 +7,6 @@
 """
 import torch
 import pytorch_lightning as pl
-from torch.distributions import Normal, kl_divergence, Independent
 
 
 from src.models.factories import build_distribution, build_model
@@ -18,7 +17,7 @@ from src.absmdp.configs import TrainerConfig
 from omegaconf import OmegaConf as oc
 
 import logging
-logging.basicConfig(level=logging.DEBUG)
+
 logger = logging.getLogger(__name__)
 
 
@@ -113,25 +112,26 @@ class AbstractMDPTrainer(pl.LightningModule):
 		# compute losses
 		prediction_loss = self._prediction_loss(s_prime, s_prime_dist, s, s_dist) 
 		kl_loss = self._init_state_dist_loss(q_z, q_z_std) 
-		reward_loss = self._reward_loss(reward_pred, s_dist, s_prime_dist, reward) 
+		#reward_loss = self._reward_loss(reward_pred, s_dist, s_prime_dist, reward) 
 		init_classifier_loss = self._init_classifier_loss(initiation_pred, initiation_target) 
 		transition_loss = self._transition_loss(q_z_prime_encoded, q_z_prime_pred, self.hyperparams.kl_balance) 
 
 
 		loss = prediction_loss * self.hyperparams.grounding_const\
 			+ kl_loss * self.hyperparams.kl_const\
-			+ reward_loss * self.hyperparams.reward_const \
 			+ init_classifier_loss * self.hyperparams.init_class_const\
 			+ transition_loss * self.hyperparams.transition_const
-
+			# + reward_loss * self.hyperparams.reward_const
 		logs = {
 			"grounding_loss": prediction_loss,
 			"kl_loss": kl_loss,
-			"reward_loss": reward_loss,
+			#"reward_loss": reward_loss,
 			"initiation_loss": init_classifier_loss,
 			"prediction_loss": transition_loss,
 			"loss": loss
 		}
+
+		logger.debug(f'Losses: {logs}')
 		return loss, logs
 
 	def _prediction_loss(self, s_prime, q_s_prime_pred, s, q_s_pred):
@@ -157,7 +157,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		obs, next_obs, rewards = reward_target  # batch x n_samples x obs_dim
 		# TODO: why is this unsqueezed dimension necessary?
 		# I this is for the number of sampled predictions for z and z_prime
-		
+
 		# q(s|z) should have B x n_z_samples distributions
 		# q(s'|z') should have B x n_z_samples x n_z_prime_samples distributions
 		obs, next_obs = obs.transpose(0, 1).unsqueeze(1), next_obs.transpose(0, 1).unsqueeze(1)  # n_samples x batch x obs_dim
@@ -166,11 +166,13 @@ class AbstractMDPTrainer(pl.LightningModule):
 		_reward_target = symlog(rewards).transpose(0, 1).unsqueeze(1) # n_samples x 1 x batch
 		logger.debug(f'reward_target: {_reward_target.shape}')
 		
-		weights = torch.exp((q_s.log_prob(obs) + q_s_prime.log_prob(next_obs)))
-		Z = weights.sum(0, keepdims=True)
-		logger.debug(f'weights: {weights.shape}, Z: {Z.shape}')
+		with torch.no_grad():
+			weights = torch.exp((q_s.log_prob(obs) + q_s_prime.log_prob(next_obs)))
+			Z = weights.sum(0, keepdims=True)
+			logger.debug(f'Reward weights: {Z}')
+			logger.debug(f'weights: {weights.shape}, Z: {Z.shape}')
+			reward_target_ = (weights*_reward_target/Z).sum(0).squeeze()
 
-		reward_target_ = (weights*_reward_target/Z).sum(0).squeeze().detach()
 		logger.debug(f'reward_target_: {reward_target_.shape}, reward_pred: {reward_pred.shape}')
 		logger.debug('Reward loss done')
 		# Note that I'm detaching the target. we don't want to backprop to the grounding function

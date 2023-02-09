@@ -15,4 +15,4 @@ dist:
   type: diag_gaussian
   output_dim: ${model.latent_dim}
   min_var: 1.0e-06
-  max_var: 1.0e6
+  max_var: 1000000

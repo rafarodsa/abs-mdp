@@ -1,11 +1,11 @@
 """
     author: Rafael Rodriguez-Sanchez
     email: rrs@brown.edu
-    date: January 2023
+    date: January 2023 (v0)
+          February 2023 (v0.1)
 """
 
 from envs.pinball.pinball_gym import PinballEnvContinuous as Pinball
-from envs.pinball.pinball_gym import PinballPixelWrapper
 from envs.pinball.controllers_pinball import create_position_controllers as OptionFactory
 
 import numpy as np

@@ -2,29 +2,29 @@
 # Full State observation
 # Gridworld abstraction
 experiment_cwd: 'experiments/pb_obstacles/pixel'
-lr: 1e-4
-batch_size: 128
-epochs: 10
-accelerator: cpu
+lr: 1e-3
+batch_size: 32
+epochs: 2
+accelerator: gpu
 devices: 1
 save_path: ${experiment_cwd}/mdps
 loss:
-  grounding_const: 10
-  kl_const:  0.1
+  grounding_const: 1
+  kl_const:  1.
   reward_const: 1.
-  transition_const: 0.1
+  transition_const: 1.
   init_class_const: 1.
   n_samples: 1
 data:
   data_path: ${experiment_cwd}/data/obstacles.pt
-  batch_size: 32
+  batch_size: ${batch_size}
   num_workers: 4
   train_split: 0.9
   val_split: 0.1
   test_split: 0.
   shuffle: True  
   obs_type: pixels
-  n_reward_samples: 5
+  n_reward_samples: 2
   gamma: 0.99
   n_options: ${model.n_options}
 model:

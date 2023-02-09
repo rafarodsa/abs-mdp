@@ -13,7 +13,7 @@ import numpy as np
 from functools import partial
 
 import logging
-logging.basicConfig(level=logging.DEBUG)
+
 logger = logging.getLogger(__name__)
 
 from itertools import product
@@ -48,7 +48,7 @@ class MaskedConv2d(nn.Module):
                 self._mask[self._color_mask(c, c), y_c, x_c] = 0
         
         self.device = self.conv.weight.get_device()
-        self._mask = torch.from_numpy(self._mask)
+        self._mask = torch.from_numpy(self._mask).type(self.conv.weight.dtype)
         self.register_buffer('mask', self._mask)
 
     def _color_mask(self, in_c, out_c):

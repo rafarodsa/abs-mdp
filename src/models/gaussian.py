@@ -22,7 +22,6 @@ class DiagonalNormal(torch.distributions.Distribution):
         return torch.exp(self._log_var)
 
     def sample(self, n_samples=1):
-        print(self._mean.device, self._log_var.device)
         return self.dist.rsample(torch.zeros(n_samples).size())
     
     def log_prob(self, x):
