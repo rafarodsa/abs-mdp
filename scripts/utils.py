@@ -5,9 +5,9 @@
     date: January 2023
 """
 
-from src.envs.pinball.pinball_gym import PinballEnvContinuous as Pinball
-from src.envs.pinball.pinball_gym import PinballPixelWrapper
-from src.envs.pinball.controllers_pinball import create_position_controllers as OptionFactory
+from envs.pinball.pinball_gym import PinballEnvContinuous as Pinball
+from envs.pinball.pinball_gym import PinballPixelWrapper
+from envs.pinball.controllers_pinball import create_position_controllers as OptionFactory
 
 import numpy as np
 import torch
