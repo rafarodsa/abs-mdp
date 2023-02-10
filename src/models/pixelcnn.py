@@ -154,7 +154,7 @@ class GatedPixelCNNLayer(nn.Module):
             
 
 class PixelCNNStack(nn.Module):
-    def __init__(self, out_channels, kernel_size=3, n_layers=10, data_channels=3):
+    def __init__(self, out_channels, kernel_size=3, n_layers=10, data_channels=1):
         super().__init__()
         self.out_channels = out_channels
         self.kernel_size = kernel_size

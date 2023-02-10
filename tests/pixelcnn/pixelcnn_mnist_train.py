@@ -104,7 +104,7 @@ if __name__ == "__main__":
     # Train
     model = PixelCNNDecoderBinary(10, 1, 64, 7, 5)
 
-    trainer = pl.Trainer(max_epochs=5, accelerator='gpu')
+    trainer = pl.Trainer(max_epochs=5, accelerator='gpu', gpus=1)
     trainer.fit(model, train_loader, val_loader)
 
     # Save model
