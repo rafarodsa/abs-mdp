@@ -233,7 +233,7 @@ class PixelCNNDecoder(nn.Module):
         super().__init__()
         self.features = features
         self.data_channels = cfg.color_channels
-        # self.conv = nn.Conv2d(cfg.in_channels, cfg.feats_maps * self.data_channels, kernel_size=1, stride=1, padding='same')
+        #self.conv = nn.Conv2d(cfg.in_channels, cfg.feats_maps * self.data_channels, kernel_size=1, stride=1, padding='same')
         
         #self.causal_block = GatedPixelCNNLayer(1, cfg.feats_maps, kernel_size=1, data_channels=self.data_channels)
         self.causal_block = MaskedConv2d(cfg.in_channels, cfg.feats_maps * self.data_channels, kernel_size=1, stride=1, padding='same', data_channels=self.data_channels, mask_type='A') 
