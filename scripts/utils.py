@@ -1,4 +1,3 @@
-
 """
     author: Rafael Rodriguez-Sanchez
     email: rrs@brown.edu
@@ -6,21 +5,9 @@
 """
 
 from envs.pinball.pinball_gym import PinballEnvContinuous as Pinball
-from envs.pinball.pinball_gym import PinballPixelWrapper
 from envs.pinball.controllers_pinball import create_position_controllers as OptionFactory
 
 import numpy as np
-import torch
-from tqdm import tqdm
-import argparse
-
-from functools import reduce
-from collections import defaultdict
-import matplotlib.pyplot as plt
-
-from joblib import Parallel, delayed, wrap_non_picklable_objects
-
-
 
 ####### Auxiliary Functions
 
