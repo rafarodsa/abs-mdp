@@ -181,14 +181,16 @@ class PixelCNNStack(nn.Module):
 class DeconvBlock(nn.Module):
     def __init__(self, cfg):
         super().__init__()
-        self.mlp = nn.Linear(cfg.input_dim, cfg.in_channels)
+        # self.mlp = nn.Linear(cfg.input_dim, cfg.in_channels)
+        hidden_dim = 128
+        self.mlp_1 = nn.Linear(cfg.input_dim, hidden_dim)
+        self.mlp_2 = nn.Linear(hidden_dim, hidden_dim)
         self.relu = nn.ReLU()
-        self.deconv = nn.ConvTranspose2d(cfg.in_channels, cfg.out_channels * cfg.color_channels, (cfg.out_width, cfg.out_height), stride=1, padding=0)
-
+        self.deconv = nn.ConvTranspose2d(hidden_dim, cfg.out_channels * cfg.color_channels, (cfg.out_width, cfg.out_height), stride=1, padding=0)
     def forward(self, x):
-        x = self.relu(self.mlp(x))
-        x = x.reshape(x.shape[-2], -1, 1, 1)
-        x = self.deconv(x)
+        x = self.mlp_2(self.relu(self.mlp_1(x)))
+        x = self.relu(x.reshape(x.shape[-2], -1, 1, 1))
+        x = self.relu(self.deconv(x))
         return x
 
 
@@ -242,13 +244,14 @@ class PixelCNNDecoder(nn.Module):
         super().__init__()
         self.features = features
         self.data_channels = cfg.color_channels
+        self.width, self.height = cfg.out_width, cfg.out_height
         
         self.causal_block = GatedPixelCNNLayer(cfg.color_channels, cfg.feats_maps * self.data_channels, kernel_size=cfg.kernel_size, data_channels=self.data_channels, residual=False)
        
         self.stack = PixelCNNStack(cfg.feats_maps * self.data_channels, cfg.kernel_size, cfg.n_layers, data_channels=self.data_channels)
         # TODO: maybe reshape and then 1-conv. or masked 1-conv for output
         self.output = nn.Conv2d(cfg.feats_maps * self.data_channels, 256 * self.data_channels, kernel_size=1, stride=1, padding='same')
-       
+        # self.output = MaskedConv2d(cfg.feats_maps * self.data_channels, 256 * self.data_channels, kernel_size=1, stride=1, padding='same', mask_type='A')
     def forward(self, x, h):
         '''
             x: input image/generating image
@@ -259,7 +262,7 @@ class PixelCNNDecoder(nn.Module):
     
     def _pixelcnn_stack(self, x, cond):
         # TODO: generalize this for multiple batch dimensions.
-        width, height = cond.shape[-2:]
+        width, height = self.width, self.height #cond.shape[-2:]
         x_v, x_h, _ = self.causal_block(x, x)
         _, _, skip = self.stack(x_v, x_h, cond)
         out = self.output(F.relu(skip))

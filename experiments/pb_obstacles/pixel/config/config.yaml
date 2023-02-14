@@ -2,7 +2,7 @@
 # Full State observation
 # Gridworld abstraction
 experiment_cwd: 'experiments/pb_obstacles/pixel'
-lr: 1e-3
+lr: 1e-2
 batch_size: 32
 epochs: 2
 accelerator: gpu

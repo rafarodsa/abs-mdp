@@ -31,8 +31,6 @@ class PinballModel(pl.LightningModule):
     def _run_step(self, x, s):
         out = self.forward(x, s)
         idx = (x * 255).long()
-        # print(x.max(), x.min())
-        # print(out.shape)
         loss = F.cross_entropy(out.reshape(x.shape[0], 256, -1), idx.reshape(x.shape[0], -1), reduction='sum')/x.shape[0]
         # log_probs = F.log_softmax(out, dim=1)
         # log_probs = log_probs.gather(1, idx.unsqueeze(1).long()).squeeze(1)
@@ -145,8 +143,8 @@ if __name__=='__main__':
         torch.save(model.state_dict(), f'{args.save_path}/pinball.pt')
         print(f'Model params saved at {args.save_path}/pinball.pt')
         # TODO: this is failing to resolve.
-        oc.save(oc.resolve(cfg), f'{args.save_path}/config.yaml')
-        print(f'Model config saved at {args.save_path}/config.yaml')
+        # oc.save(oc.resolve(cfg), f'{args.save_path}/config.yaml')
+        # print(f'Model config saved at {args.save_path}/config.yaml')
     else:
         if args.from_ckpt is None:
             model.load_state_dict(torch.load(f'{args.save_path}/pinball.pt'))
