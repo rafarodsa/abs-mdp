@@ -407,6 +407,7 @@ class PinballView:
     def blit(self):
         """ Blit the ball onto the background surface """
         self.screen.blit(self.background_surface, (0, 0))
+        
         pygame.draw.circle(self.screen, self.BALL_COLOR,
                            self._to_pixels(self.model.ball.position), int(self.model.ball.radius*self.screen.get_width()))
 

@@ -20,7 +20,8 @@ class GoalPinballModel(PinballModel):
         self.target_pos = target_pos
 
     def set_initial_pos(self, start_pos):
-        self.ball = BallModel(start_position=start_pos, radius=0.01)
+        self._ball_rad = self.ball.radius
+        self.ball = BallModel(start_position=start_pos, radius=self._ball_rad)
     
     def set_initial_state(self, state):
         self.set_initial_pos(state[:2])
@@ -163,19 +164,28 @@ class DummyDict(UserDict):
         return self.default_value_f(key)
 
 class PinballModelContinuous(GoalPinballModel):
-    MAX_SPEED = 1
+    MAX_ACC = 1
+    STEP_COST = -1
+    ACC_COST = -5
     
     def __init__(self, configuration):
         super().__init__(configuration)
         self.action_effects = DummyDict(self._action_effects)
 
     def _action_effects(self, action):
-        _action = np.clip(action, -self.MAX_SPEED, self.MAX_SPEED)
-        return _action[0], _action[1]
+        _action = np.clip(action, -self.MAX_ACC, self.MAX_ACC)
+        return _action[0], _action[1]        
+
+    def reward(self, action):
+        if np.linalg.norm(action) < 1e-6:
+            return self.STEP_COST
+        else:
+            return self.ACC_COST * np.linalg.norm(action) # acc_cost per each acceleration unit.
 
 
 class PinballEnvContinuous(PinballEnv):
     MAX_SPEED = 1
+    GOAL_REWARD = 10000
     def __init__(self, config, start_pos=None, target_pos=None, width=500, height=500, render_mode=None):
         super().__init__(config, start_pos, target_pos, width, height, render_mode)
         self.action_space = spaces.Box(low=-self.MAX_SPEED, high=self.MAX_SPEED, shape=(2,), dtype=np.float64)
@@ -188,8 +198,9 @@ class PinballEnvContinuous(PinballEnv):
 
     def step(self, action):
         action = tuple(action)
-        return super().step(action)
-
+        next_s, _, done, _, _ = super().step(action)
+        reward = self.pinball.reward(action) if not done else self.GOAL_REWARD
+        return next_s, reward, done, False, {}
 
 class PinballPixelWrapper(gym.Env):
     def __init__(self, environment, n_frames=1):
@@ -233,7 +244,7 @@ if __name__=="__main__":
     from matplotlib import pyplot as plt
     size = 100
     pinball = PinballEnvContinuous(
-                                    config="/Users/rrs/Desktop/abs-mdp/src/envs/pinball/configs/pinball_simple_single.cfg", 
+                                    config="/Users/rrs/Desktop/abs-mdp/envs/pinball/configs/pinball_simple_single.cfg", 
                                     width=size, 
                                     height=size, 
                                     render_mode="rgb_array")
