@@ -18,12 +18,12 @@ class MaskedLinear(nn.Linear):
 
 
 class MADE(nn.Module):
-    def __init__(self, input_dim, hidden_dims, permute=False, sample=False):
+    def __init__(self, input_dim, hidden_dims, order=None, permute=False, sample=False):
         super(MADE, self).__init__()
         self.input_dim = input_dim
         self.output_dim = input_dim
         self.hidden_dims = hidden_dims
-        self.layers = nn.ModuleList(self._create_layers(permute=permute, sample=sample))
+        self.layers = nn.ModuleList(self._create_layers(order=order, permute=permute, sample=sample))
 
     
     def forward(self, x):
@@ -44,14 +44,15 @@ class MADE(nn.Module):
                 mask[j, i] = 1 if  max_out[j] >= max_in[i] else 0
         return mask
 
-    def _create_layers(self, permute=False, sample=False):
+    def _create_layers(self, order=None, permute=False, sample=False):
         '''
             Creates the layers of the MADE
             permute: if true, the order of the input layer is permuted
         '''
         layers = []
         in_dim = self.input_dim
-        _max_in = np.arange(1, in_dim + 1) if not permute else np.random.permutation(np.arange(1, in_dim + 1))
+        _max_in = np.arange(1, in_dim + 1) if order is None else order
+        _max_in =  np.random.permutation(_max_in) if permute else _max_in
         max_in = _max_in
         masks = []
         for i, h_dim in enumerate(self.hidden_dims):
