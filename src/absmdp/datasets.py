@@ -129,7 +129,11 @@ class PinballDataset(pl.LightningDataModule):
         self.obs_type = cfg.obs_type
         self.train_split, self.val_split, self.test_split = cfg.train_split, cfg.val_split, cfg.test_split
         self.shuffle = cfg.shuffle
-        self.transforms = [partial(compute_return, gamma=cfg.gamma), partial(one_hot_actions, cfg.n_options)]
+        self.transforms = [ 
+                            partial(compute_return, gamma=cfg.gamma), 
+                            partial(one_hot_actions, cfg.n_options), 
+                            partial(random_projection, n_features=cfg.n_features)
+                        ]
 
     def setup(self, stage=None):
         self.dataset = PinballDataset_(self.path_to_file, self.n_reward_samples, self.transforms, obs_type=self.obs_type)
@@ -206,5 +210,3 @@ class InitiationDataset(pl.LightningDataModule):
     
     def test_dataloader(self):
         return DataLoader(self.test, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
-
-    
