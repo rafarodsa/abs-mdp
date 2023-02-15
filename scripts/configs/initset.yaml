@@ -1,5 +1,5 @@
-lr: 1e-2
-accelerator: cpu
+lr: 1e-3
+accelerator: gpu
 data:
   batch_size: 64
   num_workers: 4
@@ -15,7 +15,8 @@ initset:
   hidden_dims:
     - 128
     - 128
-  activation: relu
+    - 128
+  activation: leaky_relu
 duration:
   type: mlp
   input_dim: 8

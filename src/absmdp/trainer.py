@@ -114,7 +114,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		kl_loss = self._init_state_dist_loss(q_z, q_z_std) 
 		#reward_loss = self._reward_loss(reward_pred, s_dist, s_prime_dist, reward) 
 		init_classifier_loss = self._init_classifier_loss(initiation_pred, initiation_target) 
-		transition_loss = self._transition_loss(q_z_prime_encoded, q_z_prime_pred, self.hyperparams.kl_balance) 
+		transition_loss = self._transition_loss(q_z_prime_encoded, q_z_prime_pred, alpha=self.hyperparams.kl_balance) 
 
 
 		loss = prediction_loss * self.hyperparams.grounding_const\

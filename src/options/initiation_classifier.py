@@ -29,7 +29,7 @@ class InitsetModel(pl.LightningModule):
         logits = self(obs)
         loss = self.loss(logits, executed)
         self.log("train_loss", loss)
-        # self.log("train_acc", self.accuracy(logits, executed))
+        self.log("train_acc", self.accuracy(logits, executed))
         return loss
     
     def validation_step(self, batch, batch_idx):
@@ -38,7 +38,7 @@ class InitsetModel(pl.LightningModule):
         loss = self.loss(logits, executed)
        
         self.log("val_loss", loss)
-        # self.log("val_acc", self.accuracy(logits, executed))
+        self.log("val_acc", self.accuracy(logits, executed))
         return loss
     
     def test_step(self, batch, batch_idx):
@@ -46,8 +46,14 @@ class InitsetModel(pl.LightningModule):
         logits = self(obs)
         loss = self.loss(logits, executed)
         self.log("test_loss", loss)
-        # self.log("test_acc", self.accuracy(logits, executed))
+        self.log("test_acc", self.accuracy(logits, executed))
         return loss
+
+    def accuracy(self, logits, target):
+        with torch.no_grad():
+            chosen = F.sigmoid(logits) > 0.5 
+            accuracy = (chosen == target).sum()/target.shape[0]
+        return accuracy
     
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.cfg.lr)

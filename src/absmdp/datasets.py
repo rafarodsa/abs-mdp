@@ -10,7 +10,7 @@ from torch.utils.data import Dataset, DataLoader, random_split
 import pytorch_lightning as pl
 from functools import partial
 from typing import NamedTuple, List
-
+import os
 
 class InitiationSet(NamedTuple):
     obs: torch.Tensor
@@ -52,14 +52,14 @@ def one_hot_actions(n_actions=4, datum=None):
     action = F.one_hot(torch.Tensor([action]).long(), n_actions).squeeze()
     return datum.modify(action=action)
 
-def random_projection(datum, n_features=64):
+def linear_projection(datum, linear_projection):
+    w = linear_projection
+    r_obs = torch.tensordot(datum.rewards[0], w, dims=1) # N x state_dim | state_dim x n_features
+    r_next_obs = torch.tensordot(datum.rewards[1], w, dims=1)
     obs, next_obs = datum.obs, datum.next_obs
-    w = torch.randn(obs.shape[-1], n_features) # state_dim x n_features
-    obs = torch.dot(w, obs) 
-    next_obs = torch.dot(w, next_obs)
-    r_obs = torch.dot(datum.rewards.obs, w) # N x state_dim | state_dim x n_features
-    r_next_obs = torch.dot(datum.rewards.next_obs, w)
-    return datum.modify(obs=obs, next_obs=next_obs, rewards=[r_obs, r_next_obs, datum.rewards.rews])
+    obs = torch.tensordot(obs, w, dims=1) 
+    next_obs = torch.tensordot(next_obs, w, dims=1)
+    return datum.modify(obs=obs, next_obs=next_obs, rewards=[r_obs, r_next_obs, datum.rewards[2]])
 
 
 class PinballDataset_(torch.utils.data.Dataset):
@@ -102,7 +102,7 @@ class PinballDataset_(torch.utils.data.Dataset):
         # append current datum
         obs = np.concatenate([current_obs[np.newaxis, :], obs[sample]], axis=0)
         next_obs = np.concatenate([current_next_obs[None, :], next_obs[sample]], axis=0)
-
+        
         # transpose if images
         if self.obs_type == 'pixels':
             obs = obs.transpose(0, 3, 1, 2)
@@ -129,10 +129,14 @@ class PinballDataset(pl.LightningDataModule):
         self.obs_type = cfg.obs_type
         self.train_split, self.val_split, self.test_split = cfg.train_split, cfg.val_split, cfg.test_split
         self.shuffle = cfg.shuffle
-        self.transforms = [ 
+
+        self.cfg = cfg
+        
+        self._load_linear_transform()
+        self.transforms = [
                             partial(compute_return, gamma=cfg.gamma), 
-                            partial(one_hot_actions, cfg.n_options), 
-                            partial(random_projection, n_features=cfg.n_features)
+                            partial(one_hot_actions, cfg.n_options),
+                            partial(linear_projection, linear_projection=self.linear_transform)
                         ]
 
     def setup(self, stage=None):
@@ -147,7 +151,23 @@ class PinballDataset(pl.LightningDataModule):
 
     def test_dataloader(self):
         return torch.utils.data.DataLoader(self.test, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
+    
+    def _load_linear_transform(self):
+        path, file = os.path.split(self.path_to_file)
+        if os.path.isfile(f'{path}/lintransform.pt'):
+            self.linear_transform = torch.load(f'{path}/lintransform.pt')
+            assert self.linear_transform.shape == torch.Size([self.cfg.state_dim, self.cfg.n_out_feats])
+        else:
+            self.linear_transform = torch.rand(self.cfg.state_dim, self.cfg.n_out_feats)
+            torch.save(self.linear_transform, f'{path}/lintransform.pt')
+            print(f'Linear transform matrix saved at {path}/lintransform.pt')
 
+    def state_dict(self):
+        state = {'weights': self.linear_transform}
+        return state
+    
+    def load_state_dict(self, state_dict):
+        self.linear_transform = state_dict['weights']
     
 class InitiationDS(Dataset):
     def __init__(self, dataset_path, n_actions, dtype=torch.float32):

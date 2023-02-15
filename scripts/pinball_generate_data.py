@@ -59,7 +59,7 @@ if __name__== "__main__":
     
     options_desc = {i: str(o) for i, o in enumerate(options)}
 
-    results = Parallel(n_jobs=args.n_jobs)(delayed(run_option)(env, tuple(init_states[i]), options, obs_type=args.observation, max_exec_time=max_exec_time) for i in tqdm(range(args.n_samples)))        
+    results = Parallel(n_jobs=args.n_jobs)(delayed(run_option)(env, tuple(init_states[i]), options, obs_type=args.observation, max_exec_time=max_exec_time) for i in tqdm(range(args.n_samples)))     
 
     ##### Print dataset statistics
     dataset, info = zip(*results)
@@ -100,7 +100,7 @@ if __name__== "__main__":
             'state_change_mean': state_change_mean
         }
 
-        print(f'--------Option-{i}: {options_desc[i]}---------')
+        print(f"--------Option-{i}: {options_desc[i]}---------")
         print(f"Executed {n_executions}/{args.n_samples} times")
         print(f"Average duration {avg_duration}")
         print(f"Average reward {option_rewards.mean()}. Max reward: {option_rewards.max()}. Min reward: {option_rewards.min()}")
