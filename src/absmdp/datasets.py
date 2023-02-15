@@ -1,43 +1,91 @@
+'''
+    Pinball Environment Datasets.
+'''
+
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader, random_split
+
 import pytorch_lightning as pl
 from functools import partial
+from typing import NamedTuple, List
+
+
+class InitiationSet(NamedTuple):
+    obs: torch.Tensor
+    action: torch.Tensor
+    executed: torch.Tensor
+    duration: torch.Tensor
+    def modify(self, **kwargs):
+        params = self._asdict()
+        params.update(kwargs)
+        return InitiationSet(**params)
+
+class Transition(NamedTuple):
+    obs: torch.Tensor
+    action: torch.Tensor
+    next_obs: torch.Tensor
+    rewards: List[torch.Tensor]
+    executed: torch.Tensor
+    duration: torch.Tensor
+    init_mask: torch.Tensor
+
+    def modify(self, **kwargs):
+        params = self._asdict()
+        params.update(kwargs)
+        return Transition(**params)
+
 
 def _geometric_return(rewards, gamma):
     _gammas = gamma **  torch.arange(rewards.shape[-1])
     return (torch.Tensor(rewards) * _gammas.unsqueeze(0)).sum(-1)
 
-def compute_return(gamma=0.99, datum=None):
-    # s, a, s', r, executed, duration, init_mask
-    datum = list(datum)
-    datum[3] = datum[3][:2] + [_geometric_return(datum[3][-1], gamma),]
-    return datum
+def compute_return(datum, gamma=0.99):
+    rewards = datum.rewards
+    obs, next_obs, rews = rewards
+    rews = _geometric_return(rews, gamma)
+    return datum.modify(rewards=[obs, next_obs, rews])
 
 def one_hot_actions(n_actions=4, datum=None):
-    datum = list(datum)
-    datum[1] = F.one_hot(torch.Tensor([datum[1]]).long(), n_actions).squeeze()
-    return datum
+    action = datum.action
+    action = F.one_hot(torch.Tensor([action]).long(), n_actions).squeeze()
+    return datum.modify(action=action)
+
+def random_projection(datum, n_features=64):
+    obs, next_obs = datum.obs, datum.next_obs
+    w = torch.randn(obs.shape[-1], n_features) # state_dim x n_features
+    obs = torch.dot(w, obs) 
+    next_obs = torch.dot(w, next_obs)
+    r_obs = torch.dot(datum.rewards.obs, w) # N x state_dim | state_dim x n_features
+    r_next_obs = torch.dot(datum.rewards.next_obs, w)
+    return datum.modify(obs=obs, next_obs=next_obs, rewards=[r_obs, r_next_obs, datum.rewards.rews])
+
 
 class PinballDataset_(torch.utils.data.Dataset):
     def __init__(self, path_to_file, n_reward_samples=5, transforms=None, obs_type='full', dtype=torch.float32):
         self.data, self.rewards = torch.load(path_to_file)
+        self.data = [Transition(*d) for d in self.data] # transform all to named tuple
         self.n_reward_samples = n_reward_samples
         self.transforms = transforms
         self.dtype = dtype
         self.obs_type = obs_type
 
     def __getitem__(self, index):
-        datum = self._set_dtype(list(self.data[index]))
-        rewards = self._get_rewards(datum, n_samples=self.n_reward_samples-1)
-        datum[3] = rewards
+        datum = self.data[index]
+        obs, action, next_obs, rew, executed, duration, init_mask = self._set_dtype(datum)
+        rew = self._get_rewards(datum, n_samples=self.n_reward_samples-1)
+        rew[-1] = rew[-1].to(self.dtype) # rewards to dtype
+        if self.obs_type == 'pixels':
+            obs = self._process_pixel_obs(obs)
+            next_obs = self._process_pixel_obs(next_obs)
+        datum = Transition(obs, action, next_obs, rew, executed, duration, init_mask)
         for t in self.transforms:
             datum = t(datum)
-        datum[3][-1] = datum[3][-1].to(self.dtype)
-        if self.obs_type == 'pixels':
-            datum[0] = self._process_pixel_obs(datum[0])
-            datum[2] = self._process_pixel_obs(datum[2])
         return datum
+
+    def __len__(self):
+        return len(self.data)
 
     def _set_dtype(self, datum):
         s, a, s_, r, executed, duration, init_mask = datum
@@ -62,13 +110,14 @@ class PinballDataset_(torch.utils.data.Dataset):
 
         current_rewards = np.array(current_rewards)[None, :]
         rewards = np.concatenate([current_rewards, rews[sample]], axis=0)
-        return [torch.from_numpy(obs).to(self.dtype), torch.from_numpy(next_obs).to(self.dtype), rewards]
-	
-    def __len__(self):
-        return len(self.data)
+        return [torch.from_numpy(obs).to(self.dtype), torch.from_numpy(next_obs).to(self.dtype), torch.from_numpy(rewards)]
 
     def _process_pixel_obs(self, obs):
         return obs.type(self.dtype).permute(2, 0, 1)
+    
+    def _filter_failed_executions(self, data):
+        return [datum for datum in data if datum.executed == 1]
+    
 
 class PinballDataset(pl.LightningDataModule):
     def __init__(self, cfg):
@@ -80,7 +129,7 @@ class PinballDataset(pl.LightningDataModule):
         self.obs_type = cfg.obs_type
         self.train_split, self.val_split, self.test_split = cfg.train_split, cfg.val_split, cfg.test_split
         self.shuffle = cfg.shuffle
-        self.transforms = [partial(compute_return, cfg.gamma), partial(one_hot_actions, cfg.n_options)]
+        self.transforms = [partial(compute_return, gamma=cfg.gamma), partial(one_hot_actions, cfg.n_options)]
 
     def setup(self, stage=None):
         self.dataset = PinballDataset_(self.path_to_file, self.n_reward_samples, self.transforms, obs_type=self.obs_type)
@@ -94,3 +143,68 @@ class PinballDataset(pl.LightningDataModule):
 
     def test_dataloader(self):
         return torch.utils.data.DataLoader(self.test, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
+
+    
+class InitiationDS(Dataset):
+    def __init__(self, dataset_path, n_actions, dtype=torch.float32):
+        self.n_actions = n_actions
+        self.data, _ = torch.load(dataset_path)
+        self.data = [InitiationSet(data[0], data[1], data[4], data[5]) for data in self.data]
+        self.data = self._group_by_state()
+        self.dtype = dtype
+
+    def __getitem__(self, index):
+        d = self.data[index]
+        obs = torch.from_numpy(d.obs).to(self.dtype)
+        action = F.one_hot(d.action.long(), self.n_actions).squeeze().to(self.dtype)
+        executed = d.executed.to(self.dtype)
+        return d.modify(obs=obs, action=action, executed=executed)
+
+    def __len__(self):
+        return len(self.data)
+    
+    def _group_by_state(self):
+        groups = len(self.data) // self.n_actions
+        data_by_state = []
+        for i in range(groups):
+            
+            action = torch.from_numpy(np.array([d.action for d in self.data[i*self.n_actions:(i+1)*self.n_actions]]))
+            executed = torch.from_numpy(np.array([d.executed for d in self.data[i*self.n_actions:(i+1)*self.n_actions]]))
+            duration = torch.from_numpy(np.array([d.duration for d in self.data[i*self.n_actions:(i+1)*self.n_actions]]))
+            data_by_state.append(InitiationSet(self.data[i*self.n_actions].obs, action, executed, duration))
+
+            ## TEST
+            # assert torch.allclose(action.long(), torch.arange(self.n_actions).long()), f"action: {action}"
+            # obs = torch.from_numpy(np.array([d.obs for d in self.data[i*self.n_actions:(i+1)*self.n_actions]])).to(self.dtype)
+            # _obs = torch.from_numpy(self.data[i*self.n_actions].obs).to(self.dtype).repeat(self.n_actions, 1)
+            # assert torch.allclose(obs, _obs), f"obs: {obs}, _obs: {_obs}"
+
+        return data_by_state
+
+
+class InitiationDataset(pl.LightningDataModule):
+    def __init__(self, dataset_path, cfg, dtype=torch.float32):
+        super().__init__()
+        self.dataset_path = dataset_path
+        self.batch_size = cfg.batch_size
+        self.num_workers = cfg.num_workers
+        self.train_split, self.val_split, self.test_split = cfg.train_split, cfg.val_split, cfg.test_split
+        self.shuffle = cfg.shuffle
+        self.n_actions = cfg.n_options
+        self.dtype = dtype
+    
+    def setup(self, stage=None):
+        # split dataset
+        self.dataset = InitiationDS(self.dataset_path, self.n_actions, self.dtype)
+        self.train, self.val, self.test = random_split(self.dataset, [self.train_split, self.val_split, self.test_split])
+
+    def train_dataloader(self):
+        return DataLoader(self.train, batch_size=self.batch_size, shuffle=self.shuffle, num_workers=self.num_workers)
+
+    def val_dataloader(self):
+        return DataLoader(self.val, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
+    
+    def test_dataloader(self):
+        return DataLoader(self.test, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
+
+    

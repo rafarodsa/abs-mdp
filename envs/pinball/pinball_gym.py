@@ -177,10 +177,7 @@ class PinballModelContinuous(GoalPinballModel):
         return _action[0], _action[1]        
 
     def reward(self, action):
-        if np.linalg.norm(action) < 1e-6:
-            return self.STEP_COST
-        else:
-            return self.ACC_COST * np.linalg.norm(action) # acc_cost per each acceleration unit.
+        return self.ACC_COST * np.linalg.norm(action) # acc_cost per each acceleration unit.
 
 
 class PinballEnvContinuous(PinballEnv):

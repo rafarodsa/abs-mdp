@@ -41,7 +41,7 @@ def MLP(cfg: MLPConfig):
     return _MLP(cfg.input_dim, cfg.hidden_dims, cfg.output_dim, cfg.activation)
 
 def DynamicsMLP(cfg):
-    return _MLP(cfg.latent_dim + cfg.n_options + 1, cfg.hidden_dims, cfg.latent_dim, cfg.activation)
+    return _MLP(cfg.latent_dim + cfg.n_options, cfg.hidden_dims, cfg.latent_dim, cfg.activation)
 
 def RewardMLP(cfg):
     return _MLP(2*cfg.latent_dim + cfg.n_options, cfg.hidden_dims, 1, cfg.activation)

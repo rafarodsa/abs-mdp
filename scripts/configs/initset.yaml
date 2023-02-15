@@ -1,0 +1,26 @@
+lr: 1e-2
+accelerator: cpu
+data:
+  batch_size: 64
+  num_workers: 4
+  train_split: 0.9
+  val_split: 0.1
+  test_split: 0.
+  shuffle: True  
+  n_options: 4
+initset:
+  type: mlp
+  input_dim: 4
+  output_dim: 4
+  hidden_dims:
+    - 128
+    - 128
+  activation: relu
+duration:
+  type: mlp
+  input_dim: 8
+  output_dim: 1
+  hidden_dims:
+    - 128
+    - 128
+  activation: relu

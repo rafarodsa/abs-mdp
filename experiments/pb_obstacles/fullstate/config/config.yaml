@@ -1,11 +1,11 @@
 # Config file for Pinball environment
 # Full State observation
 # Gridworld abstraction
-experiment_cwd: 'experiments/pb_no_obs/fullstate'
+experiment_cwd: 'experiments/pb_obstacles/fullstate'
 lr: 1e-4
 batch_size: 128
 epochs: 10
-accelerator: gpu
+accelerator: cpu
 devices: 1
 save_path: ${experiment_cwd}/mdps
 loss:
@@ -23,6 +23,7 @@ data:
   val_split: 0.1
   test_split: 0.
   shuffle: True  
+  n_options: ${model.n_options}
 model:
   n_options: 4
   obs_dims: 4
