@@ -12,9 +12,10 @@ from optuna.integration import PyTorchLightningPruningCallback
 import pytorch_lightning as pl
 
 from src.absmdp.trainer import AbstractMDPTrainer
+from src.absmdp.datasets import PinballDataset
 
 
-def prepare_config(cfg, lr, grounding_const, kl_const, transition_const):
+def prepare_config(cfg, lr, grounding_const, kl_const, transition_const, kl_balance):
     
     # manually override config
     # TODO can we generalize this?
@@ -22,6 +23,7 @@ def prepare_config(cfg, lr, grounding_const, kl_const, transition_const):
     cfg.loss.grounding_const = grounding_const
     cfg.loss.kl_const = kl_const
     cfg.loss.transition_const = transition_const
+    cfg.loss.kl_balance = kl_balance
 
     return cfg
 
@@ -32,21 +34,23 @@ def objective(cfg, trial):
     grounding_const = trial.suggest_float('grounding_const', 0.1, 100)
     kl_const = trial.suggest_float('kl_const', 1e-4, 10)
     transition_const = trial.suggest_float('transition_const', 1e-4, 10)
+    kl_balance = trial.suggest_float('kl_balance', 0.01, 0.99)
 
-    cfg = prepare_config(cfg, lr, grounding_const, kl_const, transition_const)
+    cfg = prepare_config(cfg, lr, grounding_const, kl_const, transition_const, kl_balance)
     model = AbstractMDPTrainer(cfg) 
+    dataset = PinballDataset(cfg.data)
 
     trainer = pl.Trainer(
                         accelerator=cfg.accelerator,
                         gpus=cfg.devices if cfg.accelerator == "gpu" else None,
                         max_epochs=cfg.epochs, 
-                        callbacks=[PyTorchLightningPruningCallback(trial, monitor="val_NLL")],
+                        callbacks=[PyTorchLightningPruningCallback(trial, monitor="nll_loss")],
                         default_root_dir=cfg.save_path + f'/{trial.number}'
                     )
     
     trainer.logger.log_hyperparams(model.hparams)
-    trainer.fit(model)
-    return trainer.callback_metrics["val_NLL"].item()
+    trainer.fit(model, dataset)
+    return trainer.callback_metrics["nll_loss"].item()
 
 def tune():
     default_config_path = "experiments/pinball_simple/config/config.yaml"

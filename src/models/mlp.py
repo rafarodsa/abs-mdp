@@ -34,7 +34,7 @@ def _MLP(input_dim: int, hidden_dim: List[int], output_dim: int = None, activati
         else:
             raise ValueError('Invalid activation function')
     if output_dim is not None:
-        layers.append(nn.Linear(hidden_dim[-1], output_dim)) 
+        layers.append(nn.Linear(hidden_dim[-1], output_dim) if len(hidden_dim)  > 0 else nn.Linear(input_dim, output_dim)) 
     return nn.Sequential(*layers)
 
 def MLP(cfg: MLPConfig):

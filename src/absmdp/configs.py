@@ -65,7 +65,7 @@ class TrainerConfig:
     save_path: str = "mdps"
     loss: VAELossConfig = MISSING
     model: AbstractMDPConfig = MISSING
-    data: DataConfig = MISSING
+    data: Any = MISSING
 
 
 @dataclass
