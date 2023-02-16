@@ -77,7 +77,8 @@ class AbstractMDPTrainer(pl.LightningModule):
 		logger.debug(f"Transition: z {z.shape}, z' {z_prime_pred.shape}")
 		
 		# decode next latent state
-		q_s_prime = self.decoder.distribution(z_prime_pred)
+		# q_s_prime = self.decoder.distribution(z_prime_pred)
+		q_s_prime = self.decoder.distribution(q_z_prime_pred.mean)
 
 		# reward
 		reward_pred = self.reward(z, actions, z_prime_pred)
@@ -201,15 +202,12 @@ class AbstractMDPTrainer(pl.LightningModule):
 		qs, q_s_prime, reward_pred, initiation = self.forward(s, a, executed)
 		logger.debug(f'Batch: s {s.shape}, a {a.shape}, s_prime {s_prime.shape}, reward {len(reward)}, executed {executed.shape}, duration {duration.shape}, initiation_target {initiation_target.shape}')
 		
-		nll_loss = -q_s_prime.log_prob(s_prime).sum(-1).mean()
+		nll_loss = -q_s_prime.log_prob(s_prime).mean()
 		init_loss = self._init_classifier_loss(initiation, initiation_target)
-		rew_loss = self._reward_loss(reward_pred, qs, q_s_prime, reward)
-		loss = nll_loss + init_loss + rew_loss
-		self.log_dict({'val_loss': loss,
-					   'nll_loss': nll_loss,
-					   'init_loss': init_loss,
-					   'rew_loss': rew_loss})
-		return loss
+		loss = nll_loss + init_loss
+		self.log_dict({'nll_loss': nll_loss,
+					   'init_loss': init_loss})
+		return nll_loss
 		
 	def configure_optimizers(self):
 		return torch.optim.Adam(self.parameters(), lr=self.lr)

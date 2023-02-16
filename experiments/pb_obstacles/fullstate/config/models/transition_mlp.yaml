@@ -4,6 +4,7 @@ features:
   n_options: ${model.n_options}
   hidden_dims:
   - 128
+  - 64
   activation: relu
 dist:
   type: deterministic
