@@ -60,7 +60,7 @@ class MADE(nn.Module):
             if not sample:
                 # distribute equally
                 n = in_dim-max_in.min()
-                max_out = np.arange(h_dim) % n + max_in.min()
+                max_out = torch.arange(h_dim) % n + max_in.min()
             else:
                 maxes = np.arange(max_in.min(), in_dim)
                 max_out = np.random.choice(maxes, h_dim, replace=True)

@@ -1,5 +1,5 @@
 import pytorch_lightning as pl
-from src.absmdp.trainer import AbstractMDPTrainer
+from src.absmdp.trainer_iaf import AbstractMDPTrainer
 from src.absmdp.datasets import PinballDataset
 from omegaconf import OmegaConf as oc
 import argparse
