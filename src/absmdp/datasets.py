@@ -120,7 +120,7 @@ class PinballDataset_(torch.utils.data.Dataset):
     
 
 class PinballDataset(pl.LightningDataModule):
-    def __init__(self, cfg):
+    def __init__(self, cfg, linear_transform=True):
         super().__init__()
         self.path_to_file = cfg.data_path
         self.n_reward_samples = cfg.n_reward_samples
@@ -135,8 +135,9 @@ class PinballDataset(pl.LightningDataModule):
         self.transforms = [
                             partial(compute_return, gamma=cfg.gamma), 
                             partial(one_hot_actions, cfg.n_options),
-                            partial(linear_projection, linear_projection=self.linear_transform)
                         ]
+        # if linear_projection:
+        #     self.transforms.append(partial(linear_projection, linear_projection=self.linear_transform))
 
     def setup(self, stage=None):
         self.dataset = PinballDataset_(self.path_to_file, self.n_reward_samples, self.transforms, obs_type=self.obs_type)
@@ -154,6 +155,7 @@ class PinballDataset(pl.LightningDataModule):
     def _load_linear_transform(self):
         path, file = os.path.split(self.path_to_file)
         if os.path.isfile(f'{path}/lintransform.pt'):
+            print(f'Linear transform loaded from {path}/lintransform.pt')
             self.linear_transform = torch.load(f'{path}/lintransform.pt')
             assert self.linear_transform.shape == torch.Size([self.cfg.state_dim, self.cfg.n_out_feats])
         else:

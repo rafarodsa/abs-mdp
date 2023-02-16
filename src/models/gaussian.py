@@ -7,7 +7,6 @@ from .configs import DiagGaussianConfig
 from functools import partial
 from torch.distributions import Normal, register_kl
 
-
 class DiagonalNormal(torch.distributions.Distribution):
     def __init__(self, mean, log_var):
         self._mean = mean
@@ -43,16 +42,19 @@ class DiagonalGaussianModule(nn.Module):
         super().__init__()
         self.feats = features
         self.output_dim = config.output_dim
-        self.min_var = torch.tensor(config.min_var)
-        self.max_var = torch.tensor(config.max_var) # TODO: should this be in log scale or not?
+        self.mean = nn.Linear(config.input_dim, config.output_dim)
+        self.log_var = nn.Linear(config.input_dim, config.output_dim)
+        self.min_var = torch.log(torch.tensor(config.min_std)) * 2
+        self.max_var = torch.log(torch.tensor(config.max_std)) * 2 # TODO: should this be in log scale or not?
 
     def forward(self, input):
         feats = self.feats(input)
-        mean, log_var = feats[..., :self.output_dim], feats[..., self.output_dim:]
+        mean, log_var = self.mean(F.relu(feats)), self.log_var(F.relu(feats))
         
         #softly constrain the variance
-        log_var = self.min_var + F.softplus(log_var - self.min_var)
         log_var = self.max_var - F.softplus(self.max_var - log_var)
+        log_var = self.min_var + F.softplus(log_var - self.min_var)
+       
     
         return mean, log_var
 
@@ -80,9 +82,11 @@ class DiagonalGaussianModule(nn.Module):
 class FixedVarGaussian(DiagonalGaussianModule):
     def __init__(self, features, config: DiagGaussianConfig):
         nn.Module.__init__(self)
+        
         self.feats = features
         self._log_var = torch.log(torch.tensor(config.var))
         self.register_buffer('log_var', self._log_var)
+        # self.mean = nn.Linear(config.input_dim, config.output_dim)
     
     def forward(self, input):
         mean = self.feats(input)
@@ -115,3 +119,4 @@ def DiagonalGaussian(config: DiagGaussianConfig):
 def Deterministic(config: DiagGaussianConfig):
     config.var = 1.
     return partial(FixedVarGaussian, config=config)
+
