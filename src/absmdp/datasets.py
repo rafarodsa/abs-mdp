@@ -129,6 +129,7 @@ class PinballDataset(pl.LightningDataModule):
         self.obs_type = cfg.obs_type
         self.train_split, self.val_split, self.test_split = cfg.train_split, cfg.val_split, cfg.test_split
         self.shuffle = cfg.shuffle
+
         self.cfg = cfg
         
         self._load_linear_transform()
@@ -231,5 +232,3 @@ class InitiationDataset(pl.LightningDataModule):
     
     def test_dataloader(self):
         return DataLoader(self.test, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
-
-    
