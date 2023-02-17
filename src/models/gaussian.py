@@ -5,7 +5,7 @@ from torch.nn import functional as F
 from .configs import DiagGaussianConfig
 
 from functools import partial
-from torch.distributions import Normal, register_kl
+from torch.distributions import Normal, register_kl, MultivariateNormal, kl_divergence
 
 
 class DiagonalNormal(torch.distributions.Distribution):
@@ -20,12 +20,19 @@ class DiagonalNormal(torch.distributions.Distribution):
     @property
     def var(self):
         return torch.exp(self._log_var)
+    
+    @property
+    def std(self):
+        return torch.exp(self._log_var/2)
 
     def sample(self, n_samples=1):
         return self.dist.rsample(torch.zeros(n_samples).size())
     
     def log_prob(self, x):
-        return self.dist.log_prob(x).sum(-1)
+        logp = self.dist.log_prob(x).sum(-1)
+        # p_m = MultivariateNormal(self.mean, covariance_matrix=torch.diag_embed(self.var))
+        # assert torch.allclose(p_m.log_prob(x), logp)
+        return logp
     
     def entropy(self):
         return self.dist.entropy().sum(-1)
@@ -34,8 +41,19 @@ class DiagonalNormal(torch.distributions.Distribution):
         return DiagonalNormal(self.mean.detach(), self._log_var.detach())
 
 @register_kl(DiagonalNormal, DiagonalNormal)
-def diag_normal_kl(p: DiagonalNormal, q: DiagonalNormal):
-    return torch.distributions.kl_divergence(p.dist, q.dist).sum(-1)
+def diag_normal_kl(p: DiagonalNormal, q: DiagonalNormal): 
+    kl = torch.distributions.kl_divergence(p.dist, q.dist).sum(-1)
+
+    # TEST
+    if False:
+        cov= torch.diag_embed(p.var)
+        assert torch.allclose(torch.diagonal(cov, dim1=1, dim2=2), p.var)
+        p_m = MultivariateNormal(p.mean, covariance_matrix=torch.diag_embed(p.var))
+        q_m = MultivariateNormal(q.mean, covariance_matrix=torch.diag_embed(q.var))
+        kl_test = kl_divergence(p_m, q_m)
+        assert torch.allclose(kl, kl_test)
+
+    return kl
 
 class DiagonalGaussianModule(nn.Module):
 
@@ -43,8 +61,8 @@ class DiagonalGaussianModule(nn.Module):
         super().__init__()
         self.feats = features
         self.output_dim = config.output_dim
-        self.min_var = torch.tensor(config.min_var)
-        self.max_var = torch.tensor(config.max_var) # TODO: should this be in log scale or not?
+        self.min_var = torch.log(torch.tensor(config.min_var)) * 2
+        self.max_var = torch.log(torch.tensor(config.max_var)) * 2 
 
     def forward(self, input):
         feats = self.feats(input)
@@ -53,7 +71,7 @@ class DiagonalGaussianModule(nn.Module):
         #softly constrain the variance
         log_var = self.min_var + F.softplus(log_var - self.min_var)
         log_var = self.max_var - F.softplus(self.max_var - log_var)
-    
+
         return mean, log_var
 
     def sample_n_dist(self, input, n_samples=1):
@@ -90,7 +108,7 @@ class FixedVarGaussian(DiagonalGaussianModule):
 
     def sample_n_dist(self, input, n_samples=1):
         mean = self.forward(input)
-        std = torch.exp(self.log_var / 2)
+        std = torch.exp(self.log_var / 2) * torch.ones_like(mean)
         std_normal = DiagonalNormal(torch.zeros_like(mean), torch.ones_like(std))
         q = DiagonalNormal(mean, std)
         z = q.sample(n_samples)
@@ -98,14 +116,14 @@ class FixedVarGaussian(DiagonalGaussianModule):
 
     def sample(self, input, n_samples):
         mean = self.forward(input)
-        std = torch.exp(self.log_var / 2)
+        std = torch.exp(self.log_var / 2) * torch.ones_like(mean)
         q = DiagonalNormal(mean, std)
         z = q.sample(n_samples)
         return z
     
     def distribution(self, input):
         mean = self.forward(input)
-        std = torch.exp(self.log_var / 2)
+        std = torch.exp(self.log_var / 2) * torch.ones_like(mean)
         q = DiagonalNormal(mean, std)
         return q
 
