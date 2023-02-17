@@ -2,17 +2,17 @@
 # Full State observation
 # Gridworld abstraction
 experiment_cwd: 'experiments/pb_obstacles/fullstate'
-lr: 1e-4
+lr: 1e-5
 batch_size: 128
-epochs: 10
-accelerator: cpu
+epochs: 50
+accelerator: gpu
 devices: 1
 save_path: ${experiment_cwd}/mdps
 loss:
-  grounding_const: 10
-  kl_const:  0.1
+  grounding_const: 1
+  kl_const:  1
   reward_const: 1.
-  transition_const: 0.1
+  transition_const: 1
   init_class_const: 1.
   kl_balance: 0.01
   n_samples: 1
@@ -26,7 +26,7 @@ data:
   shuffle: True  
   n_reward_samples: 5
   n_options: ${model.n_options}
-  n_out_feats: 20
+  n_out_feats: 4
   state_dim : 4
   obs_type: simple
   gamma: 0.99

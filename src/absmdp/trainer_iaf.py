@@ -81,7 +81,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 
 		q_s = self.decoder.distribution(z)
 
-		return q_z, q_z_std, q_z_prime_pred, q_z_prime_encoder, q_s_prime, q_s
+		return q_z, q_z_std, q_z_prime_pred, q_z_prime_encoder.log_prob(z_prime_pred), q_s_prime, q_s # TODO check p_phi(z'|s')
 		
 	def reward(self, z, a, z_prime):
 		n_samples = self.hyperparams.n_samples
@@ -180,7 +180,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		# kl_2 = torch.distributions.kl_divergence(encoder_dist.detach(), transition_dist)
 		
 		# KL balancing
-		return -encoder_dist.entropy().mean() - transition_dist.mean()
+		return encoder_dist.detach().mean() - transition_dist.mean()
 	
 	def training_step(self, batch, batch_idx):
 		loss, logs = self.step(batch, batch_idx)
@@ -193,7 +193,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		qs, q_s_prime, reward_pred, initiation = self.forward(s, a, executed)
 		logger.debug(f'Batch: s {s.shape}, a {a.shape}, s_prime {s_prime.shape}, reward {len(reward)}, executed {executed.shape}, duration {duration.shape}, initiation_target {initiation_target.shape}')
 		
-		nll_loss = -q_s_prime.log_prob(s_prime).sum(-1).mean()
+		nll_loss = -q_s_prime.log_prob(s_prime).mean()
 		init_loss = self._init_classifier_loss(initiation, initiation_target)
 		rew_loss = self._reward_loss(reward_pred, qs, q_s_prime, reward)
 		loss = nll_loss + init_loss + rew_loss

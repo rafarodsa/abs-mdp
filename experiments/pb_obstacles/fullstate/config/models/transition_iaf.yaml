@@ -4,11 +4,11 @@ features:
   n_options: ${model.n_options}
   hidden_dims:
   - 128
-  activation: relu
+  activation: elu
 dist:
   type: iaf
-  num_blocks: 5
+  num_blocks: 20
   hidden_dims:
-    - 64
+    - 128
   input_dim: 128
   output_dim: ${model.latent_dim}

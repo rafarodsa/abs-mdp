@@ -55,7 +55,7 @@ class DiagonalGaussianModule(nn.Module):
         log_var = self.max_var - F.softplus(self.max_var - log_var)
         log_var = self.min_var + F.softplus(log_var - self.min_var)
        
-    
+        print(self.min_var, log_var[0:2], self.max_var)
         return mean, log_var
 
     def sample_n_dist(self, input, n_samples=1):

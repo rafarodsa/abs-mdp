@@ -10,5 +10,5 @@ dist:
   type: diag_gaussian
   input_dim: ${model.decoder.features.output_dim}
   output_dim: ${model.obs_dims}
-  min_std: 1e-6
+  min_std: 1e-3
   max_std: 0.5

@@ -25,7 +25,7 @@ class IAFBlock(nn.Module):
         self.cond = nn.Linear(cond_dim, self.input_dim)
     def forward(self, x, h=None):
         _x = x + self.cond(h) if h is not None else x
-        mean, scale = self.mean(x), F.sigmoid(self.scale(x))
+        mean, scale = self.mean(_x), torch.sigmoid(self.scale(_x))
         z = x * scale + mean * (1-scale)
         return z, mean, scale
 
@@ -64,7 +64,7 @@ class IAFDist(nn.Module):
         return z
 
     def sample_n_dist(self, h, n_samples=1):
-        epsilon = torch.randn(n_samples * h.shape[0], self.cfg.output_dim)
+        epsilon = torch.randn(n_samples * h.shape[0], self.cfg.output_dim).to(h.device)
         z, log_det = self.forward(epsilon, h)
         return z, log_det.sum(-1), None
 
