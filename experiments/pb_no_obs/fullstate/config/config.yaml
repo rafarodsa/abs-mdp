@@ -4,24 +4,25 @@
 experiment_cwd: 'experiments/pb_no_obs/fullstate'
 lr: 1e-4
 batch_size: 128
-epochs: 10
-accelerator: cpu
+epochs: 50
+accelerator: gpu
 devices: 1
 save_path: ${experiment_cwd}/mdps
 loss:
   grounding_const: 10
   kl_const:  0.1
-  reward_const: 1.
+  reward_const: 0.
   transition_const: 0.1
-  init_class_const: 1.
+  init_class_const: 0.
+  kl_balance: 0.01
   n_samples: 1
 data:
-  data_path: ${experiment_cwd}/data/pinball_no_obstacle_rewards.pt
+  data_path: ${experiment_cwd}/data/no_obs.pt
   batch_size: 32
   num_workers: 4
-  train_split: 0.9
+  train_split: 0.8
   val_split: 0.1
-  test_split: 0.
+  test_split: 0.1
   shuffle: True
   obs_type: simple
   n_reward_samples: 5
