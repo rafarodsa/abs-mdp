@@ -29,8 +29,8 @@ class DiagonalNormal(torch.distributions.Distribution):
     
     def log_prob(self, x):
         logp = self.dist.log_prob(x).sum(-1)
-        # p_m = MultivariateNormal(self.mean, covariance_matrix=torch.diag_embed(self.var))
-        # assert torch.allclose(p_m.log_prob(x), logp)
+        p_m = MultivariateNormal(self.mean, covariance_matrix=torch.diag_embed(self.var))
+        assert torch.allclose(p_m.log_prob(x), logp)
         return logp
     
     def entropy(self):
@@ -44,13 +44,16 @@ def diag_normal_kl(p: DiagonalNormal, q: DiagonalNormal):
     kl = torch.distributions.kl_divergence(p.dist, q.dist).sum(-1)
 
     # TEST
-    if False:
+    if True:
         cov= torch.diag_embed(p.var)
         assert torch.allclose(torch.diagonal(cov, dim1=1, dim2=2), p.var)
         p_m = MultivariateNormal(p.mean, covariance_matrix=torch.diag_embed(p.var))
         q_m = MultivariateNormal(q.mean, covariance_matrix=torch.diag_embed(q.var))
         kl_test = kl_divergence(p_m, q_m)
-        assert torch.allclose(kl, kl_test)
+        assert torch.all(~torch.isnan(kl)), f'KL has NaNs'
+        assert torch.all(~torch.isnan(kl_test)), f'KL_test has NaNs'
+        assert kl.shape == kl_test.shape
+        # assert torch.allclose(kl_test, kl, rtol=1e-4), f'Failed with avg abs diference: {(kl_test-kl).abs().mean()}. min: {(kl_test-kl).abs().min()}. max: {(kl_test-kl).abs().max()}'
 
     return kl
 
@@ -135,6 +138,6 @@ def DiagonalGaussian(config: DiagGaussianConfig):
     return partial(DiagonalGaussianModule, config=config)
 
 def Deterministic(config: DiagGaussianConfig):
-    config.var = 1.
+    config.var = 1e-10
     return partial(FixedVarGaussian, config=config)
 

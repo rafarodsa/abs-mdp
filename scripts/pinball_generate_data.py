@@ -52,7 +52,8 @@ if __name__== "__main__":
 
     env = Pinball(config=args.env_config, width=grid_size, height=grid_size, render_mode='rgb_array') 
 
-    init_states = env.sample_init_states(args.n_samples)
+    # init_states = env.sample_init_states(args.n_samples) # sample uniformly the velocities.
+    init_states = env.sample_initial_positions(args.n_samples) # sample uniform (valid) positions with zero velocities.
 
     options = OptionFactory(env)
     max_exec_time = args.max_exec_time

@@ -6,6 +6,7 @@
 	date: January 2023
 """
 import torch
+import torch.nn.functional as F
 import pytorch_lightning as pl
 
 
@@ -45,7 +46,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		z, q_z, _ = self.encoder.sample_n_dist(state)
 		logger.debug(f'Encoder: z {z.shape}')
 		z = z.squeeze() # squeezing sample dim
-		z_prime = self.transition(torch.cat([q_z.mean, action], dim=-1))
+		z_prime = self.transition(torch.cat([z, action], dim=-1))
 		logger.debug(f'Transition: z {z.shape}, z_prime {z_prime.shape}, action {action.shape}, executed {executed.shape}')
 	
 		q_s_prime = self.decoder.distribution(z_prime) 
@@ -73,12 +74,12 @@ class AbstractMDPTrainer(pl.LightningModule):
 		
 		z = z.squeeze(0) # z.squeeze sample dimension because we are using one sample.
 		z_prime_pred, q_z_prime_pred, _ = self.transition.sample_n_dist(torch.cat([z, actions], dim=-1))
-		z_prime_pred = z_prime_pred.squeeze(0)
+		z_prime_pred = q_z_prime_pred.mean.squeeze(0) # TODO: predict mean as it's a deterministic function
 		logger.debug(f"Transition: z {z.shape}, z' {z_prime_pred.shape}")
 		
 		# decode next latent state
-		# q_s_prime = self.decoder.distribution(z_prime_pred)
-		q_s_prime = self.decoder.distribution(q_z_prime_pred.mean)
+		q_s_prime = self.decoder.distribution(z_prime)
+		# q_s_prime = self.decoder.distribution(z_prime)
 
 		# reward
 		reward_pred = self.reward(z, actions, z_prime_pred)
@@ -107,6 +108,9 @@ class AbstractMDPTrainer(pl.LightningModule):
 	
 	def step(self, batch, batch_idx):
 		s, a, s_prime, reward, executed, duration, initiation_target = batch
+
+
+		assert torch.all(executed) # check all samples are successful executions.
 		
 		q_z, q_z_std, q_z_prime_pred, q_z_prime_encoded, s_prime_dist, reward_pred, initiation_pred, s_dist = self._run_step(s, a, s_prime, executed)
 
@@ -143,7 +147,8 @@ class AbstractMDPTrainer(pl.LightningModule):
 		s_ = s.unsqueeze(0).repeat_interleave(n_samples, dim=0)
 		log_probs_s = q_s_pred.log_prob(s_)
 
-		return -(log_probs + log_probs_s).mean()
+		return -log_probs.mean() - log_probs_s.mean()
+		# return F.mse_loss(s_prime_, q_s_prime_pred.mean.squeeze())
 		
 	def _init_state_dist_loss(self, q_z, std_normal_z) -> torch.Tensor:
 		'''
@@ -203,10 +208,13 @@ class AbstractMDPTrainer(pl.LightningModule):
 		logger.debug(f'Batch: s {s.shape}, a {a.shape}, s_prime {s_prime.shape}, reward {len(reward)}, executed {executed.shape}, duration {duration.shape}, initiation_target {initiation_target.shape}')
 		
 		nll_loss = -q_s_prime.log_prob(s_prime).mean()
+		mse_error = F.mse_loss(s_prime, q_s_prime.mean.squeeze()).sqrt()
+		print(f'mse_error {mse_error}')
 		init_loss = self._init_classifier_loss(initiation, initiation_target)
 		loss = nll_loss + init_loss
 		self.log_dict({'nll_loss': nll_loss,
-					   'init_loss': init_loss})
+					   'init_loss': init_loss,
+					   'mse_error': mse_error})
 		return nll_loss
 		
 	def configure_optimizers(self):

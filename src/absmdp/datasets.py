@@ -66,6 +66,7 @@ class PinballDataset_(torch.utils.data.Dataset):
     def __init__(self, path_to_file, n_reward_samples=5, transforms=None, obs_type='full', dtype=torch.float32):
         self.data, self.rewards = torch.load(path_to_file)
         self.data = [Transition(*d) for d in self.data] # transform all to named tuple
+        self.data = self._filter_failed_executions(self.data)
         self.n_reward_samples = n_reward_samples
         self.transforms = transforms
         self.dtype = dtype
