@@ -34,14 +34,14 @@ def _MLP(input_dim: int, hidden_dim: List[int], output_dim: int = None, activati
         else:
             raise ValueError('Invalid activation function')
     if output_dim is not None:
-        layers.append(nn.Linear(hidden_dim[-1], output_dim)) 
+        layers.append(nn.Linear(hidden_dim[-1], output_dim) if len(hidden_dim)  > 0 else nn.Linear(input_dim, output_dim)) 
     return nn.Sequential(*layers)
 
 def MLP(cfg: MLPConfig):
     return _MLP(cfg.input_dim, cfg.hidden_dims, cfg.output_dim, cfg.activation)
 
 def DynamicsMLP(cfg):
-    return _MLP(cfg.latent_dim + cfg.n_options + 1, cfg.hidden_dims, cfg.latent_dim, cfg.activation)
+    return _MLP(cfg.latent_dim + cfg.n_options, cfg.hidden_dims, cfg.latent_dim, cfg.activation)
 
 def RewardMLP(cfg):
     return _MLP(2*cfg.latent_dim + cfg.n_options, cfg.hidden_dims, 1, cfg.activation)
