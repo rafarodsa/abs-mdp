@@ -5,9 +5,6 @@ experiment_cwd: 'experiments/pb_no_obs/fullstate'
 lr: 0.0038263869045413275
 batch_size: 256
 epochs: 10
-lr: 0.0038263869045413275
-batch_size: 256
-epochs: 10
 accelerator: gpu
 devices: 1
 save_path: ${experiment_cwd}/mdps
