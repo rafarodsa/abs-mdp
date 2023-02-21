@@ -35,7 +35,7 @@ if __name__ == "__main__":
     for i in tqdm(range(max(option_n)+1)):
         rewards_per_action[i] = (o[options == i], next_o[options == i], rewards[options == i])
 
-    dataset = list(zip(o, option_n, next_o, rewards, executed, duration, initiation_masks))
+    # dataset = list(zip(o, option_n, next_o, rewards, executed, duration, initiation_masks))
 
     if args.save_path is None:
         print(f'Overwriting original file at {args.dataset_path}')

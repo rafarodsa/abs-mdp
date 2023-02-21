@@ -107,7 +107,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		return self.reward_fn(input).squeeze()
 	
 	def step(self, batch, batch_idx):
-		s, a, s_prime, reward, done, executed, duration, initsets, p0 = batch.obs, batch.action, batch.next_obs, batch.reward, batch.done, batch.executed, batch.duration, batch.initsets, batch.p0
+		s, a, s_prime, reward, done, executed, duration, initsets, p0 = batch.obs, batch.action, batch.next_obs, batch.rewards, batch.done, batch.executed, batch.duration, batch.initsets, batch.p0
 		
 		q_z, q_z_std, q_z_prime_pred, q_z_prime_encoded, s_prime_dist, reward_pred, initiation_pred, s_dist = self._run_step(s, a, s_prime, executed)
 
@@ -200,7 +200,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 
 	def validation_step(self, batch, batch_idx):
 		logger.debug('Validation step')
-		s, a, s_prime, reward, executed, duration, initiation_target = batch
+		s, a, s_prime, reward, executed, duration, initiation_target = batch.obs, batch.action, batch.next_obs, batch.rewards, batch.executed, batch.duration, batch.initsets
 		qs, q_s_prime, reward_pred, initiation = self.forward(s, a, executed)
 		logger.debug(f'Batch: s {s.shape}, a {a.shape}, s_prime {s_prime.shape}, reward {len(reward)}, executed {executed.shape}, duration {duration.shape}, initiation_target {initiation_target.shape}')
 		

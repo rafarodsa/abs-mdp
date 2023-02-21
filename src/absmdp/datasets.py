@@ -1,16 +1,16 @@
 '''
     Pinball Environment Datasets.
 '''
-
+import os
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader, random_split
 
 import pytorch_lightning as pl
-from functools import partial
+from functools import partial, reduce
 from typing import NamedTuple, List, Dict, Optional
-import os
+
 
 class InitiationSet(NamedTuple):
     obs: torch.Tensor
@@ -77,6 +77,7 @@ class PinballDataset_(torch.utils.data.Dataset):
     def __getitem__(self, index):
         datum = self.data[index]
         datum = self._set_dtype(datum)
+        obs, next_obs = datum.obs, datum.next_obs
         rew = self._get_rewards(datum, n_samples=self.n_reward_samples-1)
         rew[-1] = rew[-1].to(self.dtype) # rewards to dtype
         if self.obs_type == 'pixels':
@@ -91,11 +92,12 @@ class PinballDataset_(torch.utils.data.Dataset):
         return len(self.data)
 
     def _set_dtype(self, datum):
-        s, s_, initsets = datum.obs, datum.next_obs, datum.initsets
-        s = torch.from_numpy(s).type(self.dtype)
-        s_ = torch.from_numpy(s_).type(self.dtype)
-        init_mask = torch.from_numpy(init_mask).type(self.dtype)
-        return datum.modify(obs=s, next_obs=s_, initsets=initsets)
+        s, s_, initsets, executed = datum.obs, datum.next_obs, datum.initsets, datum.executed
+        s = torch.from_numpy(s).to(self.dtype)
+        s_ = torch.from_numpy(s_).to(self.dtype)
+        initsets = torch.from_numpy(initsets).to(self.dtype)
+        executed = torch.tensor(executed).to(self.dtype)
+        return datum.modify(obs=s, next_obs=s_, initsets=initsets, executed=executed, info={})
 
     def _get_rewards(self, datum, n_samples):
         current_obs, action, current_next_obs, current_rewards = datum.obs, datum.action, datum.next_obs, datum.rewards
@@ -113,7 +115,7 @@ class PinballDataset_(torch.utils.data.Dataset):
 
         current_rewards = np.array(current_rewards)[None, :]
         rewards = np.concatenate([current_rewards, rews[sample]], axis=0)
-        return [torch.from_numpy(obs).to(self.dtype), torch.from_numpy(next_obs).to(self.dtype), torch.from_numpy(rewards)]
+        return [torch.from_numpy(obs).to(self.dtype), torch.from_numpy(next_obs).to(self.dtype), torch.from_numpy(rewards).to(self.dtype)]
 
     def _process_pixel_obs(self, obs):
         return obs.type(self.dtype).permute(2, 0, 1)

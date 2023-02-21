@@ -74,7 +74,7 @@ def run_options(env, init_state, options, obs_type='simple', max_exec_time=200):
         initiation_mask_s_prime = compute_initiation_masks(next_s, options)
         rewards = rewards + [0] * (max_exec_time - len(rewards))
  
-        dataset.append(Transition(o, option_n, next_o, rewards, info['done'], executed, duration, np.array([initiation_mask_s, initiation_mask_s_prime]), info))
+        dataset.append(Transition(o, option_n, next_o, rewards, info['done'], executed, duration, np.array([initiation_mask_s, initiation_mask_s_prime]), info, np.float32(True)))
 
     return list(dataset), infos
 

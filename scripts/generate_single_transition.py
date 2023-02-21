@@ -66,7 +66,7 @@ if __name__== "__main__":
 
     transition_samples = reduce(lambda r, acc: list(r) + list(acc), dataset, [])
     info = reduce(lambda r, acc: list(r) + list(acc), info, [])
-    o, j, next_o, rewards, done, executed, duration, initiation_masks, _ = zip(*transition_samples)
+    o, j, next_o, rewards, done, executed, duration, initiation_masks, _, _ = zip(*transition_samples)
     stats = {}
     _r = np.array(list(map(lambda x: sum(x), rewards)))
     _r_len = list(map(len, rewards))
