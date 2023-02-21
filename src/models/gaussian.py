@@ -138,6 +138,6 @@ def DiagonalGaussian(config: DiagGaussianConfig):
     return partial(DiagonalGaussianModule, config=config)
 
 def Deterministic(config: DiagGaussianConfig):
-    config.var = 1e-10
+    config.var = 1e-15
     return partial(FixedVarGaussian, config=config)
 

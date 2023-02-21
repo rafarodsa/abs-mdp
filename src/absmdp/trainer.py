@@ -79,8 +79,8 @@ class AbstractMDPTrainer(pl.LightningModule):
 		logger.debug(f"Transition: z {z.shape}, z' {z_prime_pred.shape}")
 		
 		# decode next latent state
+		# q_s_prime = self.decoder.distribution(z_prime_pred)
 		q_s_prime = self.decoder.distribution(z_prime)
-		# q_s_prime = self.decoder.distribution(z_prime)
 
 		# reward
 		reward_pred = self.reward(z, actions, z_prime_pred)
@@ -117,8 +117,8 @@ class AbstractMDPTrainer(pl.LightningModule):
 		q_z, q_z_std, q_z_prime_pred, q_z_prime_encoded, s_prime_dist, reward_pred, initiation_pred, s_dist = self._run_step(s, a, s_prime, executed)
 
 		# compute losses
-		prediction_loss = self._prediction_loss(s_prime, s_prime_dist, s, s_dist) 
-		kl_loss = self._init_state_dist_loss(q_z, q_z_std) 
+		prediction_loss = self._prediction_loss(s_prime, s_prime_dist, s, s_dist, p0) 
+		kl_loss = self._init_state_dist_loss(q_z, q_z_std, p0) 
 		#reward_loss = self._reward_loss(reward_pred, s_dist, s_prime_dist, reward) 
 		init_classifier_loss = self._init_classifier_loss(initiation_pred, initsets) 
 		transition_loss = self._transition_loss(q_z_prime_encoded, q_z_prime_pred, alpha=self.hyperparams.kl_balance) 
@@ -141,24 +141,26 @@ class AbstractMDPTrainer(pl.LightningModule):
 		logger.debug(f'Losses: {logs}')
 		return loss, logs
 
-	def _prediction_loss(self, s_prime, q_s_prime_pred, s, q_s_pred):
+	def _prediction_loss(self, s_prime, q_s_prime_pred, s, q_s_pred, p0):
 		n_samples = self.hyperparams.n_samples
 		s_prime_ = s_prime.unsqueeze(0).repeat_interleave(n_samples, dim=0)
 		log_probs = q_s_prime_pred.log_prob(s_prime_)
 
 		s_ = s.unsqueeze(0).repeat_interleave(n_samples, dim=0)
-		log_probs_s = q_s_pred.log_prob(s_)
+		log_probs_s = q_s_pred.log_prob(s_) * p0
 
 		return -log_probs.mean() - log_probs_s.mean()
 		# return F.mse_loss(s_prime_, q_s_prime_pred.mean.squeeze())
 		
-	def _init_state_dist_loss(self, q_z, std_normal_z) -> torch.Tensor:
+	def _init_state_dist_loss(self, q_z, std_normal_z, p0) -> torch.Tensor:
 		'''
 			KL regularization. We use free bits to ensure that the KL is at least 1.
 			TODO: modify this to learn the initial state distribution
 		'''
-		kl = torch.distributions.kl_divergence(q_z, std_normal_z).mean()
-		return torch.max(torch.tensor(1.), kl)
+		kl = (torch.distributions.kl_divergence(q_z, std_normal_z) * p0).mean()
+		# return torch.max(torch.tensor(1.), kl)
+		return kl
+
 
 	def _reward_loss(self, reward_pred, q_s, q_s_prime, reward_target):
 		logger.debug('Reward loss')
@@ -212,7 +214,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		
 		nll_loss = -q_s_prime.log_prob(s_prime).mean()
 		mse_error = F.mse_loss(s_prime, q_s_prime.mean.squeeze()).sqrt()
-		print(f'mse_error {mse_error}')
+		print(f'nll_error {nll_loss}')
 		init_loss = self._init_classifier_loss(initiation, initiation_target)
 		loss = nll_loss + init_loss
 		self.log_dict({'nll_loss': nll_loss,
