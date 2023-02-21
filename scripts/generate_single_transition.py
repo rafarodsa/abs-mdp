@@ -52,14 +52,19 @@ if __name__== "__main__":
 
     env = Pinball(config=args.env_config, width=grid_size, height=grid_size, render_mode='rgb_array') 
 
-    init_states = env.sample_init_states(args.n_samples)
+    # init_states = env.sample_init_states(args.n_samples) # sample uniformly the velocities.
+    init_states = env.sample_initial_positions(args.n_samples) # sample uniform (valid) positions with zero velocities.
 
     options = OptionFactory(env)
     max_exec_time = args.max_exec_time
     
     options_desc = {i: str(o) for i, o in enumerate(options)}
 
+<<<<<<< HEAD:scripts/generate_single_transition.py
     results = Parallel(n_jobs=args.n_jobs)(delayed(run_options)(env, tuple(init_states[i]), options, obs_type=args.observation, max_exec_time=max_exec_time) for i in tqdm(range(args.n_samples)))        
+=======
+    results = Parallel(n_jobs=args.n_jobs)(delayed(run_option)(env, tuple(init_states[i]), options, obs_type=args.observation, max_exec_time=max_exec_time) for i in tqdm(range(args.n_samples)))     
+>>>>>>> debugging-loss:scripts/pinball_generate_data.py
 
     ##### Print dataset statistics
     dataset, info = zip(*results)
@@ -100,7 +105,7 @@ if __name__== "__main__":
             'state_change_mean': state_change_mean
         }
 
-        print(f'--------Option-{i}: {options_desc[i]}---------')
+        print(f"--------Option-{i}: {options_desc[i]}---------")
         print(f"Executed {n_executions}/{args.n_samples} times")
         print(f"Average duration {avg_duration}")
         print(f"Average reward {option_rewards.mean()}. Max reward: {option_rewards.max()}. Min reward: {option_rewards.min()}")

@@ -1,16 +1,26 @@
 '''
     Pinball Environment Datasets.
 '''
+<<<<<<< HEAD
 import os
+=======
+
+>>>>>>> debugging-loss
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader, random_split
 
 import pytorch_lightning as pl
+<<<<<<< HEAD
 from functools import partial, reduce
 from typing import NamedTuple, List, Dict, Optional
 
+=======
+from functools import partial
+from typing import NamedTuple, List
+import os
+>>>>>>> debugging-loss
 
 class InitiationSet(NamedTuple):
     obs: torch.Tensor
@@ -23,6 +33,7 @@ class InitiationSet(NamedTuple):
         return InitiationSet(**params)
 
 class Transition(NamedTuple):
+<<<<<<< HEAD
     obs: np.ndarray
     action: int
     next_obs: np.ndarray
@@ -33,6 +44,15 @@ class Transition(NamedTuple):
     initsets: np.ndarray
     info: Dict
     p0: Optional[np.float32]
+=======
+    obs: torch.Tensor
+    action: torch.Tensor
+    next_obs: torch.Tensor
+    rewards: List[torch.Tensor]
+    executed: torch.Tensor
+    duration: torch.Tensor
+    init_mask: torch.Tensor
+>>>>>>> debugging-loss
 
     def modify(self, **kwargs):
         params = self._asdict()
@@ -67,8 +87,14 @@ def linear_projection(datum, linear_projection):
 
 class PinballDataset_(torch.utils.data.Dataset):
     def __init__(self, path_to_file, n_reward_samples=5, transforms=None, obs_type='full', dtype=torch.float32):
+<<<<<<< HEAD
         self.trajectories, self.rewards = torch.load(path_to_file)
         self.data = self.process_trajectories(self.trajectories)
+=======
+        self.data, self.rewards = torch.load(path_to_file)
+        self.data = [Transition(*d) for d in self.data] # transform all to named tuple
+        self.data = self._filter_failed_executions(self.data)
+>>>>>>> debugging-loss
         self.n_reward_samples = n_reward_samples
         self.transforms = transforms
         self.dtype = dtype
@@ -76,14 +102,22 @@ class PinballDataset_(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         datum = self.data[index]
+<<<<<<< HEAD
         datum = self._set_dtype(datum)
         obs, next_obs = datum.obs, datum.next_obs
+=======
+        obs, action, next_obs, rew, executed, duration, init_mask = self._set_dtype(datum)
+>>>>>>> debugging-loss
         rew = self._get_rewards(datum, n_samples=self.n_reward_samples-1)
         rew[-1] = rew[-1].to(self.dtype) # rewards to dtype
         if self.obs_type == 'pixels':
             obs = self._process_pixel_obs(obs)
             next_obs = self._process_pixel_obs(next_obs)
+<<<<<<< HEAD
         datum = datum.modify(obs=obs, next_obs=next_obs, rewards=rew)
+=======
+        datum = Transition(obs, action, next_obs, rew, executed, duration, init_mask)
+>>>>>>> debugging-loss
         for t in self.transforms:
             datum = t(datum)
         return datum
@@ -115,7 +149,11 @@ class PinballDataset_(torch.utils.data.Dataset):
 
         current_rewards = np.array(current_rewards)[None, :]
         rewards = np.concatenate([current_rewards, rews[sample]], axis=0)
+<<<<<<< HEAD
         return [torch.from_numpy(obs).to(self.dtype), torch.from_numpy(next_obs).to(self.dtype), torch.from_numpy(rewards).to(self.dtype)]
+=======
+        return [torch.from_numpy(obs).to(self.dtype), torch.from_numpy(next_obs).to(self.dtype), torch.from_numpy(rewards)]
+>>>>>>> debugging-loss
 
     def _process_pixel_obs(self, obs):
         return obs.type(self.dtype).permute(2, 0, 1)
@@ -123,13 +161,16 @@ class PinballDataset_(torch.utils.data.Dataset):
     def _filter_failed_executions(self, data):
         return [datum for datum in data if datum.executed == 1]
     
+<<<<<<< HEAD
     def process_trajectories(self, trajectories):
         data = reduce(lambda x, acc: x + acc, trajectories, [])
         data = self._filter_failed_executions(data)
         return data
+=======
+>>>>>>> debugging-loss
 
 class PinballDataset(pl.LightningDataModule):
-    def __init__(self, cfg):
+    def __init__(self, cfg, linear_transform=True):
         super().__init__()
         self.path_to_file = cfg.data_path
         self.n_reward_samples = cfg.n_reward_samples
@@ -145,8 +186,14 @@ class PinballDataset(pl.LightningDataModule):
         self.transforms = [
                             partial(compute_return, gamma=cfg.gamma), 
                             partial(one_hot_actions, cfg.n_options),
+<<<<<<< HEAD
                             partial(linear_projection, linear_projection=self.linear_transform)
                         ]
+=======
+                        ]
+        # if linear_projection:
+        #     self.transforms.append(partial(linear_projection, linear_projection=self.linear_transform))
+>>>>>>> debugging-loss
 
     def setup(self, stage=None):
         self.dataset = PinballDataset_(self.path_to_file, self.n_reward_samples, self.transforms, obs_type=self.obs_type)
@@ -164,6 +211,10 @@ class PinballDataset(pl.LightningDataModule):
     def _load_linear_transform(self):
         path, file = os.path.split(self.path_to_file)
         if os.path.isfile(f'{path}/lintransform.pt'):
+<<<<<<< HEAD
+=======
+            print(f'Linear transform loaded from {path}/lintransform.pt')
+>>>>>>> debugging-loss
             self.linear_transform = torch.load(f'{path}/lintransform.pt')
             assert self.linear_transform.shape == torch.Size([self.cfg.state_dim, self.cfg.n_out_feats])
         else:
@@ -238,4 +289,8 @@ class InitiationDataset(pl.LightningDataModule):
         return DataLoader(self.val, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
     
     def test_dataloader(self):
+<<<<<<< HEAD
         return DataLoader(self.test, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
+=======
+        return DataLoader(self.test, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
+>>>>>>> debugging-loss
