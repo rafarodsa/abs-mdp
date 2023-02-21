@@ -6,6 +6,10 @@ import argparse
 
 import logging
 # load the config
+
+def save_model(save_path):
+    pass
+
 def run(cfg):
     
     model = AbstractMDPTrainer(cfg) 
@@ -16,7 +20,7 @@ def run(cfg):
                         gpus=cfg.devices if cfg.accelerator == "gpu" else None,
                         max_epochs=cfg.epochs, 
                         auto_scale_batch_size=True,
-                        default_root_dir=cfg.save_path
+                        default_root_dir=f'{cfg.save_path}/runs'
                     )
     trainer.fit(model, data)
     return model

@@ -50,6 +50,12 @@ def objective(cfg, trial):
     
     trainer.logger.log_hyperparams(model.hparams)
     trainer.fit(model, dataset)
+    # print(f'Trial {trial.number}')
+    # print("  Value: {}".format(trial.value))
+    # print("  Params: ")
+    # for key, value in trial.params.items():
+    #     print("    {}: {}".format(key, value))
+
     return trainer.callback_metrics["nll_loss"].item()
 
 def tune():
@@ -58,7 +64,7 @@ def tune():
     ## Parser
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default=default_config_path)
-    parser.add_argument('--num-trials', type=int, default=10)
+    parser.add_argument('--num-trials', type=int, default=100)
     parser.add_argument('--study-name', type=str, default="pinball_simple")
     parser.add_argument('--process', type=int, default=0)
     parser.add_argument(
