@@ -37,11 +37,19 @@ def _MLP(input_dim: int, hidden_dim: List[int], output_dim: int = None, activati
         layers.append(nn.Linear(hidden_dim[-1], output_dim) if len(hidden_dim)  > 0 else nn.Linear(input_dim, output_dim)) 
     return nn.Sequential(*layers)
 
+class ResidualMLP(nn.Module):
+    def __init__(self, cfg: MLPConfig):
+        super().__init__()
+        self.mlp = _MLP(cfg.latent_dim + cfg.n_options, cfg.hidden_dims, cfg.latent_dim, cfg.activation)
+        self.residual = nn.Linear(cfg.latent_dim + cfg.n_options, cfg.latent_dim) #if cfg.latent_dim + cfg.n_options != cfg.output_dim else nn.Identity()
+    def forward(self, x):
+        return self.mlp(x) + self.residual(x)
+
 def MLP(cfg: MLPConfig):
     return _MLP(cfg.input_dim, cfg.hidden_dims, cfg.output_dim, cfg.activation)
 
 def DynamicsMLP(cfg):
-    return _MLP(cfg.latent_dim + cfg.n_options, cfg.hidden_dims, cfg.latent_dim, cfg.activation)
-
+    # return _MLP(cfg.latent_dim + cfg.n_options, cfg.hidden_dims, cfg.latent_dim, cfg.activation)
+    return ResidualMLP(cfg)
 def RewardMLP(cfg):
     return _MLP(2*cfg.latent_dim + cfg.n_options, cfg.hidden_dims, 1, cfg.activation)

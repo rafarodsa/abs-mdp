@@ -45,7 +45,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		z, q_z, _ = self.encoder.sample_n_dist(state)
 		logger.debug(f'Encoder: z {z.shape}')
 		z = z.squeeze() # squeezing sample dim
-		z_prime = self.transition(torch.cat([q_z.mean, action, executed.unsqueeze(-1)], dim=-1))
+		z_prime = self.transition(torch.cat([q_z.mean, action], dim=-1))
 		logger.debug(f'Transition: z {z.shape}, z_prime {z_prime.shape}, action {action.shape}, executed {executed.shape}')
 	
 		q_s_prime = self.decoder.distribution(z_prime) 
@@ -73,12 +73,12 @@ class AbstractMDPTrainer(pl.LightningModule):
 		logger.debug(f"Actions: {actions.shape}, executed: {executed_.shape}")
 		
 		z = z.squeeze(0) # z.squeeze sample dimension because we are using one sample.
-		z_prime_pred, q_z_prime_pred, _ = self.transition.sample_n_dist(torch.cat([z, actions, executed_], dim=-1))
+		z_prime_pred, q_z_prime_pred, _ = self.transition.sample_n_dist(torch.cat([z, actions], dim=-1))
 		z_prime_pred = z_prime_pred.squeeze(0)
 		logger.debug(f"Transition: z {z.shape}, z' {z_prime_pred.shape}")
 		
 		# decode next latent state
-		q_s_prime = self.decoder.distribution(z_prime_pred)
+		q_s_prime = self.decoder.distribution(z_prime)
 
 		# reward
 		reward_pred = self.reward(z, actions, z_prime_pred)
