@@ -53,8 +53,9 @@ class AbstractMDPTrainer(pl.LightningModule):
 
 		reward = self.reward(z, action, z_prime)
 		init_class_z = self.init_classifier(z)
-		init_class_z_prime = self.init_classifier(z_prime)
-		init_class = torch.stack([init_class_z, init_class_z_prime])
+		# init_class_z_prime = self.init_classifier(z_prime)
+		# init_class = torch.stack([init_class_z, init_class_z_prime])
+		init_class = init_class_z
 		logger.debug('Forward pass complete')
 		return q_s, q_s_prime, reward, init_class
 	
@@ -86,10 +87,11 @@ class AbstractMDPTrainer(pl.LightningModule):
 
 		# initiation classifier
 		init_mask_z = self.init_classifier(z)
-		init_mask_z_prime = self.init_classifier(z_prime_pred)
-		init_masks = torch.stack([init_mask_z, init_mask_z_prime], dim=0)
-		logger.debug(f"Initiation: {init_masks.shape}")
-		logger.debug('Training running step finished')
+		# init_mask_z_prime = self.init_classifier(z_prime_pred)
+		# init_masks = torch.stack([init_mask_z, init_mask_z_prime], dim=0)
+		init_masks = init_mask_z
+		# logger.debug(f"Initiation: {init_masks.shape}")
+		# logger.debug('Training running step finished')
 		return q_z, q_z_std, q_z_prime_pred, q_z_prime_encoder, q_s_prime, reward_pred, init_masks, q_s
 		
 	def reward(self, z, a, z_prime):
@@ -105,7 +107,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		return self.reward_fn(input).squeeze()
 	
 	def step(self, batch, batch_idx):
-		s, a, s_prime, reward, executed, duration, initiation_target = batch
+		s, a, s_prime, reward, done, executed, duration, initsets, p0 = batch.obs, batch.action, batch.next_obs, batch.reward, batch.done, batch.executed, batch.duration, batch.initsets, batch.p0
 		
 		q_z, q_z_std, q_z_prime_pred, q_z_prime_encoded, s_prime_dist, reward_pred, initiation_pred, s_dist = self._run_step(s, a, s_prime, executed)
 
@@ -113,7 +115,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		prediction_loss = self._prediction_loss(s_prime, s_prime_dist, s, s_dist) 
 		kl_loss = self._init_state_dist_loss(q_z, q_z_std) 
 		#reward_loss = self._reward_loss(reward_pred, s_dist, s_prime_dist, reward) 
-		init_classifier_loss = self._init_classifier_loss(initiation_pred, initiation_target) 
+		init_classifier_loss = self._init_classifier_loss(initiation_pred, initsets) 
 		transition_loss = self._transition_loss(q_z_prime_encoded, q_z_prime_pred, self.hyperparams.kl_balance) 
 
 
@@ -179,7 +181,8 @@ class AbstractMDPTrainer(pl.LightningModule):
 		return torch.nn.functional.mse_loss(reward_pred, reward_target_, reduction="mean")
 
 	def _init_classifier_loss(self, prediction, target):
-		target_ = target.transpose(0, 1)
+		# target_ = target.transpose(0, 1)
+		target_ = target
 		return torch.nn.functional.binary_cross_entropy_with_logits(prediction, target_, reduction="mean")
 
 	def _transition_loss(self, encoder_dist, transition_dist, alpha=0.01):

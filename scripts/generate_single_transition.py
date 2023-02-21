@@ -17,7 +17,7 @@ from functools import reduce
 
 from joblib import Parallel, delayed
 
-from scripts.utils import run_option
+from scripts.utils import run_options
 import os
 
 if __name__== "__main__":
@@ -59,14 +59,14 @@ if __name__== "__main__":
     
     options_desc = {i: str(o) for i, o in enumerate(options)}
 
-    results = Parallel(n_jobs=args.n_jobs)(delayed(run_option)(env, tuple(init_states[i]), options, obs_type=args.observation, max_exec_time=max_exec_time) for i in tqdm(range(args.n_samples)))        
+    results = Parallel(n_jobs=args.n_jobs)(delayed(run_options)(env, tuple(init_states[i]), options, obs_type=args.observation, max_exec_time=max_exec_time) for i in tqdm(range(args.n_samples)))        
 
     ##### Print dataset statistics
     dataset, info = zip(*results)
 
-    dataset = reduce(lambda r, acc: list(r) + list(acc), dataset, [])
+    transition_samples = reduce(lambda r, acc: list(r) + list(acc), dataset, [])
     info = reduce(lambda r, acc: list(r) + list(acc), info, [])
-    o, j, next_o, rewards, executed, duration, initiation_masks = zip(*dataset)
+    o, j, next_o, rewards, done, executed, duration, initiation_masks, _ = zip(*transition_samples)
     stats = {}
     _r = np.array(list(map(lambda x: sum(x), rewards)))
     _r_len = list(map(len, rewards))

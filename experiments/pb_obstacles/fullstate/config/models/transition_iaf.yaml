@@ -6,4 +6,9 @@ features:
   - 128
   activation: relu
 dist:
-  type: deterministic
+  type: iaf
+  num_blocks: 5
+  hidden_dims:
+    - 64
+  input_dim: 128
+  output_dim: ${model.latent_dim}

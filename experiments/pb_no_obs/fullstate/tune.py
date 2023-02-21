@@ -12,10 +12,9 @@ from optuna.integration import PyTorchLightningPruningCallback
 import pytorch_lightning as pl
 
 from src.absmdp.trainer import AbstractMDPTrainer
-from src.absmdp.datasets import PinballDataset
 
 
-def prepare_config(cfg, lr, grounding_const, kl_const, transition_const, kl_balance):
+def prepare_config(cfg, lr, grounding_const, kl_const, transition_const, reward_const, init_class_const):
     
     # manually override config
     # TODO can we generalize this?
@@ -23,7 +22,9 @@ def prepare_config(cfg, lr, grounding_const, kl_const, transition_const, kl_bala
     cfg.loss.grounding_const = grounding_const
     cfg.loss.kl_const = kl_const
     cfg.loss.transition_const = transition_const
-    cfg.loss.kl_balance = kl_balance
+    cfg.loss.reward_const = reward_const
+    cfg.loss.init_class_const = init_class_const
+
     return cfg
 
 def objective(cfg, trial):
@@ -33,11 +34,11 @@ def objective(cfg, trial):
     grounding_const = trial.suggest_float('grounding_const', 0.1, 100)
     kl_const = trial.suggest_float('kl_const', 1e-4, 10)
     transition_const = trial.suggest_float('transition_const', 1e-4, 10)
-    kl_balance = trial.suggest_float('kl_balance', 0., 1.)
+    init_class_const = 1. #trial.suggest_float('init_class_const', 1e-3, 10)
+    reward_const = 1. #trial.suggest_float('reward_const', 1e-3, 10)
 
-    cfg = prepare_config(cfg, lr, grounding_const, kl_const, transition_const, kl_balance)
+    cfg = prepare_config(cfg, lr, grounding_const, kl_const, transition_const, reward_const, init_class_const)
     model = AbstractMDPTrainer(cfg) 
-    dataset = PinballDataset(cfg.data)
 
     trainer = pl.Trainer(
                         accelerator=cfg.accelerator,
@@ -48,7 +49,7 @@ def objective(cfg, trial):
                     )
     
     trainer.logger.log_hyperparams(model.hparams)
-    trainer.fit(model, dataset)
+    trainer.fit(model)
     return trainer.callback_metrics["nll_loss"].item()
 
 def tune():

@@ -1,6 +1,5 @@
 type: mlp
 input_dim: ${model.latent_dim}
 output_dim: ${model.n_options}
-hidden_dims:
-  - 128
+hidden_dims: []
 activation: relu

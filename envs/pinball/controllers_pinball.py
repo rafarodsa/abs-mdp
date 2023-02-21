@@ -24,8 +24,11 @@ def ball_collides(pinball_env, initial_position, final_position):
     """ 
         Detects collision at position
     """
+
+
     for obstacle in pinball_env.get_obstacles():
         if _intersect_obstable(obstacle, initial_position, final_position):
+            # print(f'Obstacle intersected: {initial_position}->{final_position}')
             return True
     return False
         
@@ -43,6 +46,7 @@ def _intersect_obstable(obstacle, initial_position, final_position):
     return False
 
 def _intersect(edge, initial_position, final_position):
+
     displacement = np.array(final_position) - np.array(initial_position)
     edge_segment = np.array(edge[1])-np.array(edge[0])
     b = edge[0] - initial_position
@@ -141,7 +145,7 @@ def position_controller_continuous(goal, kp_vel, ki_vel, kp_pos, kd_pos):
 def position_controller_factory(init_state, distance, continuous=True):
     return position_controller_continuous(init_state + distance, 5, 0.01, 100, 0.) if continuous else position_controller_discrete(init_state+distance, 10, 0.1, 100, 0.)
 
-def create_position_controllers(env, translation_distance=1/10):
+def create_position_controllers(env, translation_distance=1/15):
     position_options = []
     controller_factory = position_controller_factory
     std_dev_vel = 0.01
