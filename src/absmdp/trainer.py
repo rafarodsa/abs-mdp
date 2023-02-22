@@ -97,8 +97,8 @@ class AbstractMDPTrainer(pl.LightningModule):
 		q_z, q_z_std, q_z_prime_pred, q_z_prime_encoded, s_prime_dist, s_dist = self._run_step(s, a, s_prime, executed)
 
 		# compute losses
-		prediction_loss = self._prediction_loss(s_prime, s_prime_dist, s, s_dist) 
-		kl_loss = self._init_state_dist_loss(q_z, q_z_std) 
+		prediction_loss = self._prediction_loss(s_prime, s_prime_dist, s, s_dist, p0) 
+		kl_loss = self._init_state_dist_loss(q_z, q_z_std, p0) 
 		transition_loss = self._transition_loss(q_z_prime_encoded, q_z_prime_pred, alpha=self.hyperparams.kl_balance) 
 
 
