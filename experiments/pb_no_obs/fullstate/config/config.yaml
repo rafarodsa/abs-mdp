@@ -19,7 +19,7 @@ loss:
 data:
   data_path: ${experiment_cwd}/data/no_obs.pt
   batch_size: ${batch_size}
-  num_workers: 4
+  num_workers: 8
   train_split: 0.8
   val_split: 0.1
   test_split: 0.1

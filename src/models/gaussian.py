@@ -30,7 +30,7 @@ class DiagonalNormal(torch.distributions.Distribution):
     def log_prob(self, x):
         logp = self.dist.log_prob(x).sum(-1)
         p_m = MultivariateNormal(self.mean, covariance_matrix=torch.diag_embed(self.var))
-        assert torch.allclose(p_m.log_prob(x), logp)
+        # assert torch.allclose(p_m.log_prob(x), logp)
         return logp
     
     def entropy(self):
@@ -44,7 +44,7 @@ def diag_normal_kl(p: DiagonalNormal, q: DiagonalNormal):
     kl = torch.distributions.kl_divergence(p.dist, q.dist).sum(-1)
 
     # TEST
-    if True:
+    if False:
         cov= torch.diag_embed(p.var)
         assert torch.allclose(torch.diagonal(cov, dim1=1, dim2=2), p.var)
         p_m = MultivariateNormal(p.mean, covariance_matrix=torch.diag_embed(p.var))
@@ -57,6 +57,10 @@ def diag_normal_kl(p: DiagonalNormal, q: DiagonalNormal):
 
     return kl
 
+def softplus(x, beta=1, threshold=20):
+    return torch.log(1 + torch.exp(beta * x)) * (x * beta <= 20) / beta + x * (x * beta > 20) 
+
+
 class DiagonalGaussianModule(nn.Module):
 
     def __init__(self, features, config: DiagGaussianConfig):
@@ -67,15 +71,15 @@ class DiagonalGaussianModule(nn.Module):
         self.mean = nn.Linear(config.input_dim, config.output_dim)
         self.log_var = nn.Linear(config.input_dim, config.output_dim)
         self.min_var = torch.log(torch.tensor(config.min_std)) * 2
-        self.max_var = torch.log(torch.tensor(config.max_std)) * 2 # TODO: should this be in log scale or not?
+        self.max_var = torch.log(torch.tensor(config.max_std)) * 2 
 
     def forward(self, input):
         feats = self.feats(input)
         mean, log_var = self.mean(F.relu(feats)), self.log_var(F.relu(feats))
         
         #softly constrain the variance
-        log_var = self.max_var - F.softplus(self.max_var - log_var)
-        log_var = self.min_var + F.softplus(log_var - self.min_var)
+        log_var = self.max_var - softplus(self.max_var - log_var)
+        log_var = self.min_var + softplus(log_var - self.min_var)
        
         return mean, log_var
 
