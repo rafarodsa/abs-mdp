@@ -73,67 +73,41 @@ class AbstractMDPTrainer(pl.LightningModule):
 		actions = a # dims: (batch, n_actions)
 		logger.debug(f"Actions: {actions.shape}, executed: {executed_.shape}")
 		
-		z = z.squeeze(0) # z.squeeze sample dimension because we are using one sample.
+		z = q_z.mean.squeeze() #z.squeeze(0) # z.squeeze sample dimension because we are using one sample.
 		z_prime_pred, q_z_prime_pred, _ = self.transition.sample_n_dist(torch.cat([z, actions], dim=-1))
-		z_prime_pred = q_z_prime_pred.mean.squeeze(0) # TODO: predict mean as it's a deterministic function
+
 		logger.debug(f"Transition: z {z.shape}, z' {z_prime_pred.shape}")
 		
 		# decode next latent state
 		q_s_prime = self.decoder.distribution(z_prime)
 		# q_s_prime = self.decoder.distribution(z_prime)
 
-		# reward
-		reward_pred = self.reward(z, actions, z_prime_pred)
-		logger.debug(f"Reward: {reward_pred.shape}")
 		q_s = self.decoder.distribution(z)
 
-		# initiation classifier
-		init_mask_z = self.init_classifier(z)
-		# init_mask_z_prime = self.init_classifier(z_prime_pred)
-		# init_masks = torch.stack([init_mask_z, init_mask_z_prime], dim=0)
-		init_masks = init_mask_z
-		# logger.debug(f"Initiation: {init_masks.shape}")
 		# logger.debug('Training running step finished')
-		return q_z, q_z_std, q_z_prime_pred, q_z_prime_encoder, q_s_prime, reward_pred, init_masks, q_s
+		return q_z, q_z_std, q_z_prime_pred, q_z_prime_encoder, q_s_prime, q_s
 		
-	def reward(self, z, a, z_prime):
-		n_samples = self.hyperparams.n_samples
-		# create batch
-		if n_samples > 1:
-			#TODO: check this is correct.
-			z_ = z.unsqueeze(0).repeat_interleave(n_samples, dim=0)
-			a_ = a.unsqueeze(0).repeat_interleave(n_samples, dim=0)
-		else:
-			z_, a_ = z, a
-		input = torch.cat([z_, a_, z_prime], dim=-1)
-		return self.reward_fn(input).squeeze()
 	
 	def step(self, batch, batch_idx):
-		s, a, s_prime, reward, done, executed, duration, initsets, p0 = batch.obs, batch.action, batch.next_obs, batch.rewards, batch.done, batch.executed, batch.duration, batch.initsets, batch.p0
+		s, a, s_prime, _, _, executed, _, _, p0 = batch.obs, batch.action, batch.next_obs, batch.rewards, batch.done, batch.executed, batch.duration, batch.initsets, batch.p0
 
 
 		assert torch.all(executed) # check all samples are successful executions.
 		
-		q_z, q_z_std, q_z_prime_pred, q_z_prime_encoded, s_prime_dist, reward_pred, initiation_pred, s_dist = self._run_step(s, a, s_prime, executed)
+		q_z, q_z_std, q_z_prime_pred, q_z_prime_encoded, s_prime_dist, s_dist = self._run_step(s, a, s_prime, executed)
 
 		# compute losses
 		prediction_loss = self._prediction_loss(s_prime, s_prime_dist, s, s_dist) 
 		kl_loss = self._init_state_dist_loss(q_z, q_z_std) 
-		#reward_loss = self._reward_loss(reward_pred, s_dist, s_prime_dist, reward) 
-		init_classifier_loss = self._init_classifier_loss(initiation_pred, initsets) 
 		transition_loss = self._transition_loss(q_z_prime_encoded, q_z_prime_pred, alpha=self.hyperparams.kl_balance) 
 
 
 		loss = prediction_loss * self.hyperparams.grounding_const\
 			+ kl_loss * self.hyperparams.kl_const\
-			+ init_classifier_loss * self.hyperparams.init_class_const\
 			+ transition_loss * self.hyperparams.transition_const
-			# + reward_loss * self.hyperparams.reward_const
 		logs = {
 			"grounding_loss": prediction_loss,
 			"kl_loss": kl_loss,
-			#"reward_loss": reward_loss,
-			"initiation_loss": init_classifier_loss,
 			"prediction_loss": transition_loss,
 			"loss": loss
 		}
@@ -151,6 +125,14 @@ class AbstractMDPTrainer(pl.LightningModule):
 
 		return -log_probs.mean() - log_probs_s.mean()
 		# return F.mse_loss(s_prime_, q_s_prime_pred.mean.squeeze())
+
+	def _transition_loss(self, encoder_dist, transition_dist, alpha=0.01):
+	
+		kl_1 = torch.distributions.kl_divergence(encoder_dist, transition_dist.detach())
+		kl_2 = torch.distributions.kl_divergence(encoder_dist.detach(), transition_dist)
+		
+		# KL balancing
+		return (alpha*kl_1 + (1-alpha)*kl_2).mean()
 		
 	def _init_state_dist_loss(self, q_z, std_normal_z) -> torch.Tensor:
 		'''
@@ -158,7 +140,47 @@ class AbstractMDPTrainer(pl.LightningModule):
 			TODO: modify this to learn the initial state distribution
 		'''
 		kl = torch.distributions.kl_divergence(q_z, std_normal_z).mean()
+		
 		return torch.max(torch.tensor(1.), kl)
+
+
+
+	
+	def training_step(self, batch, batch_idx):
+		loss, logs = self.step(batch, batch_idx)
+		self.log_dict({f"train_{k}": v for k, v in logs.items()}, on_step=True, on_epoch=False)
+		return loss
+
+	def validation_step(self, batch, batch_idx):
+		logger.debug('Validation step')
+		s, a, s_prime, reward, executed, duration, initiation_target = batch.obs, batch.action, batch.next_obs, batch.rewards, batch.executed, batch.duration, batch.initsets
+		qs, q_s_prime, reward_pred, initiation = self.forward(s, a, executed)
+		logger.debug(f'Batch: s {s.shape}, a {a.shape}, s_prime {s_prime.shape}, reward {len(reward)}, executed {executed.shape}, duration {duration.shape}, initiation_target {initiation_target.shape}')
+		
+		nll_loss = -q_s_prime.log_prob(s_prime).mean()
+		mse_error = F.mse_loss(s_prime, q_s_prime.mean.squeeze()).sqrt()
+		# print(f'mse_error {mse_error}')
+		init_loss = self._init_classifier_loss(initiation, initiation_target)
+		loss = nll_loss + init_loss
+		self.log_dict({'nll_loss': nll_loss,
+					   'init_loss': init_loss,
+					   'mse_error': mse_error})
+		return nll_loss
+		
+	def configure_optimizers(self):
+		return torch.optim.Adam(self.parameters(), lr=self.lr)
+
+	def reward(self, z, a, z_prime):
+		n_samples = self.hyperparams.n_samples
+		# create batch
+		if n_samples > 1:
+			#TODO: check this is correct.
+			z_ = z.unsqueeze(0).repeat_interleave(n_samples, dim=0)
+			a_ = a.unsqueeze(0).repeat_interleave(n_samples, dim=0)
+		else:
+			z_, a_ = z, a
+		input = torch.cat([z_, a_, z_prime], dim=-1)
+		return self.reward_fn(input).squeeze()
 
 	def _reward_loss(self, reward_pred, q_s, q_s_prime, reward_target):
 		logger.debug('Reward loss')
@@ -191,37 +213,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		target_ = target
 		return torch.nn.functional.binary_cross_entropy_with_logits(prediction, target_, reduction="mean")
 
-	def _transition_loss(self, encoder_dist, transition_dist, alpha=0.01):
 	
-		kl_1 = torch.distributions.kl_divergence(encoder_dist, transition_dist.detach())
-		kl_2 = torch.distributions.kl_divergence(encoder_dist.detach(), transition_dist)
-		
-		# KL balancing
-		return (alpha*kl_1 + (1-alpha)*kl_2).mean()
-	
-	def training_step(self, batch, batch_idx):
-		loss, logs = self.step(batch, batch_idx)
-		self.log_dict({f"train_{k}": v for k, v in logs.items()}, on_step=True, on_epoch=False)
-		return loss
-
-	def validation_step(self, batch, batch_idx):
-		logger.debug('Validation step')
-		s, a, s_prime, reward, executed, duration, initiation_target = batch.obs, batch.action, batch.next_obs, batch.rewards, batch.executed, batch.duration, batch.initsets
-		qs, q_s_prime, reward_pred, initiation = self.forward(s, a, executed)
-		logger.debug(f'Batch: s {s.shape}, a {a.shape}, s_prime {s_prime.shape}, reward {len(reward)}, executed {executed.shape}, duration {duration.shape}, initiation_target {initiation_target.shape}')
-		
-		nll_loss = -q_s_prime.log_prob(s_prime).mean()
-		mse_error = F.mse_loss(s_prime, q_s_prime.mean.squeeze()).sqrt()
-		print(f'mse_error {mse_error}')
-		init_loss = self._init_classifier_loss(initiation, initiation_target)
-		loss = nll_loss + init_loss
-		self.log_dict({'nll_loss': nll_loss,
-					   'init_loss': init_loss,
-					   'mse_error': mse_error})
-		return nll_loss
-		
-	def configure_optimizers(self):
-		return torch.optim.Adam(self.parameters(), lr=self.lr)
 
 	@staticmethod
 	def load_config(path):
