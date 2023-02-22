@@ -1,6 +1,6 @@
 """
 	AbstractMDPVAE
-	Implementation based in VAE loss
+	Implementation based on VAE loss
 
 	author: Rafael Rodriguez-Sanchez (rrs@brown.edu)
 	date: January 2023
@@ -39,6 +39,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		self.init_classifier = build_model(cfg.model.init_class)
 		self.lr = cfg.lr
 		self.hyperparams = cfg.loss
+
 
 	
 	def forward(self, state, action, executed):
@@ -101,14 +102,15 @@ class AbstractMDPTrainer(pl.LightningModule):
 		kl_loss = self._init_state_dist_loss(q_z, q_z_std) 
 		transition_loss = self._transition_loss(q_z_prime_encoded, q_z_prime_pred, alpha=self.hyperparams.kl_balance) 
 
-
+		print(f'kl_const {self.hyperparams.kl_const}')
 		loss = prediction_loss * self.hyperparams.grounding_const\
-			+ kl_loss * self.hyperparams.kl_const\
+			+ kl_loss * self.kl_const\
 			+ transition_loss * self.hyperparams.transition_const
 		logs = {
 			"grounding_loss": prediction_loss,
 			"kl_loss": kl_loss,
 			"prediction_loss": transition_loss,
+			"kl_const": self.kl_const,
 			"loss": loss
 		}
 

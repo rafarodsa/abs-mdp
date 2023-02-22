@@ -10,7 +10,7 @@ devices: 1
 save_path: ${experiment_cwd}/mdps
 loss:
   grounding_const: 1. #99.03164077159823
-  kl_const: 0 #0.3589425248337221
+  kl_const: 1. #0.3589425248337221
   reward_const: 0.0
   transition_const: 1. #5.263095635338799
   init_class_const: 0.0

@@ -1,6 +1,7 @@
 import pytorch_lightning as pl
 from src.absmdp.trainer import AbstractMDPTrainer
 from src.absmdp.datasets import PinballDataset
+from src.absmdp.utils import CyclicalKLAnnealing
 from omegaconf import OmegaConf as oc
 import argparse
 
@@ -20,7 +21,8 @@ def run(cfg):
                         gpus=cfg.devices if cfg.accelerator == "gpu" else None,
                         max_epochs=cfg.epochs, 
                         auto_scale_batch_size=True,
-                        default_root_dir=f'{cfg.save_path}/runs'
+                        default_root_dir=f'{cfg.save_path}/runs',
+                        callbacks=[CyclicalKLAnnealing()]
                     )
     trainer.fit(model, data)
     return model
