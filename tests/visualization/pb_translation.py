@@ -105,6 +105,10 @@ if __name__ == '__main__':
         predicted_next_s_q = model.decoder.distribution(predicted_z)
         predicted_next_s = predicted_next_s_q.mean
         decoded_next_s_q = model.decoder.distribution(next_z)
+
+        print(f'Empirical MSE {(predicted_next_s - batch.next_obs).pow(2).sum(-1).sqrt().mean()}')
+        print(f'Empirical std deviation {predicted_next_s.std(0)}')
+
         avg_std = predicted_next_s_q.var.sqrt().mean(-1).mean()
         print(f'Avg total state encoding deviation {z_q.var.sqrt().mean(-1).mean()} per dim')
         print(f'Avg total grounding deviation {avg_std} per dim')
@@ -121,7 +125,7 @@ if __name__ == '__main__':
     plt.scatter(z[:, 0], z[:, 1], s=5, marker='o', color='b')
 
     for a in range(4):
-        next_z_a = predicted_z[_action==a]
+        next_z_a = next_z[_action==a]
         plt.scatter(next_z_a[:, 0], next_z_a[:, 1], s=5, marker='^', label=f'action {a}')    
     plt.savefig(f'{args.save_path}/z-space.png')
     # Plot initial states
@@ -189,9 +193,9 @@ if __name__ == '__main__':
     plt.subplot(1,3,3)
     for a in acts: 
         plt.title('Encoded/Decoded')
-        plt.scatter(s[_action == a, 0], s[_action == a, 1], marker='x', s=5, color='b')
+        # plt.scatter(s[_action == a, 0], s[_action == a, 1], marker='x', s=5, color='b')
         plt.scatter(encoded_next_s[_action == a, 0], encoded_next_s[_action == a, 1], marker='o', s=5, color='g')
-        plt.quiver(s[_action == a, 0], s[_action == a, 1], d_pred[_action == a, 0], d_pred[_action == a, 1], angles='xy', scale_units='xy', scale=1)
+        # plt.quiver(s[_action == a, 0], s[_action == a, 1], d_pred[_action == a, 0], d_pred[_action == a, 1], angles='xy', scale_units='xy', scale=1)
 
     plt.savefig(f'{args.save_path}/pca_s.png')
 

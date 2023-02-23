@@ -99,8 +99,8 @@ class AbstractMDPTrainer(pl.LightningModule):
 
 		# compute losses
 		# prediction_loss = self._prediction_loss(s_prime, s_prime_dist, s, s_dist, p0)
-		prediction_loss = self.calibrated_prediction_loss(s_prime, s_prime_dist, s, s_dist, p0)
-		kl_loss = self._init_state_dist_loss(q_z, q_z_std, p0) 
+		prediction_loss = self.calibrated_prediction_loss(s_prime, s_prime_dist, s, s_dist, p0)/2
+		kl_loss = (self._init_state_dist_loss(q_z, q_z_std, p0) + self._init_state_dist_loss(q_z_prime_encoded, q_z_std, p0))/2
 		# transition_loss, nlog_p = self._transition_loss(q_z_prime_encoded, q_z_prime_pred, alpha=self.hyperparams.kl_balance) 
 		transition_loss, nlog_p = self._transition_loss(q_z_prime_encoded, q_z_prime_pred, alpha=self.hyperparams.kl_balance), 0
 		loss = prediction_loss * self.hyperparams.grounding_const\
@@ -108,6 +108,11 @@ class AbstractMDPTrainer(pl.LightningModule):
 			+ transition_loss * self.kl_const * 0. \
 			+ nlog_p * self.hyperparams.transition_const 
 		elbo = prediction_loss + kl_loss + transition_loss
+
+		# log std deviations for encoder.
+
+
+
 		logs = {
 			"grounding_loss": prediction_loss,
 			"kl_loss": kl_loss,
@@ -115,7 +120,9 @@ class AbstractMDPTrainer(pl.LightningModule):
 			"kl_const": self.kl_const,
 			"elbo": -elbo,
 			"transition_loss": nlog_p,
-			"loss": loss
+			"loss": loss,
+			"std_s": s_dist.mean.squeeze().std(0).mean().item(),
+			"std_next_s": s_prime_dist.mean.squeeze().std(0).mean().item(),
 		}
 
 		logger.debug(f'Losses: {logs}')
@@ -141,7 +148,6 @@ class AbstractMDPTrainer(pl.LightningModule):
 		return n_log_probs.mean() + nlog_prob_s_prime.mean()
 
 	def _log_var(self, mean, x):
-		
 		return ((mean - x) ** 2).mean((0,1), keepdim=True).log() / 2
 	
 	def softclip(self, x, min):
@@ -195,7 +201,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		return nll_loss
 		
 	def configure_optimizers(self):
-		return torch.optim.Adam(self.parameters(), lr=self.lr)
+		return torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=1e-5)
 
 	def reward(self, z, a, z_prime):
 		n_samples = self.hyperparams.n_samples

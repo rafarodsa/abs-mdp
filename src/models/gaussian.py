@@ -123,7 +123,7 @@ class SphericalGaussianModule(DiagonalGaussianModule):
         feats = self.feats(input)
         mean, log_var = self.mean(F.relu(feats)), self.log_var(F.relu(feats))
         
-        #softly constrain the variance
+        # softly constrain the variance
         log_var = self.max_var - softplus(self.max_var - log_var)
         log_var = self.min_var + softplus(log_var - self.min_var)
        

@@ -40,8 +40,8 @@ def _MLP(input_dim: int, hidden_dim: List[int], output_dim: int = None, activati
 class ResidualMLP(nn.Module):
     def __init__(self, cfg: MLPConfig):
         super().__init__()
-        self.mlp = _MLP(cfg.latent_dim + cfg.n_options, cfg.hidden_dims, cfg.latent_dim, cfg.activation)
-        self.residual = nn.Linear(cfg.latent_dim + cfg.n_options, cfg.latent_dim) #if cfg.latent_dim + cfg.n_options != cfg.output_dim else nn.Identity()
+        self.mlp = _MLP(cfg.input_dim, cfg.hidden_dims, cfg.output_dim, cfg.activation)
+        self.residual = nn.Linear(cfg.input_dim, cfg.output_dim) if cfg.input_dim != cfg.output_dim else nn.Identity()
     def forward(self, x):
         return self.mlp(x) + self.residual(x)
 

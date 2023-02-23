@@ -147,7 +147,7 @@ class PinballDataset(pl.LightningDataModule):
                             partial(one_hot_actions, cfg.n_options),
                         ]
         # if linear_projection:
-        #     self.transforms.append(partial(linear_projection, linear_projection=self.linear_transform))
+            # self.transforms.append(partial(linear_projection, linear_projection=self.linear_transform))
 
     def setup(self, stage=None):
         self.dataset = PinballDataset_(self.path_to_file, self.n_reward_samples, self.transforms, obs_type=self.obs_type)

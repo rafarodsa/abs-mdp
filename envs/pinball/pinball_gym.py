@@ -189,9 +189,11 @@ class PinballEnvContinuous(PinballEnv):
         self.pinball = PinballModelContinuous(config)
     
     def reset(self, state=None):
-        if state is not None:
-            self.pinball.set_initial_state(state)
-        return super().reset(self)
+        if state is None:
+            state = self.sample_initial_positions(1)[0]
+
+        self.pinball.set_initial_state(state)
+        return state
 
     def step(self, action):
         action = tuple(action)
