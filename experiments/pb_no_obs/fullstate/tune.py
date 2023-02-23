@@ -10,10 +10,11 @@ from functools import partial
 import optuna
 from optuna.integration import PyTorchLightningPruningCallback
 import pytorch_lightning as pl
-from pl.callbacks.early_stopping import EarlyStopping
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
 from src.absmdp.trainer import AbstractMDPTrainer
 from src.absmdp.datasets import PinballDataset
+from src.absmdp.utils import CyclicalKLAnnealing
 
 
 def prepare_config(cfg, lr, kl_const, transition_const, kl_balance):
@@ -44,7 +45,8 @@ def objective(cfg, trial):
                         max_epochs=cfg.epochs, 
                         callbacks=[
                                     PyTorchLightningPruningCallback(trial, monitor="nll_loss"),
-                                    EarlyStopping(monitor='nll_loss', mode='min')
+                                    EarlyStopping(monitor='nll_loss', mode='min'),
+                                    CyclicalKLAnnealing()
                                 ],
                         default_root_dir=cfg.save_path + f'/{trial.number}'
                     )

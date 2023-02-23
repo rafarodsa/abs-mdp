@@ -10,4 +10,4 @@ dist:
   output_dim: ${model.latent_dim}
   input_dim: ${model.encoder.features.output_dim}
   min_std: 1.0e-15
-  max_std: 1e-10
+  max_std: 100000

@@ -6,8 +6,8 @@ features:
   - 64
   activation: relu
 dist:
-  type: diag_gaussian
+  type: spherical_gaussian
   output_dim: ${model.obs_dims}
   input_dim: ${model.decoder.features.output_dim}
   min_std: 1e-10
-  max_std: 0.0001
+  max_std: 10000

@@ -22,7 +22,8 @@ def run(cfg):
                         max_epochs=cfg.epochs, 
                         auto_scale_batch_size=True,
                         default_root_dir=f'{cfg.save_path}/runs',
-                        callbacks=[CyclicalKLAnnealing()]
+                        callbacks=[CyclicalKLAnnealing(num_cycles=1, rate=0.2)],
+                        log_every_n_steps=15
                     )
     trainer.fit(model, data)
     return model
