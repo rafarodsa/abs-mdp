@@ -129,6 +129,14 @@ class SphericalGaussianModule(DiagonalGaussianModule):
        
         return mean, log_var * torch.ones_like(mean)
 
+
+# class CalibratedOptimaGaussianModule(SphericalGaussianModule):
+#     def __init__(self, features, config):
+#         super().__init__(self, features, config)
+#         self.log_var = 1.
+
+#     def forward(self, input):
+
 class FixedVarGaussian(DiagonalGaussianModule):
     def __init__(self, features, config: DiagGaussianConfig):
         nn.Module.__init__(self)

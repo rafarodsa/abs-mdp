@@ -81,9 +81,8 @@ class AbstractMDPTrainer(pl.LightningModule):
 		logger.debug(f"Transition: z {z.shape}, z' {z_prime_pred.shape}")
 		
 		# decode next latent state
-		q_s_prime = self.decoder.distribution(z_prime_pred)
-		# q_s_prime = self.decoder.distribution(z_prime)
-
+		# q_s_prime = self.decoder.distribution(z_prime_pred)
+		q_s_prime = self.decoder.distribution(z_prime)
 		q_s = self.decoder.distribution(z)
 
 		# logger.debug('Training running step finished')
@@ -99,12 +98,14 @@ class AbstractMDPTrainer(pl.LightningModule):
 		q_z, q_z_std, q_z_prime_pred, q_z_prime_encoded, s_prime_dist, s_dist = self._run_step(s, a, s_prime, executed)
 
 		# compute losses
-		prediction_loss = self._prediction_loss(s_prime, s_prime_dist, s, s_dist, p0) 
+		# prediction_loss = self._prediction_loss(s_prime, s_prime_dist, s, s_dist, p0)
+		prediction_loss = self.calibrated_prediction_loss(s_prime, s_prime_dist, s, s_dist, p0)
 		kl_loss = self._init_state_dist_loss(q_z, q_z_std, p0) 
-		transition_loss, nlog_p = self._transition_loss(q_z_prime_encoded, q_z_prime_pred, alpha=self.hyperparams.kl_balance) 
+		# transition_loss, nlog_p = self._transition_loss(q_z_prime_encoded, q_z_prime_pred, alpha=self.hyperparams.kl_balance) 
+		transition_loss, nlog_p = self._transition_loss(q_z_prime_encoded, q_z_prime_pred, alpha=self.hyperparams.kl_balance), 0
 		loss = prediction_loss * self.hyperparams.grounding_const\
 			+ kl_loss * self.kl_const\
-			+ transition_loss * self.kl_const \
+			+ transition_loss * self.kl_const * 0. \
 			+ nlog_p * self.hyperparams.transition_const 
 		elbo = prediction_loss + kl_loss + transition_loss
 		logs = {
@@ -130,19 +131,38 @@ class AbstractMDPTrainer(pl.LightningModule):
 
 		return -log_probs.mean() - log_probs_s.mean()
 
+
+	def calibrated_prediction_loss(self, s_prime, q_s_prime_pred, s, q_s_pred, p0):
+		log_var_s_prime = self._log_var(q_s_prime_pred.mean.squeeze(), s_prime)
+		nlog_prob_s_prime = self.softclip(self.gaussian_nll(q_s_prime_pred.mean.squeeze(), log_var_s_prime, s_prime), -6)
+
+		log_var_s = self.softclip(self._log_var(q_s_pred.mean.squeeze(), s), -6)
+		n_log_probs = self.gaussian_nll(q_s_pred.mean.squeeze(), log_var_s, s)
+		return n_log_probs.mean() + nlog_prob_s_prime.mean()
+
+	def _log_var(self, mean, x):
+		
+		return ((mean - x) ** 2).mean((0,1), keepdim=True).log() / 2
+	
+	def softclip(self, x, min):
+		return min + F.softplus(x - min)
+
+	def gaussian_nll(self, mu, log_sigma, x):
+		return 0.5 * torch.pow((x - mu) / log_sigma.exp(), 2) + log_sigma + 0.5 * torch.log(torch.tensor(2 * torch.pi))
+
 	def _transition_loss(self, encoder_dist, transition_dist, alpha=0.01):
 	
-		# kl_1 = torch.distributions.kl_divergence(encoder_dist, transition_dist.detach())
-		# kl_2 = torch.distributions.kl_divergence(encoder_dist.detach(), transition_dist)
+		kl_1 = torch.distributions.kl_divergence(encoder_dist, transition_dist.detach())
+		kl_2 = torch.distributions.kl_divergence(encoder_dist.detach(), transition_dist)
 		
 		# KL balancing
-		# return (alpha*kl_1 + (1-alpha)*kl_2).mean()
-		h = encoder_dist.entropy().mean()
+		return (alpha*kl_1 + (1-alpha)*kl_2).mean()
+		# h = encoder_dist.entropy().mean()
 		
-		mse = F.mse_loss(transition_dist.mean.detach(), encoder_dist.mean).mean()
+		# mse = F.mse_loss(transition_dist.mean.detach(), encoder_dist.mean).mean()
 
-		nlog_p = -encoder_dist.detach().log_prob(transition_dist.mean)
-		return -h+mse, nlog_p.mean()
+		# nlog_p = -encoder_dist.detach().log_prob(transition_dist.mean)
+		# return -h+mse, nlog_p.mean()
 		
 	def _init_state_dist_loss(self, q_z, std_normal_z, p0) -> torch.Tensor:
 		'''

@@ -12,9 +12,9 @@ loss:
   grounding_const: 1. #99.03164077159823
   kl_const: 1. #0.3589425248337221
   reward_const: 0.0
-  transition_const: 5 #5.263095635338799
+  transition_const: 0. #5.263095635338799
   init_class_const: 0.0
-  kl_balance: 0.9
+  kl_balance: 0.
   n_samples: 1
 data:
   data_path: ${experiment_cwd}/data/no_obs.pt

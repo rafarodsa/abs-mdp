@@ -102,9 +102,9 @@ if __name__ == '__main__':
         transition_in = torch.cat((z, batch.action), dim=-1)
         predicted_z, q_z, _ = model.transition.sample_n_dist(transition_in, 1)
         predicted_z = q_z.mean
-        print(predicted_z.shape)
         predicted_next_s_q = model.decoder.distribution(predicted_z)
         predicted_next_s = predicted_next_s_q.mean
+        decoded_next_s_q = model.decoder.distribution(next_z)
         avg_std = predicted_next_s_q.var.sqrt().mean(-1).mean()
         print(f'Avg total state encoding deviation {z_q.var.sqrt().mean(-1).mean()} per dim')
         print(f'Avg total grounding deviation {avg_std} per dim')
@@ -166,20 +166,31 @@ if __name__ == '__main__':
     transform = np.eye(4)
     s = np.einsum('ji, bj->bi', transform, batch.obs.numpy())
     next_s, pred_next_s = np.einsum('ji, bj->bi',transform ,batch.next_obs.numpy()), np.einsum('ji, bj->bi', transform, predicted_next_s.numpy())
+    encoded_next_s = np.einsum('ji, bj->bi',transform ,decoded_next_s_q.mean.numpy())
+    
     d_real = next_s - s
     d_pred = pred_next_s - s
 
     plt.figure()
-    plt.subplot(1,2,1)
+    plt.subplot(1,3,1)
     for a in acts:
+        plt.title('Truth')
         plt.scatter(s[_action == a, 0], s[_action == a, 1], marker='x', s=5, color='b')
         plt.scatter(next_s[_action==a, 0], next_s[_action == a, 1], marker='x', s=5, color='r')
         plt.quiver(s[_action == a, 0], s[_action == a, 1], d_real[_action == a, 0], d_real[_action == a, 1], angles='xy', scale_units='xy', scale=1)
     # plt.quiver(s[:, 0], s[:, 1], d_pred[:, 0], d_pred[:, 1])
-    plt.subplot(1,2,2)
+    plt.subplot(1,3,2)
     for a in acts: 
+        plt.title('Predicted')
         plt.scatter(s[_action == a, 0], s[_action == a, 1], marker='x', s=5, color='b')
         plt.scatter(pred_next_s[_action == a, 0], pred_next_s[_action == a, 1], marker='o', s=5, color='g')
+        plt.quiver(s[_action == a, 0], s[_action == a, 1], d_pred[_action == a, 0], d_pred[_action == a, 1], angles='xy', scale_units='xy', scale=1)
+    
+    plt.subplot(1,3,3)
+    for a in acts: 
+        plt.title('Encoded/Decoded')
+        plt.scatter(s[_action == a, 0], s[_action == a, 1], marker='x', s=5, color='b')
+        plt.scatter(encoded_next_s[_action == a, 0], encoded_next_s[_action == a, 1], marker='o', s=5, color='g')
         plt.quiver(s[_action == a, 0], s[_action == a, 1], d_pred[_action == a, 0], d_pred[_action == a, 1], angles='xy', scale_units='xy', scale=1)
 
     plt.savefig(f'{args.save_path}/pca_s.png')
