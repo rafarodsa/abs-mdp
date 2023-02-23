@@ -34,7 +34,10 @@ class DiagonalNormal(torch.distributions.Distribution):
         return logp
     
     def entropy(self):
-        return self.dist.entropy().sum(-1)
+        h = self.dist.entropy().sum(-1)
+        # p_m = MultivariateNormal(self.mean, covariance_matrix=torch.diag_embed(self.var))
+        # assert torch.allclose(p_m.entropy(), h)
+        return h
 
     def detach(self):
         return DiagonalNormal(self.mean.detach(), self._log_var.detach())
@@ -104,6 +107,28 @@ class DiagonalGaussianModule(nn.Module):
         q = DiagonalNormal(mean, std)
         return q
 
+
+class SphericalGaussianModule(DiagonalGaussianModule):
+    def __init__(self, features, config):
+        nn.Module.__init__(self)
+        self.feats = features
+        self.output_dim = config.output_dim
+
+        self.mean = nn.Linear(config.input_dim, config.output_dim)
+        self.log_var = nn.Linear(config.input_dim, 1)
+        self.min_var = torch.log(torch.tensor(config.min_std)) * 2
+        self.max_var = torch.log(torch.tensor(config.max_std)) * 2 
+
+    def forward(self, input):
+        feats = self.feats(input)
+        mean, log_var = self.mean(F.relu(feats)), self.log_var(F.relu(feats))
+        
+        #softly constrain the variance
+        log_var = self.max_var - softplus(self.max_var - log_var)
+        log_var = self.min_var + softplus(log_var - self.min_var)
+       
+        return mean, log_var * torch.ones_like(mean)
+
 class FixedVarGaussian(DiagonalGaussianModule):
     def __init__(self, features, config: DiagGaussianConfig):
         nn.Module.__init__(self)
@@ -140,6 +165,9 @@ class FixedVarGaussian(DiagonalGaussianModule):
 
 def DiagonalGaussian(config: DiagGaussianConfig):
     return partial(DiagonalGaussianModule, config=config)
+
+def SphericalGaussian(config: DiagGaussianConfig):
+    return partial(SphericalGaussianModule, config=config)
 
 def Deterministic(config: DiagGaussianConfig):
     config.var = 1e-15
