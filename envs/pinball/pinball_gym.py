@@ -191,7 +191,7 @@ class PinballEnvContinuous(PinballEnv):
     def reset(self, state=None):
         if state is not None:
             self.pinball.set_initial_state(state)
-        return np.array(self.pinball.get_state())
+        return super().reset(self)
 
     def step(self, action):
         action = tuple(action)
