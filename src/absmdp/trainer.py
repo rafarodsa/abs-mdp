@@ -20,7 +20,7 @@ from omegaconf import OmegaConf as oc
 import logging
 
 logger = logging.getLogger(__name__)
-
+torch.set_float32_matmul_precision('medium')
 
 class AbstractMDPTrainer(pl.LightningModule):
 	
@@ -39,6 +39,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		self.init_classifier = build_model(cfg.model.init_class)
 		self.lr = cfg.lr
 		self.hyperparams = cfg.loss
+		self.kl_const =  self.hyperparams.kl_const
 
 
 	
@@ -46,7 +47,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		logger.debug('Forward pass')
 		z, q_z, _ = self.encoder.sample_n_dist(state)
 		logger.debug(f'Encoder: z {z.shape}')
-		z = z.squeeze() # squeezing sample dim
+		z = q_z.mean.squeeze() # squeezing sample dim
 		z_prime = self.transition(torch.cat([z, action], dim=-1))
 		logger.debug(f'Transition: z {z.shape}, z_prime {z_prime.shape}, action {action.shape}, executed {executed.shape}')
 	
@@ -80,8 +81,8 @@ class AbstractMDPTrainer(pl.LightningModule):
 		logger.debug(f"Transition: z {z.shape}, z' {z_prime_pred.shape}")
 		
 		# decode next latent state
-		# q_s_prime = self.decoder.distribution(z_prime_pred)
-		q_s_prime = self.decoder.distribution(z_prime)
+		q_s_prime = self.decoder.distribution(z_prime_pred)
+		# q_s_prime = self.decoder.distribution(z_prime)
 
 		q_s = self.decoder.distribution(z)
 
@@ -100,17 +101,19 @@ class AbstractMDPTrainer(pl.LightningModule):
 		# compute losses
 		prediction_loss = self._prediction_loss(s_prime, s_prime_dist, s, s_dist, p0) 
 		kl_loss = self._init_state_dist_loss(q_z, q_z_std, p0) 
-		transition_loss = self._transition_loss(q_z_prime_encoded, q_z_prime_pred, alpha=self.hyperparams.kl_balance) 
-
-		print(f'kl_const {self.hyperparams.kl_const}')
+		transition_loss, nlog_p = self._transition_loss(q_z_prime_encoded, q_z_prime_pred, alpha=self.hyperparams.kl_balance) 
 		loss = prediction_loss * self.hyperparams.grounding_const\
 			+ kl_loss * self.kl_const\
-			+ transition_loss * self.hyperparams.transition_const
+			+ transition_loss * self.kl_const \
+			+ nlog_p * self.hyperparams.transition_const 
+		elbo = prediction_loss + kl_loss + transition_loss
 		logs = {
 			"grounding_loss": prediction_loss,
 			"kl_loss": kl_loss,
 			"prediction_loss": transition_loss,
 			"kl_const": self.kl_const,
+			"elbo": -elbo,
+			"transition_loss": nlog_p,
 			"loss": loss
 		}
 
@@ -123,18 +126,23 @@ class AbstractMDPTrainer(pl.LightningModule):
 		log_probs = q_s_prime_pred.log_prob(s_prime_)
 
 		s_ = s.unsqueeze(0).repeat_interleave(n_samples, dim=0)
-		log_probs_s = q_s_pred.log_prob(s_) * p0
+		log_probs_s = q_s_pred.log_prob(s_) #* p0
 
 		return -log_probs.mean() - log_probs_s.mean()
-		# return F.mse_loss(s_prime_, q_s_prime_pred.mean.squeeze())
 
 	def _transition_loss(self, encoder_dist, transition_dist, alpha=0.01):
 	
-		kl_1 = torch.distributions.kl_divergence(encoder_dist, transition_dist.detach())
-		kl_2 = torch.distributions.kl_divergence(encoder_dist.detach(), transition_dist)
+		# kl_1 = torch.distributions.kl_divergence(encoder_dist, transition_dist.detach())
+		# kl_2 = torch.distributions.kl_divergence(encoder_dist.detach(), transition_dist)
 		
 		# KL balancing
-		return (alpha*kl_1 + (1-alpha)*kl_2).mean()
+		# return (alpha*kl_1 + (1-alpha)*kl_2).mean()
+		h = encoder_dist.entropy().mean()
+		
+		mse = F.mse_loss(transition_dist.mean.detach(), encoder_dist.mean).mean()
+
+		nlog_p = -encoder_dist.detach().log_prob(transition_dist.mean)
+		return -h+mse, nlog_p.mean()
 		
 	def _init_state_dist_loss(self, q_z, std_normal_z, p0) -> torch.Tensor:
 		'''
@@ -142,12 +150,9 @@ class AbstractMDPTrainer(pl.LightningModule):
 			TODO: modify this to learn the initial state distribution
 		'''
 		kl = torch.distributions.kl_divergence(q_z, std_normal_z).mean()
-		
-		return torch.max(torch.tensor(1.), kl)
+		return kl
+		# return torch.max(torch.tensor(1.), kl)
 
-
-
-	
 	def training_step(self, batch, batch_idx):
 		loss, logs = self.step(batch, batch_idx)
 		self.log_dict({f"train_{k}": v for k, v in logs.items()}, on_step=True, on_epoch=False)
@@ -161,7 +166,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		
 		nll_loss = -q_s_prime.log_prob(s_prime).mean()
 		mse_error = F.mse_loss(s_prime, q_s_prime.mean.squeeze()).sqrt()
-		# print(f'mse_error {mse_error}')
+
 		init_loss = self._init_classifier_loss(initiation, initiation_target)
 		loss = nll_loss + init_loss
 		self.log_dict({'nll_loss': nll_loss,
