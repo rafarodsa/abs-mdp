@@ -17,7 +17,7 @@ loss:
   kl_balance: 0.
   n_samples: 1
 data:
-  data_path: ${experiment_cwd}/data/no_obs.pt
+  data_path: ./data/noobs_t.pt
   batch_size: ${batch_size}
   num_workers: 1
   train_split: 0.8

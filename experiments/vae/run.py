@@ -14,7 +14,7 @@ import logging
 def save_model(save_path):
     pass
 
-def run(cfg):
+def run(cfg, ckpt=None):
     
     model = AbstractMDPTrainer(cfg) 
     data = PinballDataset(cfg.data)
@@ -25,11 +25,13 @@ def run(cfg):
                         max_epochs=cfg.epochs, 
                         auto_scale_batch_size=True,
                         default_root_dir=f'{cfg.save_path}/runs',
-                        callbacks=[CyclicalKLAnnealing(num_cycles=4, rate=0.5),
-                                    EarlyStopping(monitor='val_loss', patience=10)],
+                        callbacks=[
+                                    CyclicalKLAnnealing(num_cycles=4, rate=0.5),
+                                    #EarlyStopping(monitor='val_loss', patience=10)
+                                ],
                         log_every_n_steps=15
                     )
-    trainer.fit(model, data)
+    trainer.fit(model, data, ckpt_path=ckpt)
     return model
 
 def main():
@@ -38,6 +40,7 @@ def main():
     parser.add_argument('--config', type=str, default=default_config_path)
     parser.add_argument('--debug', action='store_const', const=logging.DEBUG, dest='loglevel', default=logging.WARNING)
     parser.add_argument('--verbose', action='store_const', const=logging.INFO, dest='loglevel')
+    parser.add_argument('--from-ckpt', type=str, default=None)
     args, unknown = parser.parse_known_args()
 
     logging.basicConfig(level=args.loglevel)
@@ -45,7 +48,7 @@ def main():
     cli_config = oc.from_cli(unknown)
     cfg = AbstractMDPTrainer.load_config(args.config)
     cfg = oc.merge(cfg, cli_config)
-    run(cfg)
+    run(cfg, ckpt=args.from_ckpt)
 
 if __name__ == "__main__":
     main()
