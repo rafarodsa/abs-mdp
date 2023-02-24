@@ -11,6 +11,7 @@ from src.models.factories import build_distribution, build_model
 
 from src.utils.symlog import symlog
 from src.absmdp.configs import TrainerConfig
+from src.utils.softplus import Softplus
 
 from omegaconf import OmegaConf as oc
 
@@ -74,7 +75,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		return loss
 
 	def calibrated_prediction_loss(self, x, mu):
-		logvar = self._log_var(mu, x)/2
+		logvar = self._log_var(mu, x)
 		logsigma = self.softclip(logvar/2, -6)
 		nll = self.gaussian_nll(mu, logsigma, x)
 		return nll.sum()
@@ -83,7 +84,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		return ((mean - x) ** 2).mean((0,1), keepdim=True).log()
 	
 	def softclip(self, x, min):
-		return min + F.softplus(x - min)
+		return min + Softplus(x - min)
 
 	def gaussian_nll(self, mu, log_sigma, x):
 		return 0.5 * torch.pow((x - mu) / log_sigma.exp(), 2) + log_sigma + 0.5 * torch.log(torch.tensor(2 * torch.pi))
