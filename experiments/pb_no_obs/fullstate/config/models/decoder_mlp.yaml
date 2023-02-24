@@ -4,7 +4,7 @@ features:
   output_dim: ${eval:${model.obs_dims}*2}
   hidden_dims:
   - 64
-  activation: gelu
+  activation: relu
 dist:
   type: spherical_gaussian
   output_dim: ${model.obs_dims}

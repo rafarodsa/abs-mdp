@@ -34,7 +34,15 @@ class AbstractMDPTrainer(pl.LightningModule):
 		self.hyperparams = cfg.loss
 		self.kl_const =  self.hyperparams.kl_const
 	
+	
 	def forward(self, s):
+		x = self.encoder(s)
+		mean, log_var = x[:, :self.latent_dim], x[:, self.latent_dim:]
+		z = mean
+		reconstruction = self.decoder(z)
+		return z, reconstruction, (mean, log_var)
+	
+	def _forward(self, s):
 		x = self.encoder(s)
 		mean, log_var = x[:, :self.latent_dim], x[:, self.latent_dim:]
 		z = mean + torch.randn_like(mean) * torch.exp(log_var/2)
@@ -47,18 +55,19 @@ class AbstractMDPTrainer(pl.LightningModule):
 		s, s_prime, executed = batch.obs, batch.next_obs, batch.executed
 		assert torch.all(executed) # check all samples are successful executions.
 
-		z, s_bar, q_s = self.forward(s)
-		z_prime, s_prime_bar, q_sprime = self.forward(s_prime)
+		z, s_bar, q_z = self._forward(s)
+		z_prime, s_prime_bar, q_zprime = self._forward(s_prime)
+		N = s.shape[0] + s_prime.shape[0]
 
-		reconstruction_loss = (self.calibrated_prediction_loss(s, s_bar) + self.calibrated_prediction_loss(s_prime, s_prime_bar)) / (s.shape[0] + s_prime.shape[0])
-		# reconstruction_loss = (F.mse_loss(s, s_bar, reduction='sum') + F.mse_loss(s_prime, s_prime_bar, reduction='sum')) / (s.shape[0] + s_prime.shape[0])
-		kl_loss = (self.kl_loss(q_s[0], q_s[1]/2) + self.kl_loss(q_sprime[0], q_sprime[1]/2)) / (s.shape[0] + s_prime.shape[0])
-		loss = reconstruction_loss + 1. * kl_loss
+		reconstruction_loss = self.calibrated_prediction_loss(s, s_bar).sum() + self.calibrated_prediction_loss(s_prime, s_prime_bar).sum()
+		# reconstruction_loss = (F.mse_loss(s, s_bar, reduction='sum') + F.mse_loss(s_prime, s_prime_bar, reduction='sum'))
+		kl_loss = self.kl_loss(q_z[0], q_z[1]/2).sum() + self.kl_loss(q_zprime[0], q_zprime[1]/2).sum()
+		loss = (reconstruction_loss + 1. * kl_loss) / N
 		# log std deviations for encoder.
 		logs = {
 			'loss': loss,
-			'reconstruction_loss': reconstruction_loss,
-			'kl_loss': kl_loss,
+			'reconstruction_loss': reconstruction_loss / N,
+			'kl_loss': kl_loss / N,
 		}
 
 		logger.debug(f'Losses: {logs}')
@@ -77,8 +86,8 @@ class AbstractMDPTrainer(pl.LightningModule):
 	def calibrated_prediction_loss(self, x, mu):
 		logvar = self._log_var(mu, x)
 		logsigma = self.softclip(logvar/2, -6)
-		nll = self.gaussian_nll(mu, logsigma, x)
-		return nll.sum()
+		nll = self.gaussian_nll(mu, logsigma, x).sum(-1)
+		return nll
 
 	def _log_var(self, mean, x):
 		return ((mean - x) ** 2).mean((0,1), keepdim=True).log()
@@ -90,7 +99,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		return 0.5 * torch.pow((x - mu) / log_sigma.exp(), 2) + log_sigma + 0.5 * torch.log(torch.tensor(2 * torch.pi))
 
 	def kl_loss(self, mu, log_sigma):
-		return 0.5 * (-2 * log_sigma + (2 * log_sigma).exp() + mu ** 2 - 1).sum()
+		return 0.5 * (-2 * log_sigma + (2 * log_sigma).exp() + mu ** 2 - 1).sum(-1)
 
 	def configure_optimizers(self):
 		return torch.optim.Adam(self.parameters(), lr=self.lr)
