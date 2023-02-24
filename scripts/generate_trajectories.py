@@ -1,0 +1,122 @@
+"""
+    author: Rafael Rodriguez-Sanchez
+    email: rrs@brown.edu
+    date: 20 February 2023
+"""
+import os
+from functools import reduce
+
+import numpy as np
+import torch, argparse
+from tqdm import tqdm
+
+
+from joblib import Parallel, delayed
+
+from scripts.utils import collect_trajectory
+from envs.pinball.pinball_gym import PinballEnvContinuous as Pinball
+from envs.pinball.controllers_pinball import create_position_controllers as OptionFactory
+
+if __name__== "__main__":
+
+    ######## Parameters
+    np.set_printoptions(precision=3)
+    configuration_file = "/Users/rrs/Desktop/abs-mdp/envs/pinball/configs/pinball_simple_single.cfg"
+    num_traj = 100
+    observation_type = 'simple'
+
+    ###### CMDLINE ARGUMENTS
+
+    dataset_file_path = '/Users/rrs/Desktop/abs-mdp/data/'
+    dataset_name = 'pinball_simple_obs.pt'
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--save-path', type=str, default=dataset_file_path+dataset_name)
+    parser.add_argument('--env-config', type=str, default=configuration_file)
+    parser.add_argument('--num-traj', type=int, default=num_traj)
+    parser.add_argument('--max-horizon', type=int, default=100)
+    parser.add_argument('--observation', type=str, default=observation_type)
+    parser.add_argument('--n-jobs', type=int, default=1)
+    parser.add_argument('--max-exec-time', type=int, default=1000)
+    parser.add_argument('--image-size', type=int, default=100)
+    args = parser.parse_args()
+
+
+    ######## DATA GENERATION #######
+
+    trajectories = []  # (o, a, o', rewards, executed, duration, initiation_masks, info)
+
+    grid_size = args.image_size
+
+    env = Pinball(config=args.env_config, width=grid_size, height=grid_size, render_mode='rgb_array') 
+
+
+    options = OptionFactory(env)
+    max_exec_time = args.max_exec_time
+    
+    options_desc = {i: str(o) for i, o in enumerate(options)}
+
+    trajectories = Parallel(n_jobs=args.n_jobs)(delayed(collect_trajectory)(env, options, obs_type=args.observation, max_exec_time=max_exec_time, horizon=args.max_horizon) for i in tqdm(range(args.num_traj)))        
+    
+    ##### Print dataset statistics
+    transition_samples = reduce(lambda x, acc: x + acc, trajectories, [])
+    n_samples = len(transition_samples)
+
+
+    o, option_n, next_o, rewards, done, executed, duration, initiation_mask, info, p0 = zip(*transition_samples)
+    stats = {}
+    _r = np.array(list(map(lambda x: sum(x), rewards)))
+    _r_len = list(map(len, rewards))
+    
+    s = np.array(list(map(lambda x: x['state'], info)))
+    next_s = np.array(list(map(lambda x: x['next_state'], info)))
+
+    
+    for i in range(len(options)):
+        idx = np.array(option_n) == i
+        _executed = np.array(executed)[idx]
+        n_executions = _executed.sum()
+        _duration = np.array(duration)[idx]
+        option_rewards = _r[idx][_executed==1]/_duration[_executed==1]
+        avg_duration = np.array(duration)[idx].mean()
+       
+       
+        s_executed = s[idx][_executed==1]
+        next_s_executed = next_s[idx][_executed==1]
+        state_change = next_s_executed - s_executed
+        state_change_min, state_change_max = state_change.min(0), state_change.max(0)
+        state_change_mean = state_change.mean(0)
+
+        stats[i] = {
+            'prob_executions': n_executions,
+            'avg_duration': avg_duration,
+            'avg_reward': option_rewards.mean(),
+            'min_reward': option_rewards.min(),
+            'max_reward': option_rewards.max(),
+            'state_change_min': state_change_min,
+            'state_change_max': state_change_max,
+            'state_change_mean': state_change_mean
+        }
+
+        print(f'--------Option-{i}: {options_desc[i]}---------')
+        print(f"Executed {n_executions}/{n_samples} times")
+        print(f"Average duration {avg_duration}")
+        print(f"Average reward {option_rewards.mean()}. Max reward: {option_rewards.max()}. Min reward: {option_rewards.min()}")
+        print(f"Reward length: mean: {np.array(_r_len)[idx].mean()}, max: {np.array(_r_len)[idx].max()}, min: {np.array(_r_len)[idx].min()}")
+        print(f"State change: mean: {state_change_mean}, max: {state_change_max}, min: {state_change_min}")
+    
+    debug = {
+        'latent_states': info,
+        'options': options_desc,
+        'stats': stats
+    }
+
+    ########### SAVE DATASET ###########
+    
+    dir, name = os.path.split(args.save_path)
+    os.makedirs(dir, exist_ok=True)
+    torch.save(trajectories, args.save_path)
+    print('---------------------------------')
+    print(f'Dataset saved at {args.save_path}')
+    torch.save(debug, args.save_path.replace('.pt', '_debug.pt'))
+    print(f'Debug info saved at {args.save_path.replace(".pt", "_debug.pt")}')

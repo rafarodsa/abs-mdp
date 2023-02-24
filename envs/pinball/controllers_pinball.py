@@ -24,8 +24,11 @@ def ball_collides(pinball_env, initial_position, final_position):
     """ 
         Detects collision at position
     """
+
+
     for obstacle in pinball_env.get_obstacles():
         if _intersect_obstable(obstacle, initial_position, final_position):
+            # print(f'Obstacle intersected: {initial_position}->{final_position}')
             return True
     return False
         
@@ -43,6 +46,7 @@ def _intersect_obstable(obstacle, initial_position, final_position):
     return False
 
 def _intersect(edge, initial_position, final_position):
+
     displacement = np.array(final_position) - np.array(initial_position)
     edge_segment = np.array(edge[1])-np.array(edge[0])
     b = edge[0] - initial_position

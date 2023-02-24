@@ -12,11 +12,13 @@ from typing import Any, Dict, List, Optional, Tuple
 from src.models.configs import DiagGaussianConfig, MLPConfig, DistributionConfig, ModuleConfig
 from src.models import MLP, DiagonalGaussian, DynamicsMLP, RewardMLP, Deterministic
 from src.models import ResidualConvEncoder, DeconvBlock, PixelCNNDecoder
+from src.models.gaussian import SphericalGaussian
 
 class ModuleFactory:
     factories ={
         "mlp": MLP,
         "diag_gaussian": DiagonalGaussian,
+        "spherical_gaussian": SphericalGaussian,
         "dynamics_mlp": DynamicsMLP,
         "reward_mlp": RewardMLP,
         "deterministic": Deterministic,

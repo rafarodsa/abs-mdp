@@ -1,0 +1,7 @@
+
+type: mlp
+input_dim: ${model.obs_dims}
+output_dim: ${eval:${model.latent_dim} * 2}
+hidden_dims:
+- 64
+activation: gelu

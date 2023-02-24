@@ -3,12 +3,11 @@ features:
   input_dim: ${model.obs_dims}
   output_dim: ${eval:${model.latent_dim} * 2}
   hidden_dims:
-  - 128
-  - 128
-  activation: gelu
+  - 64
+  activation: relu
 dist:
   type: diag_gaussian
   output_dim: ${model.latent_dim}
   input_dim: ${model.encoder.features.output_dim}
-  min_std: 1.0e-15
-  max_std: 1000000.0
+  min_std: 0.001
+  max_std: 100000

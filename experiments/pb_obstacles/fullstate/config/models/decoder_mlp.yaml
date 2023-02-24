@@ -1,12 +1,14 @@
 features:
   type: mlp
   input_dim: ${model.latent_dim}
-  output_dim: ${eval:${model.obs_dims}*2}
+  output_dim: 64
   hidden_dims:
+  - 128
   - 64
-  activation: relu
+  activation: gelu
 dist:
   type: diag_gaussian
+  input_dim: ${model.decoder.features.output_dim}
   output_dim: ${model.obs_dims}
-  min_var: 1e-3
-  max_var: 1e6
+  min_std: 1e-6
+  max_std: 0.5
