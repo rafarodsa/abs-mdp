@@ -199,8 +199,8 @@ class AbstractMDPTrainer(pl.LightningModule):
 		init_loss = self._init_classifier_loss(initiation, initiation_target)
 		loss = nll_loss + init_loss
 		self.log_dict({'nll_loss': nll_loss,
-					   'init_loss': init_loss,
-					   'mse_error': mse_error})
+					   'init_loss': init_loss})
+		self.log_dict({'mse_error': mse_error}, on_step=False, on_epoch=True, prog_bar=True, logger=True)
 		return nll_loss
 		
 	def configure_optimizers(self):

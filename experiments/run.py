@@ -42,7 +42,7 @@ def main():
     cli_config = oc.from_cli(unknown)
     cfg = AbstractMDPTrainer.load_config(args.config)
     cfg = oc.merge(cfg, cli_config)
-    run(cfg)
+    run(cfg, args.from_ckpt)
 
 if __name__ == "__main__":
     main()
