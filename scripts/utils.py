@@ -15,11 +15,11 @@ from src.absmdp.datasets import Transition
 
 def execute_option(env, initial_state, option, obs_type='simple', max_exec_time=1000):
     t = 0
-    next_s = initial_state
+    next_s = np.array(initial_state)
     can_execute = option.execute(initial_state)
     rewards = []
     done = False
-    s = env.reset(initial_state)
+    s = np.array(env.reset(initial_state))
     next_s = s
 
     o = np.array(env.render()) if obs_type == 'pixel' else s
@@ -31,6 +31,7 @@ def execute_option(env, initial_state, option, obs_type='simple', max_exec_time=
             if action is None:
                 break # option terminated
             next_s, r, done, _, info = env.step(action)
+
             rewards.append(r)
             t += 1
         if t >= max_exec_time and not done:
@@ -86,7 +87,7 @@ def collect_trajectory(env, options, obs_type='simple', max_exec_time=200, horiz
     trajectory = []
     infos = []
     s = env.reset()
-    o = np.array(env.render()) if obs_type == 'pixel' else s
+    o = np.array(env.render()) if obs_type == 'pixel' else np.array(s)
     executed = True
     done = False
     for t in range(horizon): # execute t options in sequence
@@ -102,12 +103,12 @@ def collect_trajectory(env, options, obs_type='simple', max_exec_time=200, horiz
 
         option_n = np.random.choice(len(options), p=initiation_mask_s/np.sum(initiation_mask_s)) # sample option uniformly
         option = options[option_n]
-        o, next_o, rewards, executed, duration, info = execute_option(env, s, option, obs_type=obs_type, max_exec_time=max_exec_time)
+        o, next_o, rewards, executed, duration, info = execute_option(env, np.array(s), option, obs_type=obs_type, max_exec_time=max_exec_time)
         next_s = next_o if obs_type == 'simple' else info['next_state']
         rewards = rewards + [0] * (max_exec_time - len(rewards))
         done = info['done']
 
-        trajectory.append(Transition(o, option_n, next_o, rewards, done, executed, duration, np.array(initiation_mask_s), info, np.float32(t==0)))
+        trajectory.append(Transition(np.array(o), option_n, np.array(next_o), rewards, done, executed, duration, np.array(initiation_mask_s), info, np.float32(t==0)))
         infos.append(info)
         s = next_s
         

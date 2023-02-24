@@ -60,11 +60,7 @@ if __name__== "__main__":
     
     options_desc = {i: str(o) for i, o in enumerate(options)}
 
-<<<<<<< HEAD:scripts/generate_single_transition.py
     results = Parallel(n_jobs=args.n_jobs)(delayed(run_options)(env, tuple(init_states[i]), options, obs_type=args.observation, max_exec_time=max_exec_time) for i in tqdm(range(args.n_samples)))        
-=======
-    results = Parallel(n_jobs=args.n_jobs)(delayed(run_option)(env, tuple(init_states[i]), options, obs_type=args.observation, max_exec_time=max_exec_time) for i in tqdm(range(args.n_samples)))     
->>>>>>> debugging-loss:scripts/pinball_generate_data.py
 
     ##### Print dataset statistics
     dataset, info = zip(*results)

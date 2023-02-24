@@ -145,7 +145,7 @@ def position_controller_continuous(goal, kp_vel, ki_vel, kp_pos, kd_pos):
 def position_controller_factory(init_state, distance, continuous=True):
     return position_controller_continuous(init_state + distance, 5, 0.01, 100, 0.) if continuous else position_controller_discrete(init_state+distance, 10, 0.1, 100, 0.)
 
-def create_position_controllers(env, translation_distance=1/15):
+def create_position_controllers(env, translation_distance=1/10):
     position_options = []
     controller_factory = position_controller_factory
     std_dev_vel = 0.01
