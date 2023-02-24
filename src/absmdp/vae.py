@@ -72,19 +72,20 @@ class AbstractMDPTrainer(pl.LightningModule):
 			z_prime, s_prime_bar, q_zprime = self._forward(s_prime)
 			kl_loss = self.kl_loss(q_z[0], q_z[1]/2).sum() + self.kl_loss(q_zprime[0], q_zprime[1]/2).sum()
 			reconstruction_loss = (F.mse_loss(s, s_bar, reduction='none') + F.mse_loss(s_prime, s_prime_bar, reduction='none')).sum()
-			loss = (kl_loss + reconstruction_loss)/N
+			loss = (self.kl_const * kl_loss + reconstruction_loss)/N
 		elif model == 'cvae':
 			z, s_bar, q_z = self._forward(s)
 			z_prime, s_prime_bar, q_zprime = self._forward(s_prime)
 			kl_loss = self.kl_loss(q_z[0], q_z[1]/2).sum() + self.kl_loss(q_zprime[0], q_zprime[1]/2).sum()
 			reconstruction_loss = self.calibrated_prediction_loss(s, s_bar).sum() + self.calibrated_prediction_loss(s_prime, s_prime_bar).sum()
-			loss = (kl_loss + reconstruction_loss)/N
+			loss = (self.kl_const * kl_loss + reconstruction_loss)/N
 
 		
 		logs = {
 			'loss': loss,
 			'reconstruction_loss': reconstruction_loss / N,
 			'kl_loss': kl_loss / N,
+			'kl_const': self.kl_const
 		}
 
 		logger.debug(f'Losses: {logs}')
