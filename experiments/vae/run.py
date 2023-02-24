@@ -3,6 +3,9 @@ from src.absmdp.vae import AbstractMDPTrainer
 from src.absmdp.datasets import PinballDataset
 from src.absmdp.utils import CyclicalKLAnnealing
 from omegaconf import OmegaConf as oc
+
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+
 import argparse
 
 import logging
@@ -22,7 +25,8 @@ def run(cfg):
                         max_epochs=cfg.epochs, 
                         auto_scale_batch_size=True,
                         default_root_dir=f'{cfg.save_path}/runs',
-                        callbacks=[CyclicalKLAnnealing(num_cycles=4, rate=0.5)],
+                        callbacks=[CyclicalKLAnnealing(num_cycles=4, rate=0.5),
+                                    EarlyStopping(monitor='val_loss', patience=10)],
                         log_every_n_steps=15
                     )
     trainer.fit(model, data)

@@ -55,15 +55,32 @@ class AbstractMDPTrainer(pl.LightningModule):
 		s, s_prime, executed = batch.obs, batch.next_obs, batch.executed
 		assert torch.all(executed) # check all samples are successful executions.
 
-		z, s_bar, q_z = self._forward(s)
-		z_prime, s_prime_bar, q_zprime = self._forward(s_prime)
+		
 		N = s.shape[0] + s_prime.shape[0]
-
-		reconstruction_loss = self.calibrated_prediction_loss(s, s_bar).sum() + self.calibrated_prediction_loss(s_prime, s_prime_bar).sum()
-		# reconstruction_loss = (F.mse_loss(s, s_bar, reduction='sum') + F.mse_loss(s_prime, s_prime_bar, reduction='sum'))
-		kl_loss = self.kl_loss(q_z[0], q_z[1]/2).sum() + self.kl_loss(q_zprime[0], q_zprime[1]/2).sum()
-		loss = (reconstruction_loss + 1. * kl_loss) / N
+		
+		model = 'vae'
+		# loss = (reconstruction_loss + 1. * kl_loss) / N
 		# log std deviations for encoder.
+		if model == 'ae':
+			z, s_bar, q_z = self.forward(s)
+			z_prime, s_prime_bar, q_zprime = self.forward(s_prime)
+			kl_loss = 0
+			reconstruction_loss = (F.mse_loss(s, s_bar, reduction='none') + F.mse_loss(s_prime, s_prime_bar, reduction='none')).sum()
+			loss = reconstruction_loss / N
+		elif model == 'vae':
+			z, s_bar, q_z = self._forward(s) # samples z from q(z|x)
+			z_prime, s_prime_bar, q_zprime = self._forward(s_prime)
+			kl_loss = self.kl_loss(q_z[0], q_z[1]/2).sum() + self.kl_loss(q_zprime[0], q_zprime[1]/2).sum()
+			reconstruction_loss = (F.mse_loss(s, s_bar, reduction='none') + F.mse_loss(s_prime, s_prime_bar, reduction='none')).sum()
+			loss = (kl_loss + reconstruction_loss)/N
+		elif model == 'cvae':
+			z, s_bar, q_z = self._forward(s)
+			z_prime, s_prime_bar, q_zprime = self._forward(s_prime)
+			kl_loss = self.kl_loss(q_z[0], q_z[1]/2).sum() + self.kl_loss(q_zprime[0], q_zprime[1]/2).sum()
+			reconstruction_loss = self.calibrated_prediction_loss(s, s_bar).sum() + self.calibrated_prediction_loss(s_prime, s_prime_bar).sum()
+			loss = (kl_loss + reconstruction_loss)/N
+
+		
 		logs = {
 			'loss': loss,
 			'reconstruction_loss': reconstruction_loss / N,
@@ -79,13 +96,21 @@ class AbstractMDPTrainer(pl.LightningModule):
 		return loss
 	
 	def validation_step(self, batch, batch_idx):
-		loss, logs = self.step(batch, batch_idx)
+		s, next_s = batch.obs, batch.next_obs
+		x = torch.cat((s, next_s), dim=0)
+		z, x_bar, _ = self(x)
+		reconstruction_loss =  F.mse_loss(x, x_bar, reduction='none')
+		reconstruction_loss =reconstruction_loss.sum(-1).sqrt().mean()
+		logs = {
+			'val_loss': reconstruction_loss
+		}
+
 		self.log_dict(logs, on_step=False, on_epoch=True, prog_bar=True, logger=True)
-		return loss
+		return reconstruction_loss
 
 	def calibrated_prediction_loss(self, x, mu):
 		logvar = self._log_var(mu, x)
-		logsigma = self.softclip(logvar/2, -6)
+		logsigma = self.softclip(logvar, -6)/2
 		nll = self.gaussian_nll(mu, logsigma, x).sum(-1)
 		return nll
 
@@ -99,7 +124,8 @@ class AbstractMDPTrainer(pl.LightningModule):
 		return 0.5 * torch.pow((x - mu) / log_sigma.exp(), 2) + log_sigma + 0.5 * torch.log(torch.tensor(2 * torch.pi))
 
 	def kl_loss(self, mu, log_sigma):
-		return 0.5 * (-2 * log_sigma + (2 * log_sigma).exp() + mu ** 2 - 1).sum(-1)
+		kl = .5 * (-2 * log_sigma + (2 * log_sigma).exp() + mu ** 2 - 1).sum(-1)
+		return torch.max(torch.ones_like(kl), kl) # free bits.
 
 	def configure_optimizers(self):
 		return torch.optim.Adam(self.parameters(), lr=self.lr)

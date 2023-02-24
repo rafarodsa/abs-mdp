@@ -93,3 +93,10 @@ if __name__ == '__main__':
     plt.scatter(next_s[:, 0], next_s[:, 1], marker='o', s=5, color='g')
     plt.savefig(f'{args.save_path}/reconstruction.png')
 
+    plt.figure()
+    plt.scatter(obs[:,0], obs[:, 1], marker='x', s=5, color='b')
+    plt.scatter(next_obs[:, 0], next_obs[:, 1], marker='o', s=5, color='b')
+    plt.scatter(s[:, 0], s[:, 1], marker='x', s=5, color='g')
+    plt.scatter(next_s[:, 0], next_s[:, 1], marker='o', s=5, color='g')
+    plt.savefig(f'{args.save_path}/reconstruction_overlap.png')
+
