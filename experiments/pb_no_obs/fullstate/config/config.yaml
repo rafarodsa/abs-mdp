@@ -14,10 +14,10 @@ loss:
   reward_const: 0.0
   transition_const: 0. #5.263095635338799
   init_class_const: 0.0
-  kl_balance: 0.
+  kl_balance: 0.1
   n_samples: 1
 data:
-  data_path: ${experiment_cwd}/data/no_obs.pt
+  data_path: ${experiment_cwd}/data/noobs.pt
   batch_size: ${batch_size}
   num_workers: 1
   train_split: 0.8

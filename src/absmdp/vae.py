@@ -58,7 +58,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		
 		N = s.shape[0] + s_prime.shape[0]
 		
-		model = 'vae'
+		model = 'cvae'
 		# loss = (reconstruction_loss + 1. * kl_loss) / N
 		# log std deviations for encoder.
 		if model == 'ae':

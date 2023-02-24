@@ -11,7 +11,7 @@ import logging
 def save_model(save_path):
     pass
 
-def run(cfg):
+def run(cfg, ckpt=None):
     
     model = AbstractMDPTrainer(cfg) 
     data = PinballDataset(cfg.data)
@@ -25,7 +25,7 @@ def run(cfg):
                         callbacks=[CyclicalKLAnnealing(num_cycles=1, rate=0.2)],
                         log_every_n_steps=15
                     )
-    trainer.fit(model, data)
+    trainer.fit(model, data, ckpt_path=ckpt)
     return model
 
 def main():
@@ -34,6 +34,7 @@ def main():
     parser.add_argument('--config', type=str, default=default_config_path)
     parser.add_argument('--debug', action='store_const', const=logging.DEBUG, dest='loglevel', default=logging.WARNING)
     parser.add_argument('--verbose', action='store_const', const=logging.INFO, dest='loglevel')
+    parser.add_argument('--from-ckpt', type=str, default=None)
     args, unknown = parser.parse_known_args()
 
     logging.basicConfig(level=args.loglevel)
