@@ -75,8 +75,8 @@ class AbstractMDPTrainer(pl.LightningModule):
 		actions = a # dims: (batch, n_actions)
 		logger.debug(f"Actions: {actions.shape}, executed: {executed_.shape}")
 		
-		z = q_z.mean.squeeze() #z.squeeze(0) # z.squeeze sample dimension because we are using one sample.
-		z_prime_pred, q_z_prime_pred, _ = self.transition.sample_n_dist(torch.cat([z, actions], dim=-1))
+		_z = q_z.mean.squeeze() #z.squeeze(0) # z.squeeze sample dimension because we are using one sample.
+		z_prime_pred, q_z_prime_pred, _ = self.transition.sample_n_dist(torch.cat([_z, actions], dim=-1))
 
 		logger.debug(f"Transition: z {z.shape}, z' {z_prime_pred.shape}")
 		
