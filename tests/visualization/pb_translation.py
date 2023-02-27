@@ -150,27 +150,13 @@ if __name__ == '__main__':
     plt.savefig(f'{args.save_path}/latent_space.png')
 
 
-    # # plot reconstruction of next state.
-    # plt.figure()
-    # gaussians = many_gaussian_values(next_z_q.mean[_action==a], next_z_q.var[_action==a])
-    
-    # for g in gaussians:
-    #     plt.contour(g[0], g[1], g[2])
-    # error = predicted_z - next_z
-    # plt.quiver(next_z[_action==a, 0], next_z[_action==a, 1], error[_action==a, 0], error[_action==a, 1], angles='xy', scale_units='xy', scale=1)
-    # plt.scatter(predicted_z[_action == a, 0], predicted_z[_action == a, 1], s=5, label=f'action {a}', color='r')
-    # plt.scatter(next_z[_action == a, 0], next_z[_action == a, 1], label=f'action {a}', color='k', marker='x')
-
-
-    # plt.savefig(f'{args.save_path}/error.png')
-
     
     # pca = PCA(2)
     # pca = pca.fit(batch.obs)
     transform = np.eye(4)
     s = np.einsum('ji, bj->bi', transform, batch.obs.numpy())
     next_s, pred_next_s = np.einsum('ji, bj->bi',transform ,batch.next_obs.numpy()), np.einsum('ji, bj->bi', transform, predicted_next_s.numpy())
-    encoded_next_s = np.einsum('ji, bj->bi',transform ,decoded_next_s_q.mean.numpy())
+    encoded_next_s = np.einsum('ji, bj->bi',transform , decoded_next_s_q.mean.numpy())
     
     d_real = next_s - s
     d_pred = pred_next_s - s
@@ -195,7 +181,5 @@ if __name__ == '__main__':
         plt.title('Encoded/Decoded')
         # plt.scatter(s[_action == a, 0], s[_action == a, 1], marker='x', s=5, color='b')
         plt.scatter(encoded_next_s[_action == a, 0], encoded_next_s[_action == a, 1], marker='o', s=5, color='g')
-        # plt.quiver(s[_action == a, 0], s[_action == a, 1], d_pred[_action == a, 0], d_pred[_action == a, 1], angles='xy', scale_units='xy', scale=1)
-
     plt.savefig(f'{args.save_path}/pca_s.png')
 
