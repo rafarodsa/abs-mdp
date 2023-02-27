@@ -12,7 +12,7 @@ from optuna.integration import PyTorchLightningPruningCallback
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
-from src.absmdp.trainer import AbstractMDPTrainer
+from src.absmdp.vaetrainer import AbstractMDPTrainer
 from src.absmdp.datasets import PinballDataset
 from src.absmdp.utils import CyclicalKLAnnealing
 

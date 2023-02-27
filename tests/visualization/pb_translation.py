@@ -10,7 +10,7 @@ import torch
 
 import argparse
 
-from src.absmdp.trainer import AbstractMDPTrainer
+from src.absmdp.vaetrainer import AbstractMDPTrainer
 from src.absmdp.datasets import PinballDataset
 
 from omegaconf import OmegaConf as oc

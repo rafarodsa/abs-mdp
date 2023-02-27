@@ -70,7 +70,7 @@ class DiagonalGaussianModule(nn.Module):
         super().__init__()
         self.feats = features
         self.output_dim = config.output_dim
-
+        
         self.mean = nn.Linear(config.input_dim, config.output_dim)
         self.log_var = nn.Linear(config.input_dim, config.output_dim)
         self.min_var = torch.log(torch.tensor(config.min_std)) * 2
@@ -87,6 +87,7 @@ class DiagonalGaussianModule(nn.Module):
         return mean, log_var
 
     def sample_n_dist(self, input, n_samples=1):
+ 
         mean, log_var = self.forward(input)
         std = torch.exp(log_var / 2)
         std_normal = DiagonalNormal(torch.zeros_like(mean), torch.ones_like(std))

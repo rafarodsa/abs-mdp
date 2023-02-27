@@ -10,14 +10,14 @@ devices: 1
 save_path: ${experiment_cwd}/mdps
 loss:
   grounding_const: 1. #99.03164077159823
-  kl_const: 1. #0.3589425248337221
+  kl_const: 10 #0.3589425248337221
   reward_const: 0.0
   transition_const: 0. #5.263095635338799
   init_class_const: 0.0
-  kl_balance: 0.1
+  kl_balance: 0.
   n_samples: 1
 data:
-  data_path: ${experiment_cwd}/data/noobs_t.pt
+  data_path: ${experiment_cwd}/data/noobs.pt
   batch_size: ${batch_size}
   num_workers: 1
   train_split: 0.8
@@ -34,9 +34,9 @@ model:
   n_options: 4
   obs_dims: 4
   latent_dim: 2
-  encoder: ${loadcfg:${experiment_cwd}/config/models/encoder_mlp.yaml}
+  encoder: ${loadcfg:${experiment_cwd}/config/models/encoder_mlp_det.yaml}
   decoder: ${loadcfg:${experiment_cwd}/config/models/decoder_mlp.yaml}
-  transition: ${loadcfg:${experiment_cwd}/config/models/transition_mlp.yaml}
+  transition: ${loadcfg:${experiment_cwd}/config/models/transition_gaussian.yaml}
   init_class: ${loadcfg:${experiment_cwd}/config/models/init_class_mlp.yaml}
   reward: ${loadcfg:${experiment_cwd}/config/models/reward_mlp.yaml}
   gamma: ${loadcfg:${experiment_cwd}/config/models/reward_mlp.yaml}
