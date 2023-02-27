@@ -102,7 +102,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		prediction_loss = self.calibrated_prediction_loss(s_prime, s_prime_dist, s, s_dist, p0)
 		kl_loss = self.kl_loss(q_z, q_z_std, p0) #+ self._init_state_dist_loss(q_z_prime_encoded, q_z_std, p0)
 		# transition_loss, nlog_p = self._transition_loss(q_z_prime_encoded, q_z_prime_pred, alpha=self.hyperparams.kl_balance) 
-		transition_loss, nlog_p = self.transition_kl(q_z_prime_encoded, q_z_prime_pred, alpha=self.hyperparams.kl_balance), 0
+		transition_loss, nlog_p = self.transition_kl(q_z_prime_encoded, q_z_prime_pred, alpha=self.hyperparams.kl_balance)
 
 		# compute total loss
 		
@@ -122,7 +122,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 			"prediction_loss": transition_loss.mean(),
 			"kl_const": self.kl_const,
 			"elbo": elbo,
-			"transition_loss": nlog_p,
+			"transition_loss": nlog_p.mean(),
 			"loss": loss,
 			"std_s": s_dist.mean.squeeze().std(0).mean().item(),
 			"std_next_s": s_prime_dist.mean.squeeze().std(0).mean().item(),
@@ -161,18 +161,14 @@ class AbstractMDPTrainer(pl.LightningModule):
 
 	def transition_kl(self, encoder_dist, transition_dist, alpha=0.01):
 	
-		kl_1 = torch.distributions.kl_divergence(encoder_dist, transition_dist.detach())
-		kl_2 = torch.distributions.kl_divergence(encoder_dist.detach(), transition_dist)
-		kl = alpha * kl_1 + (1-alpha) * kl_2 # KL balancing
-		return torch.max(torch.ones_like(kl), kl) # free bits
-
-
-		# h = encoder_dist.entropy().mean()
-		
-		# mse = F.mse_loss(transition_dist.mean.detach(), encoder_dist.mean).mean()
-
-		# nlog_p = -encoder_dist.detach().log_prob(transition_dist.mean)
-		# return -h+mse, nlog_p.mean()
+		# kl_1 = torch.distributions.kl_divergence(encoder_dist, transition_dist.detach())
+		# kl_2 = torch.distributions.kl_divergence(encoder_dist.detach(), transition_dist)
+		# kl = alpha * kl_1 + (1-alpha) * kl_2 # KL balancing
+		# return torch.max(torch.ones_like(kl), kl) # free bits
+		h = encoder_dist.entropy().detach()
+		mse = F.mse_loss(transition_dist.mean, encoder_dist.mean.detach(), reduction='none').sum(-1)
+		nlog_p = -encoder_dist.detach().log_prob(transition_dist.mean)
+		return mse, nlog_p
 		
 	def kl_loss(self, q_z, std_normal_z, p0) -> torch.Tensor:
 		'''
@@ -194,7 +190,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		logger.debug(f'Batch: s {s.shape}, a {a.shape}, s_prime {s_prime.shape}, reward {len(reward)}, executed {executed.shape}, duration {duration.shape}, initiation_target {initiation_target.shape}')
 		
 		nll_loss = -q_s_prime.log_prob(s_prime).mean()
-		mse_error = F.mse_loss(s_prime, q_s_prime.mean.squeeze(), reduction='sum') / s_prime.shape[0]
+		mse_error = F.mse_loss(s_prime, q_s_prime.mean.squeeze(), reduction='sum').sqrt() / s_prime.shape[0]
 
 		init_loss = self._init_classifier_loss(initiation, initiation_target)
 		loss = nll_loss + init_loss
