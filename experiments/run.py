@@ -1,5 +1,6 @@
 import pytorch_lightning as pl
-from src.absmdp.det_ibtrainer import AbstractMDPTrainer
+from src.absmdp.ibtrainer import AbstractMDPTrainer
+from src.absmdp.det_ibtrainer import AbstractMDPTrainer as DetAbstractMDPTrainer
 from src.absmdp.datasets import PinballDataset
 from src.absmdp.utils import CyclicalKLAnnealing
 from omegaconf import OmegaConf as oc
