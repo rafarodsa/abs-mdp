@@ -82,19 +82,16 @@ class AbstractMDPTrainer(pl.LightningModule):
 		
 		loss = prediction_loss * self.hyperparams.grounding_const\
 			+ kl_loss * self.kl_const\
-			+ transition_loss * self.kl_const \
-			+ nlog_p * self.hyperparams.transition_const 
+			+ transition_loss * self.hyperparams.transition_const 
 		
 		loss = loss.mean()
 
 		# log std deviations for encoder.
 
 		logs = {
-			"grounding_loss": prediction_loss.mean(),
+			"prediction_loss (grounding function)": prediction_loss.mean(),
 			"kl_loss": kl_loss.mean(),
-			"prediction_loss": transition_loss.mean(),
-			"kl_const": self.kl_const,
-			"transition_loss": nlog_p,
+			"transition_loss": transition_loss.mean(),
 			"loss": loss
 		}
 
@@ -130,7 +127,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		mse_error = F.mse_loss(next_s, q_s_prime.mean.squeeze(), reduction='sum') / next_s.shape[0]
 
 		loss = nll_loss
-		self.log_dict({'nll_loss': nll_loss})
+		self.log_dict({'nll_loss': nll_loss},on_step=False, on_epoch=True, prog_bar=True, logger=True)
 		self.log_dict({'mse_error': mse_error}, on_step=False, on_epoch=True, prog_bar=True, logger=True)
 		return nll_loss
 		

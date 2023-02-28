@@ -2,22 +2,22 @@
 # Full State observation
 # Gridworld abstraction
 experiment_cwd: 'experiments/pb_no_obs/fullstate'
-lr: 3e-5
-batch_size: 64
-epochs: 50
+lr: 0.0009996863205559922
+batch_size: 128
+epochs: 200
 accelerator: gpu
 devices: 1
 save_path: ${experiment_cwd}/mdps
 loss:
-  grounding_const: 1. #99.03164077159823
-  kl_const: 10 #0.3589425248337221
+  grounding_const: 0.20833333550749766
+  kl_const: 85.34459562691943
   reward_const: 0.0
-  transition_const: 0. #5.263095635338799
+  transition_const: 36.714444967297894
   init_class_const: 0.0
-  kl_balance: 0.
+  kl_balance: 0.0
   n_samples: 1
 data:
-  data_path: ${experiment_cwd}/data/noobs.pt
+  data_path: ${experiment_cwd}/data/noobs_t.pt
   batch_size: ${batch_size}
   num_workers: 1
   train_split: 0.8

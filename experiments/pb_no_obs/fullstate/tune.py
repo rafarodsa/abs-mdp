@@ -12,30 +12,28 @@ from optuna.integration import PyTorchLightningPruningCallback
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
-from src.absmdp.vaetrainer import AbstractMDPTrainer
+from src.absmdp.det_ibtrainer import AbstractMDPTrainer
 from src.absmdp.datasets import PinballDataset
 from src.absmdp.utils import CyclicalKLAnnealing
 
 
-def prepare_config(cfg, lr, kl_const, transition_const, kl_balance):
+def prepare_config(trial, cfg, variables):
     
-    # manually override config
-    # TODO can we generalize this?
-    cfg.lr = lr
-    cfg.loss.kl_const = kl_const
-    cfg.loss.transition_const = transition_const
-    cfg.loss.kl_balance = kl_balance
+    for var in variables:
+        name, min, max, _type = var.name, var.min, var.max, var.type
+        _path = name.split('.')
+        if _type == 'float':
+            val = trial.suggest_float(name, min, max)
+            for node in _path[:-1]:
+                x = cfg[node] # get to the parent of leave node
+            x[_path[-1]] = val
+        else:
+            raise NotImplementedError
     return cfg
 
-def objective(cfg, trial):
+def objective(cfg, trial, variables, metrics=None):
     # Search Space
-    
-    lr = trial.suggest_float('lr', 1e-6, 1e-3)
-    kl_const = trial.suggest_float('kl_const', 0., 100)
-    transition_const = trial.suggest_float('transition_const', 0., 100)
-    kl_balance = trial.suggest_float('kl_balance', 0., 1.)
-
-    cfg = prepare_config(cfg, lr, kl_const, transition_const, kl_balance)
+    cfg = prepare_config(trial, cfg, variables)
     model = AbstractMDPTrainer(cfg) 
     dataset = PinballDataset(cfg.data)
 
@@ -60,9 +58,8 @@ def tune():
 
     ## Parser
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', type=str, default=default_config_path)
+    parser.add_argument('--tune-config', type=str, default='./tune.yaml')
     parser.add_argument('--num-trials', type=int, default=10)
-    parser.add_argument('--study-name', type=str, default="pinball_simple")
     parser.add_argument('--process', type=int, default=0)
     parser.add_argument(
         "--pruning",
@@ -80,28 +77,30 @@ def tune():
     )
     
     # allow to overwrite config from command line
-    cfg = oc.load(args.config)
+    tune_cfg = oc.load(args.tune_config)
+
+    cfg = oc.load(tune_cfg.config)
     cfg_cli = oc.from_cli()
     cfg = oc.merge(cfg, cfg_cli)
 
+
     # storage for optuna parallelization
-    optuna_db_path = cfg.experiment_cwd + "/tune.db"
+    optuna_db_path = cfg.experiment_cwd + tune_cfg.db
     storage = optuna.storages.JournalStorage(
             optuna.storages.JournalFileStorage(optuna_db_path)
         )
 
     study = optuna.create_study(
-                        direction="minimize",
+                        direction=tune_cfg.direction,
                         pruner=pruner, 
                         storage=storage,
-                        study_name=args.study_name, 
+                        study_name=tune_cfg.study_name, 
                         load_if_exists=True
                     )
     if not args.best_trial:
         study.optimize(
-                        partial(objective, cfg), 
-                        n_trials=args.num_trials, 
-                        timeout=600
+                        partial(objective, cfg, variables=tune_cfg.variables), 
+                        n_trials=args.num_trials
                     )
     else:
         print("Number of finished trials: {}".format(len(study.trials)))
