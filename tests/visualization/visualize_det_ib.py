@@ -19,45 +19,7 @@ from omegaconf import OmegaConf as oc
 from sklearn.decomposition import PCA
 
 from collections import namedtuple
-from src.utils.printarr import printarr
-
-def predict_next_states(mdp, states, actions, executed):
-    next_s = []
-    next_z = []
-    for action in actions:
-        actions_ = action * torch.ones(states.shape[0])
-        z = mdp.encoder(states)
-        next_z_ = mdp.transition(z, actions_.long(), executed)
-        next_s.append(mdp.ground(next_z_))
-        next_z.append(next_z_)
-    return next_s, next_z
-
-def states_to_plot(states, n_grids=10):
-    return torch.round(n_grids * states)
-
-def test_grounding(mdp, states):
-    z = mdp.encoder(states)
-    s = mdp.ground(z)
-    return s, z
-
-def many_gaussian_values(means, vars):
-    batch = means.shape[0]
-    stds = np.sqrt(vars)
-    gaussians = []
-    for b in range(batch):
-        mean, std = means[b][:2], stds[b][:2]
-        min_v, max_v = mean-2*std, mean + 2 *std
-        x, y = np.linspace(min_v[0],max_v[0], 200), np.linspace(min_v[1],max_v[1], 200)
-        xv, yv = np.meshgrid(x, y)
-        pts = np.dstack((xv,yv))
-        rv = multivariate_normal(mean, np.diag(vars[b]))
-        z = rv.pdf(pts)/batch
-        gaussians.append(np.stack((xv,yv,z), axis=0))
-
-    return gaussians
-        
-
-    
+from src.utils.printarr import printarr    
 
 
 if __name__ == '__main__':
@@ -102,7 +64,7 @@ if __name__ == '__main__':
         predicted_z, q_z, _ = model.transition.sample_n_dist(transition_in, 1)
         predicted_z = predicted_z.squeeze()
         predicted_next_s, predicted_next_s_q, _ = model.decoder.sample_n_dist(predicted_z)
-        predicted_next_s = predicted_next_s.squeeze()
+        predicted_next_s = predicted_next_s_q.mean.squeeze()
         decoded_next_s_q = model.decoder.distribution(next_z)
         print(predicted_next_s.isnan())
         print(f'Empirical MSE {(predicted_next_s - batch.next_obs).pow(2).sum(-1).sqrt().mean()}')

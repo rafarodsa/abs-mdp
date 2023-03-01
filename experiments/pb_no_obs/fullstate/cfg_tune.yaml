@@ -6,15 +6,15 @@ db: tune.db
 variables:
   - name: loss.grounding_const
     min: 0.
-    max: 100
+    max: 10
     type: float
   - name: loss.kl_const
     min: 0.
-    max: 100
+    max: 10
     type: float
   - name: loss.transition_const
     min: 0.
-    max: 100
+    max: 10
     type: float
   - name: lr
     min: 1e-7
