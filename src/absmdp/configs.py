@@ -46,7 +46,9 @@ class AbstractMDPConfig:
     #TODO allow to load from path into structure config
     encoder: Optional[Any]
     decoder: Optional[Any]
+    inference: Optional[Any]
     transition: Optional[Any]
+    transition_s: Optional[Any]
     reward: Optional[Any]
     init_class: Optional[Any]
     gamma: Optional[Any]
