@@ -3,11 +3,12 @@ features:
   latent_dim: ${model.latent_dim}
   n_options: ${model.n_options}
   hidden_dims:
-  - 64
-  activation: gelu
+  - 128
+  - 128
+  activation: relu
 dist:
   type: diag_gaussian
   output_dim: ${model.obs_dims}
   input_dim: ${model.latent_dim}
-  min_std: 0.0001
-  max_std: 0.01
+  min_std: 0.001
+  max_std: 100

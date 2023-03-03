@@ -23,6 +23,7 @@ import logging
 logger = logging.getLogger(__name__)
 torch.set_float32_matmul_precision('medium')
 
+
 class AbstractMDPTrainer(pl.LightningModule):
 	
 	def __init__(self, cfg: TrainerConfig):
@@ -37,6 +38,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		self.q = build_distribution(cfg.model.inference)
 		self.transition = build_distribution(cfg.model.transition)
 		self.grounding = build_distribution(cfg.model.decoder)
+		self.decoder = build_distribution(cfg.model.decoder)
 		self.transition_s = build_distribution(cfg.model.transition_s)
 		self.lr = cfg.lr
 		self.hyperparams = cfg.loss
@@ -46,8 +48,9 @@ class AbstractMDPTrainer(pl.LightningModule):
 		z = self.encoder(state)
 		t_in = torch.cat([z, action], dim=-1)
 		next_z, next_z_q, _ = self.transition.sample_n_dist(t_in)	
-		q_s_prime = self.transition_s.distribution(t_in) 
-		q_s = self.grounding.distribution(z) 
+		# q_s_prime = self.transition_s.distribution(t_in) 
+		q_s_prime = self.grounding.distribution(self.transition.distribution(t_in).mean + z)
+		q_s = self.decoder.distribution(z) 
 		return q_s, q_s_prime
 
 	def _run_step(self, s, a, next_s):
@@ -59,43 +62,43 @@ class AbstractMDPTrainer(pl.LightningModule):
 	
 		inferred_z, q_z, _ = self.q.sample_n_dist(torch.cat([next_s, actions], dim=-1))
 
-		# inferred_z = torch.randn(z.shape) * q_z.std + z 
+		inferred_z = torch.randn(z.shape).to(z.get_device()) * q_z.std + z 
 
 		
-		next_s_q_pred  = self.transition_s.distribution(torch.cat([inferred_z.squeeze(), actions], dim=-1))
+		# next_s_q_pred  = self.transition_s.distribution(torch.cat([inferred_z.squeeze(), actions], dim=-1))
+		next_z_pred, _, _ = self.transition.sample_n_dist(torch.cat([inferred_z.squeeze(), actions], dim=-1))
+		next_z_pred = next_z_pred.squeeze() + z
+		next_s_q_pred = self.grounding.distribution(next_z_pred.squeeze())
 		infomax_loss = self.infomax_loss(next_s, next_s_q_pred, n_samples=1)
 		
-		q_loss = self.inference_loss(z, q_z)
-		transition_loss = self.transition_loss(z, next_z, a)
+		# q_loss = 0 * self.inference_loss(z, q_z)
+		transition_loss = self.transition_loss(z.detach(), next_z.detach(), a)
 
 		# decode next latent state
-		q_next_s = self.grounding.distribution(next_z)
-		q_s = self.grounding.distribution(z)
+		# q_next_s = self.decoder.distribution(next_z)
+		q_s = self.decoder.distribution(z)
 		
-		info_loss_z, info_loss_next_z = -self.info_bottleneck(s, q_s), -self.info_bottleneck(next_s, q_next_s)
+		info_loss_z = -self.info_bottleneck(s, q_s) 
 
-		return infomax_loss, q_loss, transition_loss, info_loss_z, info_loss_next_z
+		return infomax_loss + transition_loss, info_loss_z
 
 
 	def step(self, batch, batch_idx):
 		s, a, next_s, executed = batch.obs, batch.action, batch.next_obs, batch.executed
 		assert torch.all(executed) # check all samples are successful executions.
 		
-		infomax, q_loss, transition_loss, info_loss_z, info_loss_next_z = self._run_step(s, a, next_s)
+		infomax, info_loss_z = self._run_step(s, a, next_s)
 
 
 		# compute total loss
-		loss = infomax + q_loss + 0*transition_loss + self.kl_const * (info_loss_z + 0 * info_loss_next_z)
+		loss = infomax + self.kl_const * info_loss_z
 		loss = loss.mean()
 
 		# log std deviations for encoder.
 
 		logs = {
 			'infomax': infomax.mean(),
-			'q_loss': q_loss.mean(),
-			'transition_loss': transition_loss.mean(),
 			'info_loss_z': info_loss_z.mean(),
-			'info_loss_next_z': info_loss_next_z.mean(),
 		}
 
 		logger.debug(f'Losses: {logs}')
@@ -111,7 +114,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		return decoded_q_s.log_prob(s)
 	
 	def transition_loss(self, z, next_z, action):
-		return -self.transition.distribution(torch.cat([z, action], dim=-1)).log_prob(next_z)
+		return -self.transition.distribution(torch.cat([z, action], dim=-1)).log_prob(next_z-z)
 
 	def inference_loss(self, z, inferred_q):
 		return -inferred_q.detach().log_prob(z)
@@ -135,7 +138,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 		return nll_loss
 		
 	def configure_optimizers(self):
-		return torch.optim.NAdam(self.parameters(), lr=self.lr)
+		return torch.optim.Adam(self.parameters(), lr=self.lr)
 	
 	@staticmethod
 	def load_config(path):

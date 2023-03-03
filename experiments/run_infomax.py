@@ -4,7 +4,7 @@ from src.absmdp.datasets import PinballDataset
 from src.absmdp.utils import CyclicalKLAnnealing
 from omegaconf import OmegaConf as oc
 import argparse
-
+import torch
 import logging
 # load the config
 
@@ -23,12 +23,15 @@ def run(cfg, ckpt=None):
                         auto_scale_batch_size=True,
                         default_root_dir=f'{cfg.save_path}/runs',
                         # callbacks=[CyclicalKLAnnealing(num_cycles=1, rate=0.5)],
-                        log_every_n_steps=15
+                        log_every_n_steps=15,
+                        track_grad_norm=2,
+                        detect_anomaly=True
                     )
     trainer.fit(model, data, ckpt_path=ckpt)
     return model
 
 def main():
+    torch.autograd.set_detect_anomaly(True)
     default_config_path = "experiments/pb_no_obs/fullstate/config/config.yaml"
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default=default_config_path)
