@@ -15,7 +15,8 @@ from joblib import Parallel, delayed
 
 from scripts.utils import collect_trajectory
 from envs.pinball.pinball_gym import PinballEnvContinuous as Pinball
-from envs.pinball.controllers_pinball import create_position_controllers as OptionFactory
+from envs.pinball.controllers_pinball import create_position_controllers_v0 as OptionFactory
+from envs.pinball.controllers_pinball import create_position_options as OptionFactory2
 
 if __name__== "__main__":
 
@@ -51,7 +52,7 @@ if __name__== "__main__":
     env = Pinball(config=args.env_config, width=grid_size, height=grid_size, render_mode='rgb_array') 
 
 
-    options = OptionFactory(env)
+    options = OptionFactory2(env)
     max_exec_time = args.max_exec_time
     
     options_desc = {i: str(o) for i, o in enumerate(options)}

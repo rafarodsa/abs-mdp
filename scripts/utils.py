@@ -5,7 +5,7 @@
 """
 
 from envs.pinball.pinball_gym import PinballEnvContinuous as Pinball
-from envs.pinball.controllers_pinball import create_position_controllers as OptionFactory
+from envs.pinball.controllers_pinball import create_position_controllers_v0 as OptionFactory
 
 import numpy as np
 
