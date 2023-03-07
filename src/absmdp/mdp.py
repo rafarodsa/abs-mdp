@@ -11,25 +11,15 @@
 import torch
 import torch.nn.functional as F
 import pytorch_lightning as pl
-
-from src.models.factories import build_model
+import numpy as np
 from src.absmdp.infomax import InfomaxAbstraction
-from src.utils.symlog import symlog
+from src.utils.symlog import symlog, symexp
 
 import logging
 logger = logging.getLogger(__name__)
 torch.set_float32_matmul_precision('medium')
 
 
-"""
-    Abstract MDP
-    author: Rafael Rodriguez-Sanchez (rrs@brown.edu)
-    date: 1 December 2022
-"""
-import numpy as np
-import torch
-
-from argparse import Namespace
 from src.utils.symlog import symexp
 
 class AbstractMDP:
@@ -46,6 +36,10 @@ class AbstractMDP:
 
     def plan(self, initial_state, goal):
         pass
+
+        # 1. sample initial_state distribution and map to abstract state
+        # 2. map goal states to abstract states
+        # 3. define new reward function and terminal states
     
     def get_actions(self):
         return list(range(self.n_options)) 

@@ -22,7 +22,7 @@ class VAELossConfig:
     kl_const: float = 0.1
     reward_const: float = 1.
     transition_const: float = 0.1
-    init_class_const: float = 1.
+    initset_const: float = 1.
     tau_const: float = 1.
     n_samples: int = 1
     kl_balance: float = 0.01

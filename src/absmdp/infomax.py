@@ -25,7 +25,6 @@ torch.set_float32_matmul_precision('medium')
 
 
 class InfomaxAbstraction(pl.LightningModule):
-	
 	def __init__(self, cfg: TrainerConfig):
 		super().__init__()
 		oc.resolve(cfg)
@@ -38,6 +37,7 @@ class InfomaxAbstraction(pl.LightningModule):
 		self.transition = build_distribution(cfg.model.transition)
 		self.grounding = build_distribution(cfg.model.decoder)
 		self.decoder = build_distribution(cfg.model.decoder)
+		self.initsets = build_model(cfg.model.init_class)
 		self.lr = cfg.lr
 		self.hyperparams = cfg.loss
 		self.kl_const =  self.hyperparams.kl_const
@@ -49,7 +49,7 @@ class InfomaxAbstraction(pl.LightningModule):
 		q_s = self.decoder.distribution(z) 
 		return q_s, q_s_prime
 
-	def _run_step(self, s, a, next_s):
+	def _run_step(self, s, a, next_s, initset_s):
 		# sample encoding of (s, s')
 		z = self.encoder(s)
 		next_z  = self.encoder(next_s)
@@ -57,7 +57,6 @@ class InfomaxAbstraction(pl.LightningModule):
 		actions = a # dims: (batch, n_actions)
 		inferred_z = z #torch.randn(z.shape).to(z.get_device()) * q_z.std + z 
 		
-		# next_s_q_pred  = self.transition_s.distribution(torch.cat([inferred_z.squeeze(), actions], dim=-1))
 		next_z_pred, _, _ = self.transition.sample_n_dist(torch.cat([inferred_z.squeeze(), actions], dim=-1))
 		next_z_pred = next_z_pred.squeeze() + z
 		next_s_q_pred = self.grounding.distribution(next_z_pred.squeeze())
@@ -72,23 +71,29 @@ class InfomaxAbstraction(pl.LightningModule):
 		q_s = self.decoder.freeze().distribution(z)
 		info_loss_z = -self.info_bottleneck(s, q_s) 
 
-		return infomax_loss, transition_loss, info_loss_z
+		# initsets
+		initset_pred = torch.sigmoid(self.initsets(z))
+		initset_loss = F.binary_cross_entropy(initset_pred, initset_s)
+
+		return infomax_loss, transition_loss, info_loss_z, initset_loss
 
 
 	def step(self, batch, batch_idx):
-		s, a, next_s, executed = batch.obs, batch.action, batch.next_obs, batch.executed
+		s, a, next_s, executed, initset_s = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets
 		assert torch.all(executed) # check all samples are successful executions.
 		
-		infomax, transition_loss, info_loss_z = self._run_step(s, a, next_s)
+		infomax, transition_loss, info_loss_z, initset_loss = self._run_step(s, a, next_s, initset_s)
 
 		# compute total loss
-		loss = transition_loss + infomax + self.kl_const * info_loss_z
+		loss = infomax + info_loss_z + initset_loss * self.hyperparams.initset_const + transition_loss
 		loss = loss.mean()
 
 		# log std deviations for encoder.
 		logs = {
 			'infomax': infomax.mean(),
 			'info_loss_z': info_loss_z.mean(),
+			'transition_loss': transition_loss.mean(),
+			'initset_loss': initset_loss.mean(),
 		}
 		logger.debug(f'Losses: {logs}')
 		return loss, logs
@@ -204,11 +209,8 @@ class AbstractMDPTrainer(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        
         s, a, next_s, rews, duration = batch.obs, batch.action, batch.next_obs, batch.rewards, batch.duration
-
         z, next_z, reward_prediction, tau_prediction, q_s, q_next_s = self._step(s, a, next_s)
-
         # compute loss
         reward_loss = self._reward_loss(reward_prediction, q_s, q_next_s, rews)
         tau_loss = self._tau_loss(tau_prediction, duration)

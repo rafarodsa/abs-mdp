@@ -92,12 +92,13 @@ class PinballDataset_(torch.utils.data.Dataset):
         return len(self.data)
 
     def _set_dtype(self, datum):
-        s, s_, initsets, executed = datum.obs, datum.next_obs, datum.initsets, datum.executed
+        s, s_, initsets, executed, duration = datum.obs, datum.next_obs, datum.initsets, datum.executed, datum.duration
         s = torch.from_numpy(s).to(self.dtype)
         s_ = torch.from_numpy(s_).to(self.dtype)
+        duration = torch.tensor(duration).to(self.dtype)
         initsets = torch.from_numpy(initsets).to(self.dtype)
         executed = torch.tensor(executed).to(self.dtype)
-        return datum.modify(obs=s, next_obs=s_, initsets=initsets, executed=executed, info={})
+        return datum.modify(obs=s, next_obs=s_, initsets=initsets, executed=executed, duration=duration, info={})
 
     def _get_rewards(self, datum, n_samples):
         current_obs, action, current_next_obs, current_rewards = datum.obs, datum.action, datum.next_obs, datum.rewards

@@ -13,7 +13,8 @@ loss:
   kl_const: 1
   transition_const: 1
   reward_const: 1
-  tau_const: 1
+  tau_const: 1.
+  initset_const: 1.
   kl_balance: 0.0
   n_samples: 1
 data:
