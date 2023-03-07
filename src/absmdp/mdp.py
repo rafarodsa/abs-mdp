@@ -1,4 +1,27 @@
 """
+    Train an Abstract MDP model
+    based on an abstraction function $phi(s)$,
+    abstract transition function $T(z' | z, a)$,
+    abstract initiation classifiers $I(z)$,
+    and grounding function $g(s|z)$.
+    
+    author: Rafael Rodriguez-Sanchez
+    date: 7 March 2023
+"""
+import torch
+import torch.nn.functional as F
+import pytorch_lightning as pl
+
+from src.models.factories import build_model
+from src.absmdp.infomax import InfomaxAbstraction
+from src.utils.symlog import symlog
+
+import logging
+logger = logging.getLogger(__name__)
+torch.set_float32_matmul_precision('medium')
+
+
+"""
     Abstract MDP
     author: Rafael Rodriguez-Sanchez (rrs@brown.edu)
     date: 1 December 2022
@@ -13,26 +36,19 @@ class AbstractMDP:
     def __init__(self, mdp_trainer, data):
         self.data = data
         self.trainer = mdp_trainer
-        self.encoder = mdp_trainer.phi.encoder
-        self.grounding = mdp_trainer.phi.grounding
-        self.transition = mdp_trainer.phi.transition
-        self.reward_fn = mdp_trainer.reward_fn
-        self.gamma = mdp_trainer.gamma
-
-        self.init_classifier = mdp_trainer.phi.init_classifier
-        self.tau = mdp_trainer.tau
-
         self.n_options = mdp_trainer.n_options
         self.latent_dim = mdp_trainer.latent_dim
         self.obs_dim = mdp_trainer.obs_dim
-        
         self.initial_states = None
 
-    def plan(self, goal):
+        self._prepare_initial_states()
+        self.prepare_models()
+
+    def plan(self, initial_state, goal):
         pass
     
     def get_actions(self):
-        return list(range(self.trainer.n_options)) 
+        return list(range(self.n_options)) 
 
     def get_initial_states(self, n_samples=1):
         if self.initial_states is None:
@@ -41,10 +57,7 @@ class AbstractMDP:
         sample = np.random.choice(len(self.data), n_samples, replace=True)
         sample = self.initial_states[sample]
         return sample
-
-    def _prepare_initial_states(self):
-        self.initial_states = torch.stack([d[0] for d in self.data])
-
+    
     def action_to_one_hot(self, action):
         return torch.nn.functional.one_hot(action, self.n_options)
 
@@ -83,3 +96,23 @@ class AbstractMDP:
     def load(path):
         data, trainer = torch.load(path)
         return AbstractMDP(trainer, data)
+    
+    def _prepare_initial_states(self):
+        self.initial_states = torch.stack([d.obs for d in self.data if d.p0 == 1])
+    
+    def prepare_models(self):
+        mdp_trainer = self.mdp_trainer
+        self.encoder = mdp_trainer.phi.encoder
+        self.encoder.requires_grad_(False)
+        self.grounding = mdp_trainer.phi.grounding
+        self.grounding.requires_grad_(False)
+        self.transition = mdp_trainer.phi.transition
+        self.transition.requires_grad_(False)
+        self.reward_fn = mdp_trainer.reward_fn
+        self.reward_fn.requires_grad_(False)
+        self.gamma = mdp_trainer.gamma
+        self.gamma.requires_grad_(False)
+        self.init_classifier = mdp_trainer.phi.init_classifier
+        self.init_classifier.requires_grad_(False)
+        self.tau = mdp_trainer.tau
+        self.tau.requires_grad_(False)

@@ -86,7 +86,7 @@ if __name__== "__main__":
         next_s_executed = next_s[idx][_executed==1]
         state_change = next_s_executed - s_executed
         state_change_min, state_change_max = state_change.min(0), state_change.max(0)
-        state_change_mean = state_change.mean(0)
+        state_change_mean, state_change_std = state_change.mean(0), state_change.std(0)
 
         stats[i] = {
             'prob_executions': n_executions,
@@ -96,7 +96,8 @@ if __name__== "__main__":
             'max_reward': option_rewards.max(),
             'state_change_min': state_change_min,
             'state_change_max': state_change_max,
-            'state_change_mean': state_change_mean
+            'state_change_mean': state_change_mean,
+            'state_change_std': state_change_std
         }
 
         print(f'--------Option-{i}: {options_desc[i]}---------')
@@ -104,7 +105,7 @@ if __name__== "__main__":
         print(f"Average duration {avg_duration}")
         print(f"Average reward {option_rewards.mean()}. Max reward: {option_rewards.max()}. Min reward: {option_rewards.min()}")
         print(f"Reward length: mean: {np.array(_r_len)[idx].mean()}, max: {np.array(_r_len)[idx].max()}, min: {np.array(_r_len)[idx].min()}")
-        print(f"State change: mean: {state_change_mean}, max: {state_change_max}, min: {state_change_min}")
+        print(f"State change: mean: {state_change_mean}, max: {state_change_max}, min: {state_change_min}, std {state_change_std}")
     
     debug = {
         'latent_states': info,

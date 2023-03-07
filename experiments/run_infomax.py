@@ -1,19 +1,22 @@
 import pytorch_lightning as pl
-from src.absmdp.infomax import AbstractMDPTrainer
+
+from src.absmdp.infomax import InfomaxAbstraction, AbstractMDPTrainer
+from src.absmdp.mdp import AbstractMDP
+
+
 from src.absmdp.datasets import PinballDataset
-from src.absmdp.utils import CyclicalKLAnnealing
 from omegaconf import OmegaConf as oc
 import argparse
 import torch
 import logging
-# load the config
 
-def save_model(save_path):
+# load the config
+def save_model(trainer, save_path):
     pass
 
 def run(cfg, ckpt=None):
     
-    model = AbstractMDPTrainer(cfg) 
+    model = InfomaxAbstraction(cfg) 
     data = PinballDataset(cfg.data)
     # training
     trainer = pl.Trainer(
@@ -21,14 +24,32 @@ def run(cfg, ckpt=None):
                         gpus=cfg.devices if cfg.accelerator == "gpu" else None,
                         max_epochs=cfg.epochs, 
                         auto_scale_batch_size=True,
-                        default_root_dir=f'{cfg.save_path}/runs',
-                        # callbacks=[CyclicalKLAnnealing(num_cycles=1, rate=0.5)],
+                        default_root_dir=f'{cfg.save_path}/phi_train',
                         log_every_n_steps=15,
-                        track_grad_norm=2,
-                        detect_anomaly=True
                     )
     trainer.fit(model, data, ckpt_path=ckpt)
     return model
+
+def train_mdp(cfg, ckpt):
+    if ckpt is None:
+        raise ValueError("Must provide an abstraction checkpoint to train MDP. Run abstraction first.")
+
+    phi = InfomaxAbstraction.load_from_checkpoint(ckpt)
+    model = AbstractMDPTrainer(cfg, phi)
+    data = PinballDataset(cfg.data)
+    # training
+    trainer = pl.Trainer(
+                        accelerator=cfg.accelerator,
+                        gpus=cfg.devices if cfg.accelerator == "gpu" else None,
+                        max_epochs=cfg.epochs, 
+                        auto_scale_batch_size=True,
+                        default_root_dir=f'{cfg.save_path}/mdp_train',
+                        log_every_n_steps=15,
+                    )
+
+    trainer.fit(model, data)
+    return model
+
 
 def main():
     torch.autograd.set_detect_anomaly(True)
@@ -38,14 +59,22 @@ def main():
     parser.add_argument('--debug', action='store_const', const=logging.DEBUG, dest='loglevel', default=logging.WARNING)
     parser.add_argument('--verbose', action='store_const', const=logging.INFO, dest='loglevel')
     parser.add_argument('--from-ckpt', type=str, default=None)
+
+
+    parser.add_argument('--train-mdp', action='store_true', default=False)
+
     args, unknown = parser.parse_known_args()
 
     logging.basicConfig(level=args.loglevel)
 
     cli_config = oc.from_cli(unknown)
-    cfg = AbstractMDPTrainer.load_config(args.config)
+    cfg = InfomaxAbstraction.load_config(args.config)
     cfg = oc.merge(cfg, cli_config)
-    run(cfg, args.from_ckpt)
+
+    if not args.train_mdp:
+        run(cfg, args.from_ckpt)
+    else:
+        train_mdp(cfg, args.from_ckpt)
 
 if __name__ == "__main__":
     main()

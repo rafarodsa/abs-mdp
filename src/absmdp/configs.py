@@ -23,6 +23,7 @@ class VAELossConfig:
     reward_const: float = 1.
     transition_const: float = 0.1
     init_class_const: float = 1.
+    tau_const: float = 1.
     n_samples: int = 1
     kl_balance: float = 0.01
 
@@ -51,7 +52,7 @@ class AbstractMDPConfig:
     transition_s: Optional[Any]
     reward: Optional[Any]
     init_class: Optional[Any]
-    gamma: Optional[Any]
+    tau: Optional[Any]
     n_options: int = MISSING
     obs_dims: int = MISSING
     latent_dim: int = MISSING 
