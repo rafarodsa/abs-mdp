@@ -10,7 +10,7 @@ devices: 1
 save_path: ${experiment_cwd}/mdps
 loss:
   grounding_const: 1.
-  kl_const: .001
+  kl_const: 1
   transition_const: 1
   kl_balance: 0.0
   n_samples: 1

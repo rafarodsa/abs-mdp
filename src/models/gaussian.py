@@ -107,7 +107,16 @@ class DiagonalGaussianModule(nn.Module):
         std = torch.exp(log_var / 2)
         q = DiagonalNormal(mean, std)
         return q
-
+    
+    def freeze(self):
+        for p in self.parameters():
+            p.requires_grad_ = False
+        return self
+    
+    def unfreeze(self):
+        for p in self.parameters():
+            p.requires_grad_ = True
+        return self
 
 class SphericalGaussianModule(DiagonalGaussianModule):
     def __init__(self, features, config):

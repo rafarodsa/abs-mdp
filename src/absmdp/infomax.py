@@ -62,7 +62,7 @@ class AbstractMDPTrainer(pl.LightningModule):
 	
 		inferred_z, q_z, _ = self.q.sample_n_dist(torch.cat([next_s, actions], dim=-1))
 
-		inferred_z = torch.randn(z.shape).to(z.get_device()) * q_z.std + z 
+		inferred_z = z #torch.randn(z.shape).to(z.get_device()) * q_z.std + z 
 
 		
 		# next_s_q_pred  = self.transition_s.distribution(torch.cat([inferred_z.squeeze(), actions], dim=-1))
@@ -76,8 +76,9 @@ class AbstractMDPTrainer(pl.LightningModule):
 
 		# decode next latent state
 		# q_next_s = self.decoder.distribution(next_z)
-		q_s = self.decoder.distribution(z)
-		
+		# q_s = self.decoder.distribution(z)
+		self.decoder.load_state_dict(self.grounding.state_dict())
+		q_s = self.decoder.freeze().distribution(z)
 		info_loss_z = -self.info_bottleneck(s, q_s) 
 
 		return infomax_loss + transition_loss, info_loss_z
