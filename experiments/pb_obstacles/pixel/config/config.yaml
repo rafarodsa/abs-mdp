@@ -2,38 +2,41 @@
 # Full State observation
 # Gridworld abstraction
 experiment_cwd: 'experiments/pb_obstacles/pixel'
-lr: 1e-2
-batch_size: 32
-epochs: 2
+lr: 3e-4
+batch_size: 64
+epochs: 50
 accelerator: gpu
 devices: 1
 save_path: ${experiment_cwd}/mdps
 loss:
-  grounding_const: 1
-  kl_const:  1.
-  reward_const: 1.
-  transition_const: 1.
-  init_class_const: 1.
+  grounding_const: 1.
+  kl_const: 1
+  transition_const: 1
+  reward_const: 1
+  tau_const: 1.
+  initset_const: 0.
   n_samples: 1
 data:
-  data_path: ${experiment_cwd}/data/obstacles.pt
+  data_path: ${experiment_cwd}/data/simple_v1.zip
   batch_size: ${batch_size}
-  num_workers: 4
-  train_split: 0.9
+  num_workers: 1
+  train_split: 0.5
   val_split: 0.1
-  test_split: 0.
+  test_split: 0.4
   shuffle: True  
-  obs_type: pixels
-  n_reward_samples: 2
-  gamma: 0.99
+  n_reward_samples: 5
   n_options: ${model.n_options}
+  n_out_feats: 4
+  state_dim : 4
+  obs_type: pixels
+  gamma: 0.99
 model:
   n_options: 4
   obs_dims: 4
-  latent_dim: 2
+  latent_dim: 10
   encoder: ${loadcfg:${experiment_cwd}/config/models/encoder_residual.yaml}
   decoder: ${loadcfg:${experiment_cwd}/config/models/decoder_pixelcnn.yaml}
-  transition: ${loadcfg:${experiment_cwd}/config/models/transition_mlp.yaml}
+  transition: ${loadcfg:${experiment_cwd}/config/models/transition_gaussian.yaml}
   init_class: ${loadcfg:${experiment_cwd}/config/models/init_class_mlp.yaml}
   reward: ${loadcfg:${experiment_cwd}/config/models/reward_mlp.yaml}
-  gamma: ${loadcfg:${experiment_cwd}/config/models/reward_mlp.yaml}
+  tau: ${loadcfg:${experiment_cwd}/config/models/tau_mlp.yaml}

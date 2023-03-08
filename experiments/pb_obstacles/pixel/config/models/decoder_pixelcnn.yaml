@@ -1,7 +1,8 @@
 features:
   type: deconv
   input_dim: ${model.latent_dim}
-  in_channels: 64
+  mlp_hidden: 16
+  in_channels: 16
   out_width: 100
   out_height: 100
   out_channels: 16
@@ -12,6 +13,6 @@ dist:
   color_channels: ${model.decoder.features.color_channels} 
   feats_maps: ${model.decoder.features.out_channels}
   kernel_size: 7
-  n_layers: 20
+  n_layers: 5
   out_width: 100
   out_height: 100

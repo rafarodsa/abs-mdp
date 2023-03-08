@@ -11,6 +11,15 @@ import pytorch_lightning as pl
 from functools import partial, reduce
 from typing import NamedTuple, List, Dict, Optional
 
+import zipfile
+from PIL import Image
+from collections import namedtuple
+from typing import NamedTuple
+
+
+class ObservationImgFile(NamedTuple):
+    traj: int
+    timestep: int
 
 class InitiationSet(NamedTuple):
     obs: torch.Tensor
@@ -66,23 +75,35 @@ def linear_projection(datum, linear_projection):
 
 
 class PinballDataset_(torch.utils.data.Dataset):
+    IMG_FORMAT = 'tj_{}_obs_{}.png'
+
     def __init__(self, path_to_file, n_reward_samples=5, transforms=None, obs_type='full', dtype=torch.float32):
-        self.trajectories, self.rewards = torch.load(path_to_file)
-        self.data = self.process_trajectories(self.trajectories)
+        self.zfile_name = path_to_file
+        self.zfile = zipfile.ZipFile(self.zfile_name)
         self.n_reward_samples = n_reward_samples
         self.transforms = transforms
         self.dtype = dtype
         self.obs_type = obs_type
+        self.load()
+        self.data = self.process_trajectories(self.trajectories)
 
+    def load(self):
+        with zipfile.ZipFile(self.zfile_name, 'r') as zfile:
+            self.trajectories = torch.load(zfile.open('transitions.pt'))
+            self.rewards = torch.load(zfile.open('rewards.pt'))
+        self.images_loaded = {}
     def __getitem__(self, index):
         datum = self.data[index]
         datum = self._set_dtype(datum)
-        obs, next_obs = datum.obs, datum.next_obs
+       
         rew = self._get_rewards(datum, n_samples=self.n_reward_samples-1)
         rew[-1] = rew[-1].to(self.dtype) # rewards to dtype
-        if self.obs_type == 'pixels':
-            obs = self._process_pixel_obs(obs)
-            next_obs = self._process_pixel_obs(next_obs)
+
+        if self.obs_type != 'pixels':
+            obs, next_obs = datum.obs, datum.next_obs  
+        else:
+            obs, next_obs = self.get_image_obs(datum.obs), self.get_image_obs(datum.next_obs)
+            obs, next_obs = torch.from_numpy(obs).to(self.dtype), torch.from_numpy(next_obs).to(self.dtype)
         datum = datum.modify(obs=obs, next_obs=next_obs, rewards=rew)
         for t in self.transforms:
             datum = t(datum)
@@ -90,11 +111,28 @@ class PinballDataset_(torch.utils.data.Dataset):
 
     def __len__(self):
         return len(self.data)
+    
+    def get_image_obs(self, obs):
+        img_path = self.IMG_FORMAT.format(obs.traj, obs.timestep)
+        if img_path in self.images_loaded:
+            return self.images_loaded[img_path]
+        else: # load
+            try:
+                img = self.zfile.open(img_path)
+                img_ = Image.open(img)
+                img_ = np.array(img_)
+                img_ = self._process_pixel_obs(img_)
+                self.images_loaded[img_path] = img_
+            except:
+                raise ValueError(f'Image {img_path} could not be opened')
+            return img_
+
 
     def _set_dtype(self, datum):
         s, s_, initsets, executed, duration = datum.obs, datum.next_obs, datum.initsets, datum.executed, datum.duration
-        s = torch.from_numpy(s).to(self.dtype)
-        s_ = torch.from_numpy(s_).to(self.dtype)
+        if self.obs_type != 'pixels':
+            s = torch.from_numpy(s).to(self.dtype)
+            s_ = torch.from_numpy(s_).to(self.dtype)
         duration = torch.tensor(duration).to(self.dtype)
         initsets = torch.from_numpy(initsets).to(self.dtype)
         executed = torch.tensor(executed).to(self.dtype)
@@ -103,23 +141,35 @@ class PinballDataset_(torch.utils.data.Dataset):
     def _get_rewards(self, datum, n_samples):
         current_obs, action, current_next_obs, current_rewards = datum.obs, datum.action, datum.next_obs, datum.rewards
         obs, next_obs, rews = self.rewards[action] # tuple of arrays (obs, next_obs, rewards).
+
         N = rews.shape[0]
         sample = np.random.choice(N, n_samples, replace=False)
-        # append current datum
-        obs = np.concatenate([current_obs[np.newaxis, :], obs[sample]], axis=0)
-        next_obs = np.concatenate([current_next_obs[None, :], next_obs[sample]], axis=0)
         
         # transpose if images
         if self.obs_type == 'pixels':
-            obs = obs.transpose(0, 3, 1, 2)
-            next_obs = next_obs.transpose(0, 3, 1, 2)
+            obs_imgs = []
+            next_obs_imgs = []
+            for i in range(n_samples):
+                obs_imgs.append(self.get_image_obs(ObservationImgFile(*list(obs[sample[i]]))))
+                next_obs_imgs.append(self.get_image_obs(ObservationImgFile(*list(next_obs[sample[i]]))))
+
+            obs_imgs.append(self.get_image_obs(current_obs))
+            next_obs_imgs.append(self.get_image_obs(current_next_obs))
+            obs, next_obs = np.array(obs_imgs), np.array(next_obs_imgs)
+            # obs = obs.transpose(0, 3, 1, 2)
+            # next_obs = next_obs.transpose(0, 3, 1, 2)
+        else:
+            # append current datum
+            obs = np.concatenate([current_obs[np.newaxis, :], obs[sample]], axis=0)
+            next_obs = np.concatenate([current_next_obs[None, :], next_obs[sample]], axis=0)
 
         current_rewards = np.array(current_rewards)[None, :]
         rewards = np.concatenate([current_rewards, rews[sample]], axis=0)
         return [torch.from_numpy(obs).to(self.dtype), torch.from_numpy(next_obs).to(self.dtype), torch.from_numpy(rewards).to(self.dtype)]
 
     def _process_pixel_obs(self, obs):
-        return obs.type(self.dtype).permute(2, 0, 1)
+        r,g,b = obs[:, :, 0], obs[:, :, 1], obs[:, :, 2]
+        return (0.2989 * r + 0.5870 * g + 0.1140 * b)[np.newaxis] / 255
     
     def _filter_failed_executions(self, data):
         return [datum for datum in data if datum.executed == 1]

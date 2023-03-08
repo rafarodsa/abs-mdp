@@ -85,7 +85,7 @@ class InfomaxAbstraction(pl.LightningModule):
 		infomax, transition_loss, info_loss_z, initset_loss = self._run_step(s, a, next_s, initset_s)
 
 		# compute total loss
-		loss = infomax + info_loss_z + initset_loss * self.hyperparams.initset_const + transition_loss
+		loss = infomax + self.hyperparams.kl_const * info_loss_z + initset_loss * self.hyperparams.initset_const + transition_loss * self.hyperparams.transition_const
 		loss = loss.mean()
 
 		# log std deviations for encoder.
@@ -94,6 +94,7 @@ class InfomaxAbstraction(pl.LightningModule):
 			'info_loss_z': info_loss_z.mean(),
 			'transition_loss': transition_loss.mean(),
 			'initset_loss': initset_loss.mean(),
+			'train_loss': loss
 		}
 		logger.debug(f'Losses: {logs}')
 		return loss, logs
@@ -124,11 +125,9 @@ class InfomaxAbstraction(pl.LightningModule):
 		qs, q_s_prime = self.forward(s, a)
 		
 		nll_loss = -q_s_prime.log_prob(next_s).mean()
-		mse_error = F.mse_loss(next_s, q_s_prime.mean.squeeze(), reduction='sum') / next_s.shape[0]
-
-		loss = nll_loss
+		# mse_error = F.mse_loss(next_s, q_s_prime.mean.squeeze(), reduction='sum') / next_s.shape[0]
 		self.log_dict({'nll_loss': nll_loss},on_step=False, on_epoch=True, prog_bar=True, logger=True)
-		self.log_dict({'mse_error': mse_error}, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+		# self.log_dict({'mse_error': mse_error}, on_step=False, on_epoch=True, prog_bar=True, logger=True)
 		return nll_loss
 		
 	def configure_optimizers(self):

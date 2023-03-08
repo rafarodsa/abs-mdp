@@ -182,7 +182,7 @@ class DeconvBlock(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         # self.mlp = nn.Linear(cfg.input_dim, cfg.in_channels)
-        hidden_dim = 128
+        hidden_dim = cfg.mlp_hidden
         self.mlp_1 = nn.Linear(cfg.input_dim, hidden_dim)
         self.mlp_2 = nn.Linear(hidden_dim, hidden_dim)
         self.relu = nn.ReLU()
@@ -237,6 +237,7 @@ class PixelCNNDistribution(nn.Module):
                 log_prob = log_prob.reshape(*batch_dims, B, -1).sum(-1)
                 logger.debug(f'final log_prob.shape: {log_prob.shape}')
             return log_prob
+
 
 class PixelCNNDecoder(nn.Module):
     def __init__(self, features, cfg):
@@ -312,4 +313,8 @@ class PixelCNNDecoder(nn.Module):
     def PixelCNNDecoderDist(cfg):
         return partial(PixelCNNDecoder, cfg=cfg)
 
+    def freeze(self):
+        for p in self.parameters():
+            p.requires_grad_ = False
+        return self
     
