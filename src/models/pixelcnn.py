@@ -201,6 +201,7 @@ class PixelCNNDistribution(nn.Module):
             self.h = h
 
         def log_prob(self, x):
+          
             logger.debug(f'x.shape: {x.shape}, h.shape: {self.h.shape}')
             if len(x.shape) == len(self.h.shape):
                 assert x.shape[0] == self.h.shape[0]
@@ -224,6 +225,7 @@ class PixelCNNDistribution(nn.Module):
                 
                 log_prob = F.log_softmax(self.decoder(_x, _h), dim=1) # N x 256 x 3 x w x h
                 logger.debug(f'log_prob.shape: {log_prob.shape}, _x.shape: {_x.shape}')
+                print(x)
                 log_prob = torch.gather(log_prob, dim=1, index=(255 * _x.unsqueeze(1)).long()).squeeze(1)
                 
                 # iters = product(*list(map(lambda x: list(range(x)), batch_dims)))
@@ -307,7 +309,11 @@ class PixelCNNDecoder(nn.Module):
             h: embedding/latent feature maps, 
         '''
         out = self.forward(x, h)
-        return F.log_softmax(out, dim=1)
+        out = F.log_softmax(out, dim=1)
+        # print(out.shape)
+        # idx = (x * 255).long()
+        # return out.gather(idx, dim=1)
+        return out
 
     @staticmethod
     def PixelCNNDecoderDist(cfg):

@@ -75,17 +75,19 @@ class InfomaxAbstraction(pl.LightningModule):
 		initset_pred = torch.sigmoid(self.initsets(z))
 		initset_loss = F.binary_cross_entropy(initset_pred, initset_s)
 
-		return infomax_loss, transition_loss, info_loss_z, initset_loss
+		z_norm = z.pow(2).sum(-1)
+
+		return infomax_loss, transition_loss, info_loss_z, initset_loss, z_norm
 
 
 	def step(self, batch, batch_idx):
 		s, a, next_s, executed, initset_s = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets
 		assert torch.all(executed) # check all samples are successful executions.
 		
-		infomax, transition_loss, info_loss_z, initset_loss = self._run_step(s, a, next_s, initset_s)
+		infomax, transition_loss, info_loss_z, initset_loss, z_norm = self._run_step(s, a, next_s, initset_s)
 
 		# compute total loss
-		loss = infomax + self.hyperparams.kl_const * info_loss_z + initset_loss * self.hyperparams.initset_const + transition_loss * self.hyperparams.transition_const
+		loss = infomax + self.hyperparams.kl_const * info_loss_z + initset_loss * self.hyperparams.initset_const + transition_loss * self.hyperparams.transition_const + z_norm
 		loss = loss.mean()
 
 		# log std deviations for encoder.
@@ -94,7 +96,8 @@ class InfomaxAbstraction(pl.LightningModule):
 			'info_loss_z': info_loss_z.mean(),
 			'transition_loss': transition_loss.mean(),
 			'initset_loss': initset_loss.mean(),
-			'train_loss': loss
+			'train_loss': loss, 
+			'z_norm': z_norm.mean()
 		}
 		logger.debug(f'Losses: {logs}')
 		return loss, logs

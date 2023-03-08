@@ -56,8 +56,6 @@ def many_gaussian_values(means, vars):
     return gaussians
         
 
-    
-
 
 if __name__ == '__main__':
     # Arguments

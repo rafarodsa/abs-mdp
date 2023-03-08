@@ -21,7 +21,9 @@ def run(cfg, ckpt=None):
     # training
     trainer = pl.Trainer(
                         accelerator=cfg.accelerator,
-                        gpus=cfg.devices if cfg.accelerator == "gpu" else None,
+                        devices=cfg.devices,
+                        num_nodes=1,
+                        strategy='ddp',
                         max_epochs=cfg.epochs, 
                         auto_scale_batch_size=True,
                         default_root_dir=f'{cfg.save_path}/phi_train',
@@ -40,7 +42,9 @@ def train_mdp(cfg, ckpt):
     # training
     trainer = pl.Trainer(
                         accelerator=cfg.accelerator,
-                        gpus=cfg.devices if cfg.accelerator == "gpu" else None,
+                        devices=cfg.devices,
+                        num_nodes=1,
+                        strategy='ddp',
                         max_epochs=cfg.epochs, 
                         auto_scale_batch_size=True,
                         default_root_dir=f'{cfg.save_path}/mdp_train',
