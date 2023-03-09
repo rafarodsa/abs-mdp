@@ -79,7 +79,7 @@ class PinballDataset_(torch.utils.data.Dataset):
 
     def __init__(self, path_to_file, n_reward_samples=5, transforms=None, obs_type='full', dtype=torch.float32):
         self.zfile_name = path_to_file
-        self.zfile = zipfile.ZipFile(self.zfile_name)
+        self.zfile = zipfile.ZipFile(self.zfile_name) if obs_type == 'pixels' else None
         self.n_reward_samples = n_reward_samples
         self.transforms = transforms
         self.dtype = dtype
@@ -92,6 +92,7 @@ class PinballDataset_(torch.utils.data.Dataset):
             self.trajectories = torch.load(zfile.open('transitions.pt'))
             self.rewards = torch.load(zfile.open('rewards.pt'))
         self.images_loaded = {}
+
     def __getitem__(self, index):
         datum = self.data[index]
         datum = self._set_dtype(datum)
@@ -197,8 +198,8 @@ class PinballDataset(pl.LightningDataModule):
                             partial(compute_return, gamma=cfg.gamma), 
                             partial(one_hot_actions, cfg.n_options),
                         ]
-        # if linear_projection:
-            # self.transforms.append(partial(linear_projection, linear_projection=self.linear_transform))
+        if linear_projection:
+            self.transforms.append(partial(linear_projection, linear_projection=self.linear_transform))
 
     def setup(self, stage=None):
         self.dataset = PinballDataset_(self.path_to_file, self.n_reward_samples, self.transforms, obs_type=self.obs_type)

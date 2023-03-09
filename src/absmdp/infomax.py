@@ -57,7 +57,7 @@ class InfomaxAbstraction(pl.LightningModule):
 		actions = a # dims: (batch, n_actions)
 		inferred_z = z #torch.randn(z.shape).to(z.get_device()) * q_z.std + z 
 		
-		next_z_pred, _, _ = self.transition.sample_n_dist(torch.cat([inferred_z.squeeze(), actions], dim=-1))
+		next_z_pred, _, _ = self.transition.sample_n_dist(torch.cat([inferred_z, actions], dim=-1))
 		next_z_pred = next_z_pred.squeeze() + z
 		next_s_q_pred = self.grounding.distribution(next_z_pred.squeeze())
 		infomax_loss = self.infomax_loss(next_s, next_s_q_pred, n_samples=1)
@@ -87,7 +87,7 @@ class InfomaxAbstraction(pl.LightningModule):
 		infomax, transition_loss, info_loss_z, initset_loss, z_norm = self._run_step(s, a, next_s, initset_s)
 
 		# compute total loss
-		loss = infomax + self.hyperparams.kl_const * info_loss_z + initset_loss * self.hyperparams.initset_const + transition_loss * self.hyperparams.transition_const + z_norm
+		loss = infomax + self.hyperparams.kl_const * info_loss_z + initset_loss * self.hyperparams.initset_const + transition_loss * self.hyperparams.transition_const + 0.1 * z_norm
 		loss = loss.mean()
 
 		# log std deviations for encoder.
@@ -128,9 +128,9 @@ class InfomaxAbstraction(pl.LightningModule):
 		qs, q_s_prime = self.forward(s, a)
 		
 		nll_loss = -q_s_prime.log_prob(next_s).mean()
-		# mse_error = F.mse_loss(next_s, q_s_prime.mean.squeeze(), reduction='sum') / next_s.shape[0]
+		mse_error = F.mse_loss(next_s, q_s_prime.mean.squeeze(), reduction='sum') / next_s.shape[0]
 		self.log_dict({'nll_loss': nll_loss},on_step=False, on_epoch=True, prog_bar=True, logger=True)
-		# self.log_dict({'mse_error': mse_error}, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+		self.log_dict({'mse_error': mse_error}, on_step=False, on_epoch=True, prog_bar=True, logger=True)
 		return nll_loss
 		
 	def configure_optimizers(self):

@@ -239,6 +239,12 @@ class PixelCNNDistribution(nn.Module):
                 log_prob = log_prob.reshape(*batch_dims, B, -1).sum(-1)
                 logger.debug(f'final log_prob.shape: {log_prob.shape}')
             return log_prob
+        
+        def sample(self, n_samples=1):
+            return self.decoder.sample(self.h, n_samples=n_samples)
+        
+        
+
 
 
 class PixelCNNDecoder(nn.Module):
@@ -276,20 +282,25 @@ class PixelCNNDecoder(nn.Module):
         '''
             h: embedding/latent feature maps.
         '''
-        cond = self.features(h)
+        cond = self.features(h) # batch, channels, width, height
+        if n > 1:
+            cond = cond.repeat_interleave(n, dim=0) # batch*n, channels, width, height
+
         width, height = cond.shape[-2:]
         _device = h.get_device() if device is None else device
-        sample = torch.zeros(h.shape[0], self.data_channels, width, height).to(_device)
+        sample = torch.zeros(cond.shape[0], self.data_channels, width, height).to(_device)
         with tqdm(total=width*height) as pbar:
             for i in range(width):
                 for j in range(height):
                     for c in range(self.data_channels):
                         out = self.forward(sample, h)
-                        out = out[..., :, c, i, j]
+                        out = out[..., c, i, j]
                         out = torch.softmax(out, dim=1)
                         pixel = torch.multinomial(out, 1).squeeze(-1)
                         sample[..., :, c, i, j] = pixel
                     pbar.update(1)
+        if n > 1:
+            sample = sample.reshape(n, -1, self.data_channels, width, height)
         return sample
 
 
@@ -308,12 +319,15 @@ class PixelCNNDecoder(nn.Module):
             x: input image/generating image
             h: embedding/latent feature maps, 
         '''
-        out = self.forward(x, h)
-        out = F.log_softmax(out, dim=1)
-        # print(out.shape)
-        # idx = (x * 255).long()
-        # return out.gather(idx, dim=1)
-        return out
+        # out = self.forward(x, h)
+        # out = F.log_softmax(out, dim=1)
+        # # print(out.shape)
+        # # idx = (x * 255).long()
+        # # return out.gather(idx, dim=1)
+        # return out
+
+        raise NotImplementedError('log_prob not implemented for PixelCNNDecoder')
+    
 
     @staticmethod
     def PixelCNNDecoderDist(cfg):

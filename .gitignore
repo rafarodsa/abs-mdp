@@ -11,3 +11,4 @@ gym-minigrid
 lightning_logs/
 *.db
 .ipynb_checkpoints
+*.zip
