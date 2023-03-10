@@ -182,6 +182,7 @@ class DeconvBlock(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         # self.mlp = nn.Linear(cfg.input_dim, cfg.in_channels)
+        print(cfg.input_dim)
         hidden_dim = cfg.mlp_hidden
         self.mlp_1 = nn.Linear(cfg.input_dim, hidden_dim)
         # self.mlp_2 = nn.Linear(hidden_dim, hidden_dim)
@@ -191,6 +192,7 @@ class DeconvBlock(nn.Module):
         self.conv2 = nn.Conv2d(cfg.out_channels * cfg.color_channels, cfg.out_channels * cfg.color_channels, kernel_size=7, stride=1, padding='same')
     def forward(self, x):
         x = self.mlp_1(x)
+        
         # x = self.mlp_2(self.relu(self.mlp_1(x)))
         x = x.reshape(x.shape[0], x.shape[1], 1, 1)
         x = self.conv(self.relu(self.deconv(x)))
