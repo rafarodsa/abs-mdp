@@ -9,6 +9,7 @@ from omegaconf import OmegaConf as oc
 import argparse
 import torch
 import logging
+from pytorch_lightning.callbacks import ModelCheckpoint
 
 # load the config
 def save_model(trainer, save_path):
@@ -16,6 +17,12 @@ def save_model(trainer, save_path):
 
 def run(cfg, ckpt=None):
     
+    checkpoint_callback = ModelCheckpoint(
+        monitor='nll_loss',
+        dirpath=f'{cfg.save_path}/phi_train/ckpts/',
+        filename='infomax-pb-{epoch:02d}-{nll_loss:.2f}',
+        save_top_k=3
+    )
     model = InfomaxAbstraction(cfg) 
     data = PinballDataset(cfg.data)
     # training
@@ -26,6 +33,7 @@ def run(cfg, ckpt=None):
                         auto_scale_batch_size=True,
                         default_root_dir=f'{cfg.save_path}/phi_train',
                         log_every_n_steps=15,
+                        callbacks=[checkpoint_callback]
                     )
     trainer.fit(model, data, ckpt_path=ckpt)
     return model

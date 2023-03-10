@@ -43,7 +43,7 @@ class InfomaxAbstraction(pl.LightningModule):
 		self.kl_const =  self.hyperparams.kl_const
 
 	def forward(self, state, action):
-		z = self.encoder(state)
+		z = torch.tanh(self.encoder(state))
 		t_in = torch.cat([z, action], dim=-1)
 		q_s_prime = self.grounding.distribution(self.transition.distribution(t_in).mean + z)
 		q_s = self.decoder.distribution(z) 
@@ -51,8 +51,8 @@ class InfomaxAbstraction(pl.LightningModule):
 
 	def _run_step(self, s, a, next_s, initset_s):
 		# sample encoding of (s, s')
-		z = self.encoder(s)
-		next_z  = self.encoder(next_s)
+		z = torch.tanh(self.encoder(s))
+		next_z  = torch.tanh(self.encoder(next_s))
 
 		actions = a # dims: (batch, n_actions)
 		inferred_z = z #torch.randn(z.shape).to(z.get_device()) * q_z.std + z 
@@ -87,7 +87,7 @@ class InfomaxAbstraction(pl.LightningModule):
 		infomax, transition_loss, info_loss_z, initset_loss, z_norm = self._run_step(s, a, next_s, initset_s)
 
 		# compute total loss
-		loss = infomax + self.hyperparams.kl_const * info_loss_z + initset_loss * self.hyperparams.initset_const + transition_loss * self.hyperparams.transition_const + 0.1 * z_norm
+		loss = infomax + self.hyperparams.kl_const * info_loss_z + initset_loss * self.hyperparams.initset_const + transition_loss * self.hyperparams.transition_const + 0.* z_norm
 		loss = loss.mean()
 
 		# log std deviations for encoder.
@@ -128,13 +128,13 @@ class InfomaxAbstraction(pl.LightningModule):
 		qs, q_s_prime = self.forward(s, a)
 		
 		nll_loss = -q_s_prime.log_prob(next_s).mean()
-		mse_error = F.mse_loss(next_s, q_s_prime.mean.squeeze(), reduction='sum') / next_s.shape[0]
+		# mse_error = F.mse_loss(next_s, q_s_prime.mean.squeeze(), reduction='sum') / next_s.shape[0]
 		self.log_dict({'nll_loss': nll_loss},on_step=False, on_epoch=True, prog_bar=True, logger=True)
-		self.log_dict({'mse_error': mse_error}, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+		# self.log_dict({'mse_error': mse_error}, on_step=False, on_epoch=True, prog_bar=True, logger=True)
 		return nll_loss
 		
 	def configure_optimizers(self):
-		return torch.optim.Adam(self.parameters(), lr=self.lr)
+		return torch.optim.AdamW(self.parameters(), lr=self.lr)
 	
 	@staticmethod
 	def load_config(path):

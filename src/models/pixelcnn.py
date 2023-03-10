@@ -184,13 +184,17 @@ class DeconvBlock(nn.Module):
         # self.mlp = nn.Linear(cfg.input_dim, cfg.in_channels)
         hidden_dim = cfg.mlp_hidden
         self.mlp_1 = nn.Linear(cfg.input_dim, hidden_dim)
-        self.mlp_2 = nn.Linear(hidden_dim, hidden_dim)
+        # self.mlp_2 = nn.Linear(hidden_dim, hidden_dim)
         self.relu = nn.ReLU()
         self.deconv = nn.ConvTranspose2d(hidden_dim, cfg.out_channels * cfg.color_channels, (cfg.out_width, cfg.out_height), stride=1, padding=0)
+        self.conv = nn.Conv2d(cfg.out_channels * cfg.color_channels, cfg.out_channels * cfg.color_channels, kernel_size=7, stride=1, padding='same')
+        self.conv2 = nn.Conv2d(cfg.out_channels * cfg.color_channels, cfg.out_channels * cfg.color_channels, kernel_size=7, stride=1, padding='same')
     def forward(self, x):
-        x = self.mlp_2(self.relu(self.mlp_1(x)))
-        x = self.relu(x.reshape(x.shape[-2], -1, 1, 1))
-        x = self.relu(self.deconv(x))
+        x = self.mlp_1(x)
+        # x = self.mlp_2(self.relu(self.mlp_1(x)))
+        x = x.reshape(x.shape[0], x.shape[1], 1, 1)
+        x = self.conv(self.relu(self.deconv(x)))
+        x = self.conv2(self.relu(x)) + x
         return x
 
 
@@ -199,14 +203,17 @@ class PixelCNNDistribution(nn.Module):
             super().__init__()
             self.decoder = decoder
             self.h = h
-
+        
+        def forward(self, x):
+            return self.decoder._pixelcnn_stack(x, self.h)
+            
         def log_prob(self, x):
           
             logger.debug(f'x.shape: {x.shape}, h.shape: {self.h.shape}')
             if len(x.shape) == len(self.h.shape):
                 assert x.shape[0] == self.h.shape[0]
-                assert x.shape[-2:] == self.h.shape[-2:]
-                log_prob = F.log_softmax(self.decoder(x, self.h), dim=1)
+                # assert x.shape[-2:] == self.h.shape[-2:]
+                log_prob = F.log_softmax(self(x), dim=1)
                 logger.debug(f'log_prob.shape: {log_prob.shape}, x.shape: {x.shape}')
                 log_prob = torch.gather(log_prob, dim=1, index=(255 * x.unsqueeze(1)).long())
                 logger.debug(f'log_prob.shape: {log_prob.shape}')
@@ -223,7 +230,7 @@ class PixelCNNDistribution(nn.Module):
                 _x = x.reshape(-1, *x.shape[-len(self.h.shape)+1:])
                 logger.debug(f'Flattened batch -> x.shape: {_x.shape}, h.shape: {_h.shape}')
                 
-                log_prob = F.log_softmax(self.decoder(_x, _h), dim=1) # N x 256 x 3 x w x h
+                log_prob = F.log_softmax(self(x), dim=1) # N x 256 x 3 x w x h
                 logger.debug(f'log_prob.shape: {log_prob.shape}, _x.shape: {_x.shape}')
                 print(x)
                 log_prob = torch.gather(log_prob, dim=1, index=(255 * _x.unsqueeze(1)).long()).squeeze(1)
@@ -241,7 +248,26 @@ class PixelCNNDistribution(nn.Module):
             return log_prob
         
         def sample(self, n_samples=1):
-            return self.decoder.sample(self.h, n_samples=n_samples)
+            cond = self.h
+            if n_samples > 1:
+                cond = cond.repeat_interleave(n_samples, dim=0) # batch*n, channels, width, height
+
+            width, height = cond.shape[-2:]
+            _device = self.h.get_device()
+            sample = torch.zeros(cond.shape[0], self.decoder.data_channels, width, height).to(_device)
+            with tqdm(total=width*height) as pbar:
+                for i in range(width):
+                    for j in range(height):
+                        for c in range(self.decoder.data_channels):
+                            out = self.decoder._pixelcnn_stack(sample, cond)
+                            out = out[..., c, i, j]
+                            out = torch.softmax(out, dim=1)
+                            pixel = torch.multinomial(out, 1).squeeze(-1)
+                            sample[..., :, c, i, j] = pixel
+                        pbar.update(1)
+            if n_samples > 1:
+                sample = sample.reshape(n_samples, -1, self.decoder.data_channels, width, height)
+            return sample
         
         
 
@@ -278,13 +304,13 @@ class PixelCNNDecoder(nn.Module):
         out = out.reshape(x.shape[0], 256, self.data_channels, width, height) # (batch_size, 256, data_channels, width, height)
         return out 
 
-    def sample(self, h, n=1, device=None):
+    def sample(self, h, n_samples=1, device=None):
         '''
             h: embedding/latent feature maps.
         '''
         cond = self.features(h) # batch, channels, width, height
-        if n > 1:
-            cond = cond.repeat_interleave(n, dim=0) # batch*n, channels, width, height
+        if n_samples > 1:
+            cond = cond.repeat_interleave(n_samples, dim=0) # batch*n, channels, width, height
 
         width, height = cond.shape[-2:]
         _device = h.get_device() if device is None else device
@@ -299,8 +325,8 @@ class PixelCNNDecoder(nn.Module):
                         pixel = torch.multinomial(out, 1).squeeze(-1)
                         sample[..., :, c, i, j] = pixel
                     pbar.update(1)
-        if n > 1:
-            sample = sample.reshape(n, -1, self.data_channels, width, height)
+        if n_samples > 1:
+            sample = sample.reshape(n_samples, -1, self.data_channels, width, height)
         return sample
 
 
@@ -311,7 +337,7 @@ class PixelCNNDecoder(nn.Module):
         '''
         cond = self.features(h)
 
-        return PixelCNNDistribution(self._pixelcnn_stack, cond)
+        return PixelCNNDistribution(self, cond)
 
     
     def log_prob(self, x, h):

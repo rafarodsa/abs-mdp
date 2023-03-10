@@ -21,15 +21,27 @@ from sklearn.manifold import TSNE
 
 from collections import namedtuple
 from src.utils.printarr import printarr
-    
+from PIL import Image
+from tqdm import tqdm
+
+def img_preprocess(x):
+    img = x.byte()
+    if len(img.size()) > 3:
+        # batched
+        img = img.permute(0, 2, 3, 1)
+    else:
+        img = img.permute(1,2,0)
+    return img.squeeze(-1)
 
 if __name__ == '__main__':
+    torch.multiprocessing.set_sharing_strategy('file_system')
     # Arguments
     parser = argparse.ArgumentParser()
     parser.add_argument('--from-ckpt', type=str)
-    parser.add_argument('--n-samples', type=int, default=1000)
+    parser.add_argument('--n-samples', type=int, default=2)
     parser.add_argument('--config', type=str, default='experiments/pb_obstacles/fullstate/config/config.yaml')
     parser.add_argument('--save-path', type=str, default='.')
+    parser.add_argument('--device', type=str, default='cuda')
     args = parser.parse_args()
 
     # Load config
@@ -37,55 +49,93 @@ if __name__ == '__main__':
 
     # Load
     model = AbstractMDPTrainer.load_from_checkpoint(args.from_ckpt, cfg=cfg)
-    
+    model.to(args.device)
 
     data = PinballDataset(cfg.data)
     data.setup()
+    # data.to('cuda')
 
     batches = list(data.test_dataloader())
-    batch = batches[0]
 
-    _obs, _action, _next_obs = [], [], []
-    for b in batches:
-        obs, action, next_obs = b.obs, b.action, b.next_obs
-        _obs.append(obs)
-        _action.append(action)
-        _next_obs.append(next_obs)
-    obs, action, next_obs = torch.cat(_obs, dim=0), torch.cat(_action, dim=0), torch.cat(_next_obs, dim=0)
+    # _obs, _action, _next_obs = [], [], []
+    # for b in batches[0:1]:
+    #     obs, action, next_obs = b.obs, b.action, b.next_obs
+    #     _obs.append(obs.to(args.device))
+    #     _action.append(action.to(args.device))
+    #     _next_obs.append(next_obs.to(args.device))
+    # obs, action, next_obs = torch.cat(_obs, dim=0), torch.cat(_action, dim=0), torch.cat(_next_obs, dim=0)
 
 
-    Batch = namedtuple('batch', ['obs', 'action', 'next_obs'])
-    batch = Batch(obs, action, next_obs)
-    n_samples = 5
+    # Batch = namedtuple('batch', ['obs', 'action', 'next_obs'])
+    # batch = Batch(obs, action, next_obs)
+    # n_samples = args.n_samples
 
-    with torch.no_grad():
-        z = model.encoder(batch.obs)
-        next_z = model.encoder(batch.next_obs)
+    print('Test set loaded...')
+    _z, _next_z, _predicted_z, _next_s_q = [], [], [], []
+    actions = []
+    log_probs = []
+    for batch in tqdm(batches):
+        with torch.no_grad():
+            actions.append(batch.action)
+            z = torch.tanh(model.encoder(batch.obs.to(args.device)))
+            _z.append(z)
+            next_obs = batch.next_obs.to(args.device)
+            next_z = torch.tanh(model.encoder(next_obs))
+            _next_z.append(next_z)
 
-        transition_in = torch.cat((z, batch.action), dim=-1)
-        predicted_z, q_z, _ = model.transition.sample_n_dist(transition_in, 1)
-        predicted_z = q_z.mean + z
-        predicted_next_s_q = model.grounding.distribution(predicted_z)
-        predicted_next_s = predicted_next_s_q.sample(n_samples).mean(0)
-        decoded_next_s_q = model.grounding.distribution(next_z)
-        decoded_next_s = decoded_next_s_q.sample(n_samples).mean(0)
+            transition_in = torch.cat((z, batch.action.to(args.device)), dim=-1)
+            predicted_z, q_z, _ = model.transition.sample_n_dist(transition_in, 1)
+            predicted_z = predicted_z.squeeze() + z
+            _predicted_z.append(predicted_z)
+            next_zs = torch.cat([predicted_z, next_z], dim=0)
 
-        print(f'Empirical MSE {(predicted_next_s - batch.next_obs).pow(2).sum(-1).mean().sqrt()}')
-        print(f'Test NLL {predicted_next_s_q.log_prob(batch.next_obs).mean()}')
-        printarr(batch.obs, batch.next_obs, z, next_z, predicted_z, decoded_next_s_q.mean, predicted_next_s, decoded_next_s)
-        
+            pred_next_s_q = model.grounding.distribution(predicted_z)
+            _next_s_q.append(pred_next_s_q)
 
-        encoded_transition = next_z - z
-        predicted_transition = predicted_z - z
-        
+            log_probs.append(pred_next_s_q.log_prob(next_obs).sum())
+            
+
+            # printarr(batch.obs, batch.next_obs, z, next_z, predicted_z, predicted_next_s, decoded_next_s)
+
+
+
+    # 
+    # Generate Images.
+    n_imgs=2
+    next_s_q = _next_s_q[0]
+    next_s_real = img_preprocess(batches[0].next_obs * 255)
+    
+    samples = model.grounding.distribution(_predicted_z[0][:n_imgs]).sample(n_samples=args.n_samples).mean(0)
+    img = img_preprocess(samples).cpu().numpy()
+    printarr(img, next_s_real)
+    plt.figure()
+    for i in range(n_imgs):
+        plt.subplot(n_imgs, 2, i*n_imgs+1)
+        plt.imshow(img[i])
+        plt.subplot(n_imgs, 2, i*n_imgs+2)
+        plt.imshow(next_s_real[i])
+    plt.savefig(f'{args.save_path}/samples.png')
+    ####################
+
+
+    z = torch.cat(_z, dim=0)
+    next_z = torch.cat(_next_z, dim=0)
+    predicted_z = torch.cat(_predicted_z, dim=0)
+    actions = torch.cat(actions, dim=0)
+    print(f'Mean NLL: {-sum(log_probs) / z.shape[0]}')
+
+    if args.device == 'cuda':
+       z = z.cpu()
+       next_z = next_z.cpu()
+       predicted_z = predicted_z.cpu()
 
 
     latent_space = TSNE(2)
     latent_space = latent_space.fit_transform(torch.cat((z, next_z, predicted_z), dim=0))
     z, next_z, predicted_z = latent_space[:z.shape[0]], latent_space[z.shape[0]:z.shape[0]+next_z.shape[0]], latent_space[z.shape[0]+next_z.shape[0]:]
-
+    printarr(z, next_z, predicted_z)
     # Plot encoder space
-    _action = batch.action.argmax(-1)
+    _action = actions.argmax(-1).cpu()
     plt.figure()
     plt.scatter(z[:, 0], z[:, 1], s=5, marker='o', color='b')
     ACTIONS = ['+Y', '-Y', '+X', '-X']
@@ -102,55 +152,17 @@ if __name__ == '__main__':
 
     for a in acts:
         plt.title('Encoded transition')
-        # plt.quiver(z[_action==a, 0], z[_action==a, 1], encoded_transition[_action==a, 0], encoded_transition[_action==a, 1], angles='xy', scale_units='xy', scale=1)
         plt.scatter(z[_action == a, 0], z[_action == a, 1], s=5, label=f'action {a}', color='b')
         plt.scatter(next_z[_action == a, 0], next_z[_action == a, 1], s=5, label=f'action {a}', color='r')
 
     plt.subplot(1, 2, 2)
     for a in acts:
-        # plt.quiver(z[_action==a, 0], z[_action==a, 1], predicted_transition[_action==a, 0], predicted_transition[_action==a, 1], angles='xy', scale_units='xy', scale=1)
         plt.title('Predicted transition')
         plt.scatter(z[_action == a, 0], z[_action == a, 1], s=5, label=f'action {a}', color='b')
         plt.scatter(predicted_z[_action == a, 0], predicted_z[_action == a, 1], s=5, label=f'action {a}', color='r')
 
     plt.savefig(f'{args.save_path}/latent_space.png')
 
+#### 
 
-    
-    # pca = PCA(2)
-    # pca = pca.fit(batch.obs)
-    # s = pca.transform(batch.obs)
-    # next_s = pca.transform(batch.next_obs)
-    # pred_next_s = pca.transform(predicted_next_s)
-    # encoded_next_s = pca.transform(decoded_next_s.squeeze())
-   
-    transform = np.linalg.pinv(data.linear_transform)
-    s = np.einsum('ji, bj->bi', transform, batch.obs.numpy())
-    next_s, pred_next_s = np.einsum('ji, bj->bi',transform ,batch.next_obs.numpy()), np.einsum('ji, bj->bi', transform, predicted_next_s.numpy())
-    encoded_next_s = np.einsum('ji, bj->bi',transform , decoded_next_s.squeeze().numpy())
-    
-    d_real = next_s - s
-    d_pred = pred_next_s - s
-
-    plt.figure()
-    plt.subplot(1,3,1)
-    for a in acts:
-        plt.title('Truth')
-        plt.scatter(s[_action == a, 0], s[_action == a, 1], marker='x', s=5, color='b')
-        plt.scatter(next_s[_action==a, 0], next_s[_action == a, 1], marker='x', s=5, color='r')
-        # plt.quiver(s[_action == a, 0], s[_action == a, 1], d_real[_action == a, 0], d_real[_action == a, 1], angles='xy', scale_units='xy', scale=1)
-    # plt.quiver(s[:, 0], s[:, 1], d_pred[:, 0], d_pred[:, 1])
-    plt.subplot(1,3,2)
-    for a in acts: 
-        plt.title('Predicted')
-        plt.scatter(s[_action == a, 0], s[_action == a, 1], marker='x', s=5, color='b')
-        plt.scatter(pred_next_s[_action == a, 0], pred_next_s[_action == a, 1], marker='o', s=5, color='g')
-        # plt.quiver(s[_action == a, 0], s[_action == a, 1], d_pred[_action == a, 0], d_pred[_action == a, 1], angles='xy', scale_units='xy', scale=1)
-    
-    plt.subplot(1,3,3)
-    for a in acts: 
-        plt.title('Encoded/Decoded')
-        plt.scatter(s[_action == a, 0], s[_action == a, 1], marker='x', s=5, color='b')
-        plt.scatter(encoded_next_s[_action == a, 0], encoded_next_s[_action == a, 1], marker='o', s=5, color='g')
-    plt.savefig(f'{args.save_path}/pca_s.png')
 

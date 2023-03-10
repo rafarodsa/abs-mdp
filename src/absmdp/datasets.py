@@ -198,7 +198,7 @@ class PinballDataset(pl.LightningDataModule):
                             partial(compute_return, gamma=cfg.gamma), 
                             partial(one_hot_actions, cfg.n_options),
                         ]
-        if linear_projection:
+        if linear_projection and self.obs_type != 'pixels':
             self.transforms.append(partial(linear_projection, linear_projection=self.linear_transform))
 
     def setup(self, stage=None):

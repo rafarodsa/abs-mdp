@@ -5,14 +5,14 @@ features:
   in_channels: 16
   out_width: 100
   out_height: 100
-  out_channels: 16
+  out_channels: 32
   color_channels: 1 # 3 for RGB, 1 for grayscale
 dist:
   type: pixelcnn
   in_channels: ${model.decoder.features.color_channels} 
   color_channels: ${model.decoder.features.color_channels} 
   feats_maps: ${model.decoder.features.out_channels}
-  kernel_size: 7
-  n_layers: 5
+  kernel_size: 5
+  n_layers: 10
   out_width: 100
   out_height: 100

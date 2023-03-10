@@ -31,16 +31,24 @@ class ResidualConvEncoder(nn.Module):
         super().__init__()
         self.conv_1 = nn.Conv2d(cfg.color_channels, cfg.feat_maps, kernel_size=cfg.kernel_size, stride=1, padding='same')
         self.norm_1 = nn.LayerNorm([cfg.feat_maps, cfg.in_width, cfg.in_height])
-        self.max_pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=1) # 2x2 max pooling
+        self.max_pool_1 = nn.AvgPool2d(kernel_size=2, stride=2, padding=1) # 2x2 max pooling
+        self.conv_2 = nn.Conv2d(cfg.feat_maps, cfg.feat_maps, kernel_size=cfg.kernel_size, stride=1, padding='same')
+        self.norm_2 = nn.LayerNorm([cfg.feat_maps, cfg.in_width, cfg.in_height])
+        self.max_pool_2 = nn.AvgPool2d(kernel_size=2, stride=2, padding=1)
+        
         self.relu = nn.ReLU()
-        cfg.residual.in_width, cfg.residual.in_height = cfg.in_width // 2 + 1, cfg.in_height // 2 + 1
+        cfg.residual.in_width, cfg.residual.in_height = cfg.in_width // 4 + 1, cfg.in_height // 4 + 1
         self.residual_stack = ResidualStack(cfg.residual)
         self.linear = nn.Linear(cfg.residual.in_channels * cfg.residual.in_width * cfg.residual.in_height, cfg.out_dim)
 
     def forward(self, x):
         
-        x = self.relu(self.norm_1(self.conv_1(x)))
-        x = self.max_pool(x)
+        # x = self.relu(self.norm_1(self.conv_1(x)))
+        x = self.relu(self.conv_1(x))
+        x = self.max_pool_1(x)
+        x = self.relu(self.conv_2(x))
+        x = self.max_pool_2(x)
+
         x = self.residual_stack(x)
         x = x.reshape(x.shape[0], -1)
         x = self.linear(x)
