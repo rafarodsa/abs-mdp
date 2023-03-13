@@ -14,7 +14,7 @@ from functools import partial
 from tqdm import tqdm
 
 import logging
-
+from src.utils.printarr import printarr
 
 logger = logging.getLogger(__name__)
 
@@ -42,21 +42,19 @@ class MaskedConv2d(nn.Module):
         self._mask = np.zeros(self.conv.weight.size())
        
         if type == 'vertical':
-            for y in range(y_c):
-                for x in range(k_x):
-                    self._mask[:, :, y, x] = 1.
+            self._mask[:, :, :y_c, :] = 1.
+
         if type == 'horizontal':
-            for x in range(x_c):
-                self._mask[:, :, y_c, x] = 1.
+            self._mask[:, :, y_c, :x_c + 1] = 1.
 
-
+        
         for o in range(self.data_channels):
             for i in range(o+1, self.data_channels):
-                self._mask[self._color_mask(i, o), y_c, x_c] = 1.
+                self._mask[self._color_mask(i, o), y_c, x_c] = 0.
         
-        if mask_type == 'A':
+        if mask_type == 'A': 
             for c in range(data_channels):
-                self._mask[self._color_mask(c, c), y_c, x_c] = 1.
+                self._mask[self._color_mask(c, c), y_c, x_c] = 0.
         
         self.device = self.conv.weight.get_device()
         self._mask = torch.from_numpy(self._mask).type(self.conv.weight.dtype)
@@ -90,7 +88,7 @@ class GatedPixelCNNLayer(nn.Module):
     """
         PixelCNN layer.
     """
-    def __init__(self, in_channels, out_channels=32, kernel_size=3, data_channels=1, mask_type='A', residual=True):
+    def __init__(self, in_channels, out_channels=32, kernel_size=3, data_channels=1, mask_type='B', residual=True):
         super().__init__()
         self.kernel_size = kernel_size
         self.in_channels = in_channels
@@ -99,13 +97,13 @@ class GatedPixelCNNLayer(nn.Module):
        
         _out_channels = self.out_channels * 2
         #TODO: check the type of mask needed.
-        self.vertical_stack = MaskedConv2d(self.in_channels, _out_channels, kernel_size=kernel_size, stride=1, padding='same', data_channels=data_channels, type='vertical', mask_type='A')
-        self.horizontal_stack = MaskedConv2d(self.in_channels, _out_channels, kernel_size=kernel_size, stride=1, padding='same', data_channels=data_channels, type='horizontal', mask_type='B')
+        self.vertical_stack = MaskedConv2d(self.in_channels, _out_channels, kernel_size=kernel_size, stride=1, padding='same', data_channels=data_channels, type='vertical', mask_type=mask_type)
+        self.horizontal_stack = MaskedConv2d(self.in_channels, _out_channels, kernel_size=kernel_size, stride=1, padding='same', data_channels=data_channels, type='horizontal', mask_type=mask_type)
         self.link = nn.Conv2d(_out_channels, _out_channels , kernel_size=1, stride=1, padding='same')
         self.skip = nn.Conv2d(_out_channels // 2, _out_channels // 2, kernel_size=1, stride=1, padding='same')
         self.residual = nn.Conv2d(_out_channels // 2, _out_channels // 2, kernel_size=1, stride=1, padding='same') if residual else None
         self.conditional = nn.Conv2d(self.in_channels, _out_channels // 2, kernel_size=1, stride=1, padding='same')
-
+        self.dropout = nn.Dropout(p=0.5)
 
 
     def forward(self, vertical, horizontal, conditional=None):
@@ -124,41 +122,9 @@ class GatedPixelCNNLayer(nn.Module):
         _skip = self.skip(_horizontal)
         if self.residual is not None:
             _residual = self.residual(_horizontal) # out_channels
-            _horizontal = horizontal + _residual
+            _horizontal = horizontal + self.dropout(_residual)
 
         return _vertical, _horizontal, _skip
-
-    def __translate_and_crop(self, input, x, y):
-        """
-            Translates the input tensor by x and y. Pads with zeros and crop to the original size.
-        """
-        _, _, h, w = input.shape
-
-        # pad the input
-        pad_x = abs(x)
-        pad_y = abs(y)
-        
-        if x < 0:
-            pad_left = pad_x
-            pad_right = 0
-            x_i, x_f = 0, w
-        else:
-            pad_left = 0
-            pad_right = pad_x
-            x_i, x_f = pad_x, w + pad_x
-        if y < 0:
-            pad_top = pad_y
-            pad_bottom = 0
-            y_i, y_f = 0, h
-        else:
-            pad_top = 0
-            pad_bottom = pad_y
-            y_i, y_f = pad_y, h + pad_y
-        
-        padded_input = nn.functional.pad(input, (pad_left, pad_right, pad_top, pad_bottom), mode='constant', value=0)
-        cropped_input = padded_input[:, :, y_i:y_f, x_i:x_f]
-        return cropped_input
-            
 
 class PixelCNNStack(nn.Module):
     def __init__(self, out_channels, kernel_size=3, n_layers=10, data_channels=1):
@@ -174,7 +140,7 @@ class PixelCNNStack(nn.Module):
         for layer in self.layers:
             _v, _h, _skip = layer(_v, _h, conditional)
             skip += _skip
-        return vertical, horizontal, skip
+        return vertical, horizontal, skip+conditional
 
 
 # PixelCNN decoder
@@ -183,20 +149,42 @@ class DeconvBlock(nn.Module):
         super().__init__()
         # self.mlp = nn.Linear(cfg.input_dim, cfg.in_channels)
         print(cfg.input_dim)
+
+        feat_maps = 64
         hidden_dim = cfg.mlp_hidden
         self.mlp_1 = nn.Linear(cfg.input_dim, hidden_dim)
-        # self.mlp_2 = nn.Linear(hidden_dim, hidden_dim)
+        self.mlp_2 = nn.Linear(hidden_dim, 12 * 12)
         self.relu = nn.ReLU()
-        self.deconv = nn.ConvTranspose2d(hidden_dim, cfg.out_channels * cfg.color_channels, (cfg.out_width, cfg.out_height), stride=1, padding=0)
-        self.conv = nn.Conv2d(cfg.out_channels * cfg.color_channels, cfg.out_channels * cfg.color_channels, kernel_size=7, stride=1, padding='same')
-        self.conv2 = nn.Conv2d(cfg.out_channels * cfg.color_channels, cfg.out_channels * cfg.color_channels, kernel_size=7, stride=1, padding='same')
+        self.conv0 = nn.Conv2d(1, feat_maps * cfg.color_channels, kernel_size=1, stride=1, padding='same')
+        self.deconv1 = nn.ConvTranspose2d(feat_maps * cfg.color_channels, feat_maps * cfg.color_channels, kernel_size=3, stride=2, padding=0)
+        self.deconv2 = nn.ConvTranspose2d(feat_maps * cfg.color_channels, feat_maps * cfg.color_channels, kernel_size=3, stride=2, padding=0)
+        self.deconv3 = nn.ConvTranspose2d(feat_maps * cfg.color_channels, feat_maps* cfg.color_channels, kernel_size=3, stride=2, padding=0)
+        self.conv1 = nn.Conv2d(feat_maps* cfg.color_channels, feat_maps* cfg.color_channels, kernel_size=3, stride=1, padding='same')
+        self.conv2 = nn.Conv2d(feat_maps * cfg.color_channels, feat_maps * cfg.color_channels, kernel_size=3, stride=1, padding='same')
+        self.conv3 = nn.Conv2d(feat_maps * cfg.color_channels, cfg.out_channels * cfg.color_channels, kernel_size=4, stride=1, padding='valid')
+    
     def forward(self, x):
-        x = self.mlp_1(x)
+        # x = self.mlp_1(x)
+        x = x * 100
+        i = torch.zeros(x.shape[0], 100,100).to(x.get_device())
+        idx = x.long()
+        i[torch.arange(x.shape[0]).long(), idx[:, 0], idx[:, 1]] = 1.
+        # print(i[0].argmax(dim=0), i[0].argmax(dim=0).argmax())
+        # print(idx[0])
+        # t = i.argmax(dim=1)
+        # coords_x, coords_y = t.max(dim=1)#, t.argmax(dim=1)
+        # print(coords_x, coords_y)
+        # assert torch.allclose(idx, torch.cat([coords_x.unsqueeze(1), coords_y.unsqueeze(1)], dim=1))
+
+        i = i.unsqueeze(1)
+        x = self.relu(self.conv0(i))
         
         # x = self.mlp_2(self.relu(self.mlp_1(x)))
-        x = x.reshape(x.shape[0], x.shape[1], 1, 1)
-        x = self.conv(self.relu(self.deconv(x)))
-        x = self.conv2(self.relu(x)) + x
+        # x = self.relu(self.conv0(x.reshape(x.shape[0], 1, 12, 12)))
+        # x = self.conv1(self.relu(self.deconv1(x)))
+        # x = self.conv2(self.relu(self.deconv2(x)))
+        # x = self.conv3(self.relu(self.deconv3(self.relu(x))))
+        # x = self.conv2(self.relu(x)) + x
         return x
 
 
@@ -283,7 +271,7 @@ class PixelCNNDecoder(nn.Module):
         self.data_channels = cfg.color_channels
         self.width, self.height = cfg.out_width, cfg.out_height
         
-        self.causal_block = GatedPixelCNNLayer(cfg.color_channels, cfg.feats_maps * self.data_channels, kernel_size=cfg.kernel_size, data_channels=self.data_channels, residual=False)
+        self.causal_block = GatedPixelCNNLayer(cfg.color_channels, cfg.feats_maps * self.data_channels, kernel_size=cfg.kernel_size, data_channels=self.data_channels, residual=False, mask_type='A')
        
         self.stack = PixelCNNStack(cfg.feats_maps * self.data_channels, cfg.kernel_size, cfg.n_layers, data_channels=self.data_channels)
         # TODO: maybe reshape and then 1-conv. or masked 1-conv for output

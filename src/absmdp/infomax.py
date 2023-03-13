@@ -134,7 +134,7 @@ class InfomaxAbstraction(pl.LightningModule):
 		return nll_loss
 		
 	def configure_optimizers(self):
-		return torch.optim.AdamW(self.parameters(), lr=self.lr)
+		return torch.optim.Adam(self.parameters(), lr=self.lr)
 	
 	@staticmethod
 	def load_config(path):

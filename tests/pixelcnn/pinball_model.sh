@@ -7,6 +7,7 @@
 #SBATCH --mem=0
 #SBATCH --time=0-02:00:00
 #SBATCH -p 3090-gcondo
+#SBATCH --output pinball-log-%J.txt
 
 module load python/3.9.0
 module load cuda/10.2
@@ -25,4 +26,4 @@ export PYTHONFAULTHANDLER=1
 # export NCCL_SOCKET_IFNAME=^docker0,lo
 
 # run script from above
-srun python tests/pixelcnn/pinball_model.py --config experiments/pb_obstacles/pixel/config/test_decoder.yaml
+srun python tests/pixelcnn/pinball_model.py --config experiments/pb_obstacles/pixel/config/test_decoder.yaml --devices 2

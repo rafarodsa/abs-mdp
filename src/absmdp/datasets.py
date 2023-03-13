@@ -96,7 +96,6 @@ class PinballDataset_(torch.utils.data.Dataset):
     def __getitem__(self, index):
         datum = self.data[index]
         datum = self._set_dtype(datum)
-       
         rew = self._get_rewards(datum, n_samples=self.n_reward_samples-1)
         rew[-1] = rew[-1].to(self.dtype) # rewards to dtype
 
@@ -137,7 +136,7 @@ class PinballDataset_(torch.utils.data.Dataset):
         duration = torch.tensor(duration).to(self.dtype)
         initsets = torch.from_numpy(initsets).to(self.dtype)
         executed = torch.tensor(executed).to(self.dtype)
-        return datum.modify(obs=s, next_obs=s_, initsets=initsets, executed=executed, duration=duration, info={})
+        return datum.modify(obs=s, next_obs=s_, initsets=initsets, executed=executed, duration=duration)
 
     def _get_rewards(self, datum, n_samples):
         current_obs, action, current_next_obs, current_rewards = datum.obs, datum.action, datum.next_obs, datum.rewards
