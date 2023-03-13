@@ -16,3 +16,4 @@ dist:
   n_layers: 13
   out_width: 100
   out_height: 100
+  color_levels: 256

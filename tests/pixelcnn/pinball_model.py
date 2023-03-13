@@ -19,6 +19,9 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 from src.utils.printarr import printarr
 
+import matplotlib.pyplot as plt
+
+
 def load_states(debug):
     '''
         Load states from debug dict for PinballDataset
@@ -55,7 +58,7 @@ class TestDataset(PinballDataset_):
         datum = super().__getitem__(idx)
         s = datum.info['state'].astype(np.float32)
         return (datum.obs, s)#, datum.next_obs, self.next_s[idx])
-
+    
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +165,6 @@ def grayscale(obs):
 
 if __name__=='__main__':
 
-
     default_dataset = 'experiments/pb_obstacles/pixel/data/obstacles.pt'
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch-size', type=int, default=64)
@@ -206,6 +208,10 @@ if __name__=='__main__':
 
 
     obs = (batch[0][choice] * 255).numpy().astype(np.uint8)[:, 0] # remove channel dim
+
+    # plot histogram of grayscale values
+    print(f'Pixel values: {torch.from_numpy(obs).reshape(-1).unique(sorted=True)}')
+
     obs[np.arange(3), coords[:, 1], coords[:, 0]] = 0
     print(obs.shape)
     obs = obs.reshape(-1, obs.shape[-1])
@@ -213,6 +219,7 @@ if __name__=='__main__':
     print(coords)
     img = Image.fromarray(obs)
     samples_path = f'{args.save_path}/samples'
+    os.makedirs(samples_path, exist_ok=True)
     img.save(f'{samples_path}/sanity.png')
     
     # create model
@@ -304,7 +311,7 @@ if __name__=='__main__':
             s = d.sample()
         
         printarr(s, s_obs)
-
+        
         imgs = s.cpu().permute(0,2,3,1).numpy().astype(np.uint8)
         if imgs.shape[-1] == 1:
             imgs = imgs[..., 0]

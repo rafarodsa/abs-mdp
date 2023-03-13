@@ -148,7 +148,6 @@ class DeconvBlock(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         # self.mlp = nn.Linear(cfg.input_dim, cfg.in_channels)
-        print(cfg.input_dim)
 
         feat_maps = 64
         hidden_dim = cfg.mlp_hidden
@@ -166,7 +165,8 @@ class DeconvBlock(nn.Module):
     def forward(self, x):
         # x = self.mlp_1(x)
         x = x * 100
-        i = torch.zeros(x.shape[0], 100,100).to(x.get_device())
+        device = x.get_device() if x.is_cuda else 'cpu'
+        i = torch.zeros(x.shape[0], 100,100).to(device)
         idx = x.long()
         i[torch.arange(x.shape[0]).long(), idx[:, 0], idx[:, 1]] = 1.
         # print(i[0].argmax(dim=0), i[0].argmax(dim=0).argmax())
@@ -205,7 +205,7 @@ class PixelCNNDistribution(nn.Module):
                 # assert x.shape[-2:] == self.h.shape[-2:]
                 log_prob = F.log_softmax(self(x), dim=1)
                 logger.debug(f'log_prob.shape: {log_prob.shape}, x.shape: {x.shape}')
-                log_prob = torch.gather(log_prob, dim=1, index=(255 * x.unsqueeze(1)).long())
+                log_prob = torch.gather(log_prob, dim=1, index=((self.decoder.color_levels-1) * x.unsqueeze(1)).long())
                 logger.debug(f'log_prob.shape: {log_prob.shape}')
                 log_prob = log_prob.reshape(x.shape[0], -1).sum(-1)
             elif len(x.shape) > len(self.h.shape):
@@ -223,7 +223,7 @@ class PixelCNNDistribution(nn.Module):
                 log_prob = F.log_softmax(self(x), dim=1) # N x 256 x 3 x w x h
                 logger.debug(f'log_prob.shape: {log_prob.shape}, _x.shape: {_x.shape}')
                 print(x)
-                log_prob = torch.gather(log_prob, dim=1, index=(255 * _x.unsqueeze(1)).long()).squeeze(1)
+                log_prob = torch.gather(log_prob, dim=1, index=((self.decoder.color_levels-1) * _x.unsqueeze(1)).long()).squeeze(1)
                 
                 # iters = product(*list(map(lambda x: list(range(x)), batch_dims)))
                 # log_prob_test = torch.zeros(*batch_dims, B, x.shape[-3], x.shape[-2], x.shape[-1])
@@ -270,12 +270,12 @@ class PixelCNNDecoder(nn.Module):
         self.features = features
         self.data_channels = cfg.color_channels
         self.width, self.height = cfg.out_width, cfg.out_height
-        
+        self.color_levels = cfg.color_levels
         self.causal_block = GatedPixelCNNLayer(cfg.color_channels, cfg.feats_maps * self.data_channels, kernel_size=cfg.kernel_size, data_channels=self.data_channels, residual=False, mask_type='A')
        
         self.stack = PixelCNNStack(cfg.feats_maps * self.data_channels, cfg.kernel_size, cfg.n_layers, data_channels=self.data_channels)
         # TODO: maybe reshape and then 1-conv. or masked 1-conv for output
-        self.output = nn.Conv2d(cfg.feats_maps * self.data_channels, 256 * self.data_channels, kernel_size=1, stride=1, padding='same')
+        self.output = nn.Conv2d(cfg.feats_maps * self.data_channels, self.color_levels * self.data_channels, kernel_size=1, stride=1, padding='same')
         # self.output = MaskedConv2d(cfg.feats_maps * self.data_channels, 256 * self.data_channels, kernel_size=1, stride=1, padding='same', mask_type='A')
     def forward(self, x, h):
         '''
@@ -291,7 +291,7 @@ class PixelCNNDecoder(nn.Module):
         x_v, x_h, _ = self.causal_block(x, x)
         _, _, skip = self.stack(x_v, x_h, cond)
         out = self.output(F.relu(skip))
-        out = out.reshape(x.shape[0], 256, self.data_channels, width, height) # (batch_size, 256, data_channels, width, height)
+        out = out.reshape(x.shape[0], self.color_levels, self.data_channels, width, height) # (batch_size, 256, data_channels, width, height)
         return out 
 
     def sample(self, h, n_samples=1, device=None):
