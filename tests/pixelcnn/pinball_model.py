@@ -47,6 +47,8 @@ class TestDataset(PinballDataset_):
         self.debug = self.load_debug()
         self.s, self.next_s = load_states(self.debug)
         self._data = list(zip(self.data, self.s, self.next_s))
+        n = len(self.data)
+        self.data = self.data[: n // 10]
 
     def load_debug(self):
         with zipfile.ZipFile(self.zfile_name, 'r') as z:
@@ -68,7 +70,8 @@ class PinballDecoderModel(pl.LightningModule):
         self.deconv = DeconvBlock(cfg.features)
         self.decoder = PixelCNNDecoder(self.deconv, cfg.dist)
         self.lr = cfg.lr
-        
+        self.save_hyperparameters()
+
     def forward(self, obs, s):
         # print(obs.shape, s.shape)
         # cond = self.deconv(s)
@@ -77,7 +80,7 @@ class PinballDecoderModel(pl.LightningModule):
     def _run_step(self, obs, s):
         s = s[..., :2]
 
-        loss = -self.decoder.distribution(s).log_prob(obs).mean()
+        loss = -self.decoder.log_prob(obs, s).mean()
 
         # out = self.forward(obs, s)
         # idx = (obs * 255).long()
@@ -158,13 +161,11 @@ def load_cfg(unknown_args, path='experiments/pb_obstacles/pixel/config/config.ya
     cfg = oc.merge(cfg, cli_config)
     return cfg
 
-
-
 def grayscale(obs):
     return 0.2125 * obs[:, 0] + 0.7154 * obs[:, 1] + 0.0721 * obs[:, 2]
 
 if __name__=='__main__':
-
+    torch.set_float32_matmul_precision('medium')
     default_dataset = 'experiments/pb_obstacles/pixel/data/obstacles.pt'
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch-size', type=int, default=64)
@@ -180,12 +181,17 @@ if __name__=='__main__':
     parser.add_argument('--num-nodes', type=int, default=1)
     parser.add_argument('--devices', type=int, default=1)
     parser.add_argument('--n-samples', type=int, default=2)
+    parser.add_argument('--tag', type=str, default=None)
     parser.add_argument('--lr', type=float, default=3e-5)
+    parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument('--strategy', type=str, default=None)
     parser.add_argument('-n', type=int, default=1)
     args, unknown_args = parser.parse_known_args()
 
+    torch.manual_seed(args.seed)
+
     cfg = load_cfg(unknown_args, args.config)
-    
+    save_path = f'{args.save_path}/{args.tag}' if args.tag is not None else args.save_path
 
     data = TestDataset(path_to_file=cfg.data.data_path, obs_type=cfg.data.obs_type, transforms=[])
 
@@ -218,7 +224,7 @@ if __name__=='__main__':
     # make and save image
     print(coords)
     img = Image.fromarray(obs)
-    samples_path = f'{args.save_path}/samples'
+    samples_path = f'{save_path}/samples'
     os.makedirs(samples_path, exist_ok=True)
     img.save(f'{samples_path}/sanity.png')
     
@@ -239,7 +245,7 @@ if __name__=='__main__':
 
     checkpoint_callback = ModelCheckpoint(
         monitor='val_loss',
-        dirpath=f'{cfg.save_path}/sanity/ckpts/',
+        dirpath=f'{save_path}/ckpts/',
         filename='pixelcnn-pb-{epoch:02d}-{val_loss:.2f}'+f'_{args.model}',
         save_top_k=3
     )
@@ -249,19 +255,20 @@ if __name__=='__main__':
                         devices=args.devices,
                         num_nodes=args.num_nodes, 
                         max_epochs=args.epochs,
-                        callbacks=[checkpoint_callback]
-                        )
+                        callbacks=[checkpoint_callback],
+                        strategy=args.strategy
+                    )
     
     if not args.inference:
         trainer.fit(model, train_loader, val_loader, ckpt_path=args.from_ckpt)
     
         # save model
-        os.makedirs(args.save_path, exist_ok=True)
+        os.makedirs(save_path, exist_ok=True)
         
-        trainer.save_checkpoint(f'{args.save_path}/pinball_{args.model}.ckpt')
-        print(f'Checkpoint saved at {args.save_path}/pinball_{args.model}.ckpt')
-        torch.save(model.state_dict(), f'{args.save_path}/pinball_{args.model}.pt')
-        print(f'Model params saved at {args.save_path}/pinball_{args.model}.pt')
+        trainer.save_checkpoint(f'{save_path}/pinball_{args.model}.ckpt')
+        print(f'Checkpoint saved at {save_path}/pinball_{args.model}.ckpt')
+        torch.save(model.state_dict(), f'{save_path}/pinball_{args.model}.pt')
+        print(f'Model params saved at {save_path}/pinball_{args.model}.pt')
         # TODO: this is failing to resolve.
         # oc.save(oc.resolve(cfg), f'{args.save_path}/config.yaml')
         # print(f'Model config saved at {args.save_path}/config.yaml')
@@ -270,7 +277,7 @@ if __name__=='__main__':
 
     else:
         if args.from_ckpt is None:
-            model.load_state_dict(torch.load(f'{args.save_path}/pinball_{args.model}.pt'))
+            model.load_state_dict(torch.load(f'{save_path}/pinball_{args.model}.pt'))
         else:
             model = model.load_from_checkpoint(args.from_ckpt, cfg=model_cfg)
             model.eval()
@@ -294,7 +301,7 @@ if __name__=='__main__':
         # if s_obs.shape[-1] == 1:
             # s_obs = s_obs[..., 0]
             
-        samples_path = f'{args.save_path}/samples'
+        samples_path = f'{save_path}/samples'
         os.makedirs(samples_path, exist_ok=True)
         for i in range(s_obs.shape[0]):
             img = Image.fromarray(s_obs[i])
@@ -310,9 +317,10 @@ if __name__=='__main__':
             print(d.log_prob(_obs))
             s = d.sample()
         
-        printarr(s, s_obs)
         
+        s = s/(cfg.model.decoder.dist.color_levels-1) * 255
         imgs = s.cpu().permute(0,2,3,1).numpy().astype(np.uint8)
+        printarr(s, s_obs)
         if imgs.shape[-1] == 1:
             imgs = imgs[..., 0]
         for i in range(imgs.shape[0]):

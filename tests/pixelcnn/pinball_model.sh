@@ -4,8 +4,8 @@
 #SBATCH --nodes=1             # This needs to match Trainer(num_nodes=...)
 #SBATCH --gres=gpu:2
 #SBATCH --ntasks-per-node=2   # This needs to match Trainer(devices=...)
-#SBATCH --mem=0
-#SBATCH --time=0-02:00:00
+#SBATCH --mem=32g
+#SBATCH --time=0-06:00:00
 #SBATCH -p 3090-gcondo
 #SBATCH --output pinball-log-%J.txt
 
@@ -26,4 +26,4 @@ export PYTHONFAULTHANDLER=1
 # export NCCL_SOCKET_IFNAME=^docker0,lo
 
 # run script from above
-srun python tests/pixelcnn/pinball_model.py --config experiments/pb_obstacles/pixel/config/test_decoder.yaml --devices 2
+srun python tests/pixelcnn/pinball_model.py --config experiments/pb_obstacles/pixel/config/test_decoder.yaml --devices 2 --epochs 300 --batch-size 64 --lr 1e-3 --strategy ddp --save-path ./ckpts
