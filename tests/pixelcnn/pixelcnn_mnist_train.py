@@ -23,20 +23,22 @@ class PixelCNNDecoderBinary(pl.LightningModule):
         self.kernel_size = kernel_size
         self.n_layers = n_layers
         self.embed = nn.Embedding(n_classes, out_channels)
-        self.causal_block = GatedPixelCNNLayer(in_channels, out_channels, kernel_size, mask_type='A') # causal.
+        self.causal_block = GatedPixelCNNLayer(in_channels, out_channels, kernel_size, mask_type='A', residual=False) # causal.
         self.stack = PixelCNNStack(out_channels, kernel_size, n_layers-1)
+        self.conv = nn.Conv2d(out_channels, out_channels, kernel_size=1, stride=1)
         self.output = nn.Conv2d(out_channels, 256, kernel_size=1, stride=1, padding='same')
 
     def forward(self, x, label):
         conditional = self.embed(label).reshape(x.shape[0],-1, 1, 1)
         vertical, horizontal, _ = self.causal_block(x, x, None)
-        vertical, horizontal, skip = self.stack(vertical, horizontal, None)
-        return self.output(F.relu(skip))
+        vertical, horizontal, skip = self.stack(vertical, horizontal, conditional)
+        return self.output(F.relu(self.conv(F.relu(skip))))
 
     def training_step(self, batch, batch_idx):
         x, label = batch
         out = F.log_softmax(self(x, label), dim=1)
-        idx = (x*255).int()
+        x = x * 255
+        idx = x.long()
         # printarr(x, out, idx)
         loss = F.nll_loss(out, idx.squeeze(), reduction='none').reshape(x.shape[0], -1).sum(-1).mean()
         self.log('train_loss', loss)
@@ -45,13 +47,14 @@ class PixelCNNDecoderBinary(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         x, label = batch
         out = F.log_softmax(self(x, label), dim=1)
-        idx = (x*255).int().squeeze()
+        x = x * 255
+        idx = x.long().squeeze()
         loss = F.nll_loss(out, idx, reduction='none').reshape(x.shape[0], -1).sum(-1).mean()
         self.log('val_loss', loss, prog_bar=True)
         return loss
    
     def configure_optimizers(self) -> torch.optim.Optimizer:
-        return torch.optim.Adam(self.parameters(), lr=3e-5)
+        return torch.optim.Adam(self.parameters(), lr=1e-3)
 
 
 def conv_out_dim(in_dim, kernel_size, stride, padding=0):
@@ -99,14 +102,14 @@ if __name__ == "__main__":
     transform = transforms.Compose([transforms.ToTensor(), transforms.Grayscale(num_output_channels=1)])
     train_dataset = MNIST(root='data', train=True, download=True, transform=transform)
     val_dataset = MNIST(root='data', train=False, download=True, transform=transform)
-    train_loader = DataLoader(train_dataset, batch_size=256, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=128, shuffle=False)
 
 
     # Train
-    model = PixelCNNDecoderBinary(n_classes=10, in_channels=1, out_channels=64, kernel_size=7, n_layers=5)
+    model = PixelCNNDecoderBinary(n_classes=10, in_channels=1, out_channels=128, kernel_size=7, n_layers=10)
 
-    trainer = pl.Trainer(max_epochs=2, accelerator='gpu')
+    trainer = pl.Trainer(max_epochs=20, accelerator='gpu')
     trainer.fit(model, train_loader, val_loader)
 
     # Save model
