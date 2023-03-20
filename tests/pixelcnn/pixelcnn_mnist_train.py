@@ -9,6 +9,7 @@ from torchvision import transforms
 
 from src.models import DiagonalGaussianModule
 from src.models import PixelCNNStack, GatedPixelCNNLayer
+from src.models.quantized_logistic import QuantizedLogisticMixture
 from src.utils.printarr import printarr
 import matplotlib.pyplot as plt
 
@@ -61,6 +62,53 @@ def conv_out_dim(in_dim, kernel_size, stride, padding=0):
     return int((in_dim - kernel_size + 2 * padding) / stride + 1)
 
 
+class PixelCNNLogistic(pl.LightningModule):
+    def __init__(self, n_classes, in_channels, out_channels, kernel_size=3, n_layers=5):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.n_layers = n_layers
+        self.n_components = 10
+        self.embed = nn.Embedding(n_classes, out_channels)
+        self.causal_block = GatedPixelCNNLayer(in_channels, out_channels, kernel_size, mask_type='A', residual=False) # causal.
+        self.stack = PixelCNNStack(out_channels, kernel_size, n_layers-1)
+        self.conv = nn.Conv2d(out_channels, out_channels, kernel_size=1, stride=1)
+        self.output = nn.Conv2d(out_channels, self.n_components * 3, kernel_size=1, stride=1)
+
+    def forward(self, x, label):
+        conditional = self.embed(label).reshape(x.shape[0],-1, 1, 1)
+        vertical, horizontal, _ = self.causal_block(x, x, None)
+        vertical, horizontal, skip = self.stack(vertical, horizontal, conditional)
+        out = F.relu(skip)
+        return self.output(F.relu(self.conv(out))).permute(0,2,3,1).contiguous().unsqueeze(1)
+
+    def training_step(self, batch, batch_idx):
+        x, label = batch
+        x = x * 2 - 1
+        out = self(x, label) # n_channels
+        log_probs = QuantizedLogisticMixture(out[..., :self.n_components], out[...,self.n_components:2*self.n_components], out[..., 2*self.n_components:]).log_prob(x)
+        # printarr(x, out, idx)
+        # loss = F.nll_loss(out, idx.squeeze(), reduction='none').reshape(x.shape[0], -1).sum(-1).mean()
+        loss = -log_probs.mean()
+        self.log('train_loss', loss)
+        return loss
+    
+    def validation_step(self, batch, batch_idx):
+        x, label = batch
+        x = x * 2 - 1
+        out = self(x, label)
+        log_probs = QuantizedLogisticMixture(out[..., :self.n_components], out[..., self.n_components:2*self.n_components], out[..., 2*self.n_components:]).log_prob(x)
+        # printarr(x, out, idx)
+        # loss = F.nll_loss(out, idx.squeeze(), reduction='none').reshape(x.shape[0], -1).sum(-1).mean()
+        loss = -log_probs.mean()
+        self.log('val_loss', loss, prog_bar=True)
+        return loss
+   
+    def configure_optimizers(self) -> torch.optim.Optimizer:
+        return torch.optim.Adam(self.parameters(), lr=2e-5)
+
+
 # def encoder_conv_continuous(in_width, in_height, in_channels, kernel_size=3, stride=1, hidden_dim=128, latent_dim=2):
 #     out_channels_1, out_channels_2 = 64, 32
 #     out_width_1, out_height_1 = conv_out_dim(in_width, kernel_size=kernel_size, stride=stride), conv_out_dim(in_height, kernel_size=kernel_size, padding=0, stride=stride)
@@ -107,9 +155,9 @@ if __name__ == "__main__":
 
 
     # Train
-    model = PixelCNNDecoderBinary(n_classes=10, in_channels=1, out_channels=128, kernel_size=7, n_layers=10)
+    model = PixelCNNLogistic(n_classes=10, in_channels=1, out_channels=256, kernel_size=5, n_layers=20)
 
-    trainer = pl.Trainer(max_epochs=20, accelerator='gpu')
+    trainer = pl.Trainer(max_epochs=100, accelerator='gpu')
     trainer.fit(model, train_loader, val_loader)
 
     # Save model

@@ -114,6 +114,7 @@ class GatedPixelCNNLayer(nn.Module):
         self.skip = nn.Conv2d(_out_channels // 2, _out_channels // 2, kernel_size=1, stride=1, padding='same')
         self.residual = nn.Conv2d(_out_channels // 2, _out_channels // 2, kernel_size=1, stride=1, padding='same') if residual else None
         self.conditional = nn.Conv2d(self.in_channels, _out_channels, kernel_size=1, stride=1, padding='same')
+        self.dropout = nn.Dropout(0.5)
 
 
     def forward(self, vertical, horizontal, conditional=None):
@@ -134,7 +135,7 @@ class GatedPixelCNNLayer(nn.Module):
         
         _skip = self.skip(_horizontal)
         if self.residual is not None:
-            _residual = self.residual(_horizontal) # out_channels
+            _residual = self.residual(_horizontal)# out_channels
             _horizontal = horizontal + _residual
 
         return _vertical, _horizontal, _skip
@@ -176,28 +177,28 @@ class DeconvBlock(nn.Module):
         self.conv3 = nn.Conv2d(feat_maps * cfg.color_channels, cfg.out_channels * cfg.color_channels, kernel_size=4, stride=1, padding='valid')
     
     def forward(self, x):
-        # x = self.mlp_1(x)
-        x = x * 100
-        device = x.get_device() if x.is_cuda else 'cpu'
-        i = torch.zeros(x.shape[0], 100,100).to(device)
-        idx = x.long()
-        i[torch.arange(x.shape[0]).long(), idx[:, 0], idx[:, 1]] = 1.
+       
+
+
+        # x = x * 100
+        # device = x.get_device() if x.is_cuda else 'cpu'
+        # i = torch.zeros(x.shape[0], 100,100).to(device)
+        # idx = x.long()
+        # i[torch.arange(x.shape[0]).long(), idx[:, 0], idx[:, 1]] = 1.
         # print(i[0].argmax(dim=0), i[0].argmax(dim=0).argmax())
         # print(idx[0])
         # t = i.argmax(dim=1)
         # coords_x, coords_y = t.max(dim=1)#, t.argmax(dim=1)
         # print(coords_x, coords_y)
         # assert torch.allclose(idx, torch.cat([coords_x.unsqueeze(1), coords_y.unsqueeze(1)], dim=1))
+        # i = i.unsqueeze(1)
+        # x = self.relu(self.conv0(i)
 
-        i = i.unsqueeze(1)
-        x = self.relu(self.conv0(i))
-        
-        # x = self.mlp_2(self.relu(self.mlp_1(x)))
-        # x = self.relu(self.conv0(x.reshape(x.shape[0], 1, 12, 12)))
-        # x = self.conv1(self.relu(self.deconv1(x)))
-        # x = self.conv2(self.relu(self.deconv2(x)))
-        # x = self.conv3(self.relu(self.deconv3(self.relu(x))))
-        # x = self.conv2(self.relu(x)) + x
+        x = self.mlp_2(self.relu(self.mlp_1(x)))
+        x = self.relu(self.conv0(x.reshape(x.shape[0], 1, 12, 12)))
+        x = self.conv1(self.relu(self.deconv1(x)))
+        x = self.conv2(self.relu(self.deconv2(x)))
+        x = self.conv3(self.relu(self.deconv3(self.relu(x))))
         return x
 
 
@@ -208,6 +209,7 @@ class PixelCNNDistribution(nn.Module):
             self.h = h
         
         def forward(self, x):
+            print(self.h)
             return self.decoder._pixelcnn_stack(x, self.h)
             
         def log_prob(self, x):
@@ -262,7 +264,7 @@ class PixelCNNDistribution(nn.Module):
                 for i in range(width):
                     for j in range(height):
                         for c in range(self.decoder.data_channels):
-                            out = self.decoder._pixelcnn_stack(sample, cond)
+                            out = self.decoder._pixelcnn_stack(sample/self.decoder.color_levels, cond)
                             out = out[..., c, i, j]
                             out = torch.softmax(out, dim=1)
                             pixel = torch.multinomial(out, 1).squeeze(-1)
@@ -272,8 +274,6 @@ class PixelCNNDistribution(nn.Module):
                 sample = sample.reshape(n_samples, -1, self.decoder.data_channels, width, height)
             return sample
         
-        
-
 
 
 class PixelCNNDecoder(nn.Module):
@@ -297,7 +297,7 @@ class PixelCNNDecoder(nn.Module):
             h: embedding/latent feature maps, 
         '''
         cond = self.features(h)
-        return self._pixelcnn_stack(x, None)
+        return self._pixelcnn_stack(x, cond)
     
     def _pixelcnn_stack(self, x, cond):
         # TODO: generalize this for multiple batch dimensions.
@@ -323,7 +323,7 @@ class PixelCNNDecoder(nn.Module):
             for i in range(width):
                 for j in range(height):
                     for c in range(self.data_channels):
-                        out = self.forward(sample, h)
+                        out = self.forward(sample/(self.color_levels-1), h)
                         out = out[..., c, i, j]
                         out = torch.softmax(out, dim=1)
                         pixel = torch.multinomial(out, 1).squeeze(-1)

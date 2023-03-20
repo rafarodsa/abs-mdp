@@ -18,6 +18,7 @@ import zipfile
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from src.utils.printarr import printarr
+import src.absmdp.configs
 
 import matplotlib.pyplot as plt
 
@@ -48,7 +49,7 @@ class TestDataset(PinballDataset_):
         self.s, self.next_s = load_states(self.debug)
         self._data = list(zip(self.data, self.s, self.next_s))
         n = len(self.data)
-        self.data = self.data[: n // 10]
+        self.data = self.data[:n//6]
 
     def load_debug(self):
         with zipfile.ZipFile(self.zfile_name, 'r') as z:
@@ -154,7 +155,50 @@ class PinballEncoderModel(pl.LightningModule):
     def configure_optimizers(self):
         print(self.lr)
         return torch.optim.Adam(self.parameters(), lr=self.lr)
-        
+    
+
+class PixelCNNAutoencoder(pl.LightningModule):
+    def __init__(self, cfg):
+        super().__init__()
+        cfg.model.decoder.lr = cfg.lr
+        cfg.model.encoder.lr = cfg.lr
+        self.lr = cfg.lr
+        self.decoder = PinballDecoderModel(cfg.model.decoder)
+        self.encoder = PinballEncoderModel(cfg.model.encoder)
+        self.save_hyperparameters()
+
+    def forward(self, obs):
+        z = self.encoder(obs)
+        out_logits = self.decoder(obs, z)
+        return out_logits
+
+    def _run_step(self, obs):
+        z = self.encoder(obs)
+        return -self.decoder.decoder.log_prob(obs, z).mean()
+
+    def training_step(self, batch, batch_idx):
+        obs, s = batch
+        loss = self._run_step(obs)
+        self.log('train_loss', loss)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        obs, s = batch
+        loss = self._run_step(obs)
+        self.log('val_loss', loss,prog_bar=True)
+        logger.info(f'Validation Loss: {loss}')
+        return loss
+    
+    def test_step(self, batch, batch_idx):
+        obs, s = batch
+        loss = self._run_step(obs)
+        self.log('test_loss', loss, prog_bar=True)
+        return loss
+
+    def configure_optimizers(self):
+        print(self.lr)
+        return torch.optim.Adam(self.parameters(), lr=self.lr)
+     
 def load_cfg(unknown_args, path='experiments/pb_obstacles/pixel/config/config.yaml'):
     cfg = oc.load(path)
     cli_config = oc.from_cli(unknown_args)
@@ -233,10 +277,16 @@ if __name__=='__main__':
         model_cfg = cfg.model.decoder
         model_cfg.lr = args.lr
         model = PinballDecoderModel(model_cfg)
-    else:
+    elif args.model == 'encoder':
         model_cfg = cfg.model.encoder
         model_cfg.lr = args.lr
         model = PinballEncoderModel(model_cfg)
+    elif args.model == 'autoencoder':
+        oc.resolve(cfg)
+        model = PixelCNNAutoencoder(cfg)
+    else:
+        raise ValueError(f'{args.model} is not known')
+
 
     if args.from_ckpt is not None:
         print(f'Loading checkpoint at {args.from_ckpt}')
@@ -256,7 +306,11 @@ if __name__=='__main__':
                         num_nodes=args.num_nodes, 
                         max_epochs=args.epochs,
                         callbacks=[checkpoint_callback],
-                        strategy=args.strategy
+                        strategy=args.strategy,
+                        # gradient_clip_val=1.0,
+                        detect_anomaly=True,
+                        track_grad_norm=2,
+                        # overfit_batches=5
                     )
     
     if not args.inference:
@@ -311,11 +365,11 @@ if __name__=='__main__':
         print(f'Sampling... {args.n_samples} samples')
         with torch.no_grad():
             h = torch.from_numpy(states[choice, :2]).to(device)
-            d = decoder.to(device).distribution(h)
+            # d = decoder.to(device).distribution(h)
             _obs = torch.from_numpy(_obs/255).to(device)
-            printarr(h, _obs)
-            print(d.log_prob(_obs))
-            s = d.sample()
+            # printarr(h, _obs)
+            # print(d.log_prob(_obs))
+            s = model.to(device).decoder.sample(h)
         
         
         s = s/(cfg.model.decoder.dist.color_levels-1) * 255
