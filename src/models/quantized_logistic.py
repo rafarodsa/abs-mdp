@@ -12,7 +12,7 @@ class QuantizedLogisticMixture(torch.distributions.Distribution):
 
     def log_prob(self, x):
         # x.shape = [batch_size, num_channels, height, width]
-        # x is in [0, 1]
+        # x is in [-1, 1]
         # compute log prob in the bin
         # assert torch.all(x >= 0) and torch.all(x <= 1)
         assert torch.all(x >= -1) and torch.all(x <= 1)
@@ -33,7 +33,7 @@ class QuantizedLogisticMixture(torch.distributions.Distribution):
         log_cdf = torch.log(torch.clamp(cdf_plus - cdf_minus, min=1e-12))
 
         mid_in = inv_log_scale * centered_x
-        log_pdf_mid = mid_in - self.log_scale - 2. * F.softplus(mid_in) - torch.log(torch.tensor(127.5))
+        log_pdf_mid = mid_in - self.log_scale - 2. * F.softplus(mid_in) #- torch.log(torch.tensor(self.num_bins/2))
 
         cond_ = (cdf_plus-cdf_minus < 1e-5).float()
         log_cdf = cond_ * log_pdf_mid + (1-cond_) * log_cdf

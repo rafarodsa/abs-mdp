@@ -24,20 +24,22 @@ class PixelCNNDecoderBinary(pl.LightningModule):
         self.kernel_size = kernel_size
         self.n_layers = n_layers
         self.embed = nn.Embedding(n_classes, out_channels)
-        self.causal_block = GatedPixelCNNLayer(in_channels, out_channels, kernel_size, mask_type='A') # causal.
+        self.causal_block = GatedPixelCNNLayer(in_channels, out_channels, kernel_size, mask_type='A', residual=False) # causal.
         self.stack = PixelCNNStack(out_channels, kernel_size, n_layers-1)
+        self.conv = nn.Conv2d(out_channels, out_channels, kernel_size=1, stride=1)
         self.output = nn.Conv2d(out_channels, 256, kernel_size=1, stride=1, padding='same')
 
     def forward(self, x, label):
         conditional = self.embed(label).reshape(x.shape[0],-1, 1, 1)
         vertical, horizontal, _ = self.causal_block(x, x, None)
-        vertical, horizontal, skip = self.stack(vertical, horizontal, None)
-        return self.output(F.relu(skip))
+        vertical, horizontal, skip = self.stack(vertical, horizontal, conditional)
+        return self.output(F.relu(self.conv(F.relu(skip))))
 
     def training_step(self, batch, batch_idx):
         x, label = batch
         out = F.log_softmax(self(x, label), dim=1)
-        idx = (x*255).int()
+        x = x * 255
+        idx = x.long()
         # printarr(x, out, idx)
         loss = F.nll_loss(out, idx.squeeze(), reduction='none').reshape(x.shape[0], -1).sum(-1).mean()
         self.log('train_loss', loss)
@@ -46,13 +48,14 @@ class PixelCNNDecoderBinary(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         x, label = batch
         out = F.log_softmax(self(x, label), dim=1)
-        idx = (x*255).int().squeeze()
+        x = x * 255
+        idx = x.long().squeeze()
         loss = F.nll_loss(out, idx, reduction='none').reshape(x.shape[0], -1).sum(-1).mean()
         self.log('val_loss', loss, prog_bar=True)
         return loss
    
     def configure_optimizers(self) -> torch.optim.Optimizer:
-        return torch.optim.Adam(self.parameters(), lr=1e-4)
+        return torch.optim.Adam(self.parameters(), lr=1e-3)
 
 
 def conv_out_dim(in_dim, kernel_size, stride, padding=0):
@@ -60,9 +63,6 @@ def conv_out_dim(in_dim, kernel_size, stride, padding=0):
 
 
 class PixelCNNLogistic(pl.LightningModule):
-    '''
-        PixelCNN for binary images (Binarized MNIST)
-    '''
     def __init__(self, n_classes, in_channels, out_channels, kernel_size=3, n_layers=5):
         super().__init__()
         self.in_channels = in_channels
@@ -71,7 +71,7 @@ class PixelCNNLogistic(pl.LightningModule):
         self.n_layers = n_layers
         self.n_components = 10
         self.embed = nn.Embedding(n_classes, out_channels)
-        self.causal_block = GatedPixelCNNLayer(in_channels, out_channels, kernel_size, mask_type='A') # causal.
+        self.causal_block = GatedPixelCNNLayer(in_channels, out_channels, kernel_size, mask_type='A', residual=False) # causal.
         self.stack = PixelCNNStack(out_channels, kernel_size, n_layers-1)
         self.conv = nn.Conv2d(out_channels, out_channels, kernel_size=1, stride=1)
         self.output = nn.Conv2d(out_channels, self.n_components * 3, kernel_size=1, stride=1)
@@ -81,13 +81,13 @@ class PixelCNNLogistic(pl.LightningModule):
         vertical, horizontal, _ = self.causal_block(x, x, None)
         vertical, horizontal, skip = self.stack(vertical, horizontal, conditional)
         out = F.relu(skip)
-        return self.output(F.relu(self.conv(out))).permute(0,2,3,1).contiguous()
+        return self.output(F.relu(self.conv(out))).permute(0,2,3,1).contiguous().unsqueeze(1)
 
     def training_step(self, batch, batch_idx):
         x, label = batch
         x = x * 2 - 1
-        out = self(x, label).unsqueeze(1) # n_channels
-        log_probs = QuantizedLogisticMixture(out[..., :self.n_components], out[..., self.n_components:2*self.n_components], out[..., 2*self.n_components:]).log_prob(x)
+        out = self(x, label) # n_channels
+        log_probs = QuantizedLogisticMixture(out[..., :self.n_components], out[...,self.n_components:2*self.n_components], out[..., 2*self.n_components:]).log_prob(x)
         # printarr(x, out, idx)
         # loss = F.nll_loss(out, idx.squeeze(), reduction='none').reshape(x.shape[0], -1).sum(-1).mean()
         loss = -log_probs.mean()
@@ -97,7 +97,7 @@ class PixelCNNLogistic(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         x, label = batch
         x = x * 2 - 1
-        out = self(x, label).unsqueeze(1)
+        out = self(x, label)
         log_probs = QuantizedLogisticMixture(out[..., :self.n_components], out[..., self.n_components:2*self.n_components], out[..., 2*self.n_components:]).log_prob(x)
         # printarr(x, out, idx)
         # loss = F.nll_loss(out, idx.squeeze(), reduction='none').reshape(x.shape[0], -1).sum(-1).mean()
@@ -106,7 +106,7 @@ class PixelCNNLogistic(pl.LightningModule):
         return loss
    
     def configure_optimizers(self) -> torch.optim.Optimizer:
-        return torch.optim.Adam(self.parameters(), lr=5e-5)
+        return torch.optim.Adam(self.parameters(), lr=2e-5)
 
 
 # def encoder_conv_continuous(in_width, in_height, in_channels, kernel_size=3, stride=1, hidden_dim=128, latent_dim=2):
@@ -155,9 +155,9 @@ if __name__ == "__main__":
 
 
     # Train
-    model = PixelCNNLogistic(n_classes=10, in_channels=1, out_channels=64, kernel_size=7, n_layers=5)
+    model = PixelCNNLogistic(n_classes=10, in_channels=1, out_channels=256, kernel_size=5, n_layers=20)
 
-    trainer = pl.Trainer(max_epochs=10, accelerator='gpu', overfit_batches=0.5)
+    trainer = pl.Trainer(max_epochs=100, accelerator='gpu')
     trainer.fit(model, train_loader, val_loader)
 
     # Save model
