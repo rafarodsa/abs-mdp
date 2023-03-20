@@ -8,10 +8,10 @@ from functools import partial
 from torch.distributions import Normal, register_kl, MultivariateNormal, kl_divergence
 
 class DiagonalNormal(torch.distributions.Distribution):
-    def __init__(self, mean, log_var):
+    def __init__(self, mean, std):
         self._mean = mean
-        self._log_var = log_var
-        self.dist = Normal(mean, torch.exp(log_var / 2))
+        self._log_var = torch.log(std) * 2
+        self.dist = Normal(mean, std)
 
     @property
     def mean(self):
@@ -28,10 +28,10 @@ class DiagonalNormal(torch.distributions.Distribution):
         return self.dist.rsample(torch.zeros(n_samples).size())
     
     def log_prob(self, x):
-        logp = self.dist.log_prob(x).sum(-1)
+        # logp = self.dist.log_prob(x).sum(-1)
         p_m = MultivariateNormal(self.mean, covariance_matrix=torch.diag_embed(self.var))
         # assert torch.allclose(p_m.log_prob(x), logp)
-        return logp
+        return p_m.log_prob(x)
     
     def entropy(self):
         h = self.dist.entropy().sum(-1)
@@ -40,7 +40,7 @@ class DiagonalNormal(torch.distributions.Distribution):
         return h
 
     def detach(self):
-        return DiagonalNormal(self.mean.detach(), self._log_var.detach())
+        return DiagonalNormal(self.mean.detach(), self.std.detach())
 
 @register_kl(DiagonalNormal, DiagonalNormal)
 def diag_normal_kl(p: DiagonalNormal, q: DiagonalNormal): 
@@ -70,7 +70,7 @@ class DiagonalGaussianModule(nn.Module):
         super().__init__()
         self.feats = features
         self.output_dim = config.output_dim
-
+        
         self.mean = nn.Linear(config.input_dim, config.output_dim)
         self.log_var = nn.Linear(config.input_dim, config.output_dim)
         self.min_var = torch.log(torch.tensor(config.min_std)) * 2
@@ -78,15 +78,16 @@ class DiagonalGaussianModule(nn.Module):
 
     def forward(self, input):
         feats = self.feats(input)
-        mean, log_var = self.mean(F.relu(feats)), self.log_var(F.relu(feats))
+        mean, log_var = self.mean(F.leaky_relu(feats)), self.log_var(F.leaky_relu(feats))
         
         #softly constrain the variance
-        log_var = self.max_var - softplus(self.max_var - log_var)
-        log_var = self.min_var + softplus(log_var - self.min_var)
+        log_var = self.max_var - F.softplus(self.max_var - log_var)
+        log_var = self.min_var + F.softplus(log_var - self.min_var)
        
         return mean, log_var
 
     def sample_n_dist(self, input, n_samples=1):
+ 
         mean, log_var = self.forward(input)
         std = torch.exp(log_var / 2)
         std_normal = DiagonalNormal(torch.zeros_like(mean), torch.ones_like(std))
@@ -106,7 +107,16 @@ class DiagonalGaussianModule(nn.Module):
         std = torch.exp(log_var / 2)
         q = DiagonalNormal(mean, std)
         return q
-
+    
+    def freeze(self):
+        for p in self.parameters():
+            p.requires_grad_ = False
+        return self
+    
+    def unfreeze(self):
+        for p in self.parameters():
+            p.requires_grad_ = True
+        return self
 
 class SphericalGaussianModule(DiagonalGaussianModule):
     def __init__(self, features, config):

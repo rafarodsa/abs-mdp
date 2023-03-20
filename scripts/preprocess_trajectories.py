@@ -5,22 +5,29 @@ import numpy as np
 from tqdm import tqdm
 
 from functools import reduce
+import zipfile, io
+from collections import namedtuple
+
+from src.absmdp.datasets import ObservationImgFile
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset-path', type=str, default='data/pinball_simple_obs.pt')
-    parser.add_argument('--save-path', type=str, default=None)
+    parser.add_argument('--dataset-path', type=str, default='data/pinball_simple_obs.zip')
+    # parser.add_argument('--save-path', type=str, default=None)
 
     args = parser.parse_args()
 
+    zfile = zipfile.ZipFile(args.dataset_path, 'a')
+
+
     # load dataset
+    with zfile.open('transitions.pt', 'r') as transitions_f:
+        dataset = torch.load(transitions_f) # trajectories.
     
-    dataset = torch.load(args.dataset_path) # trajectories.
     print(f'Dataset at {args.dataset_path} loaded')
     transition_samples = reduce(lambda x, acc: x + acc, dataset, [])
     o, option_n, next_o, rewards, executed, done, duration, initiation_masks, _, _ = zip(*transition_samples)
-
     rewards_per_action = {i: [] for i in range(max(option_n))}
 
     max_length = max(map(len, rewards))
@@ -37,8 +44,11 @@ if __name__ == "__main__":
 
     # dataset = list(zip(o, option_n, next_o, rewards, executed, duration, initiation_masks))
 
-    if args.save_path is None:
-        print(f'Overwriting original file at {args.dataset_path}')
-        args.save_path = args.dataset_path
+    # if args.save_path is None:
+    #     print(f'Overwriting original file at {args.dataset_path}')
+    #     args.save_path = args.dataset_path
 
-    torch.save((dataset, rewards_per_action), args.save_path)
+    bs = io.BytesIO()
+    torch.save(rewards_per_action, bs)
+    zfile.writestr('rewards.pt', bs.getvalue())
+    zfile.close()

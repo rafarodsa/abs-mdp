@@ -1,20 +1,20 @@
 # Config file for Pinball environment
 # Full State observation
 # Gridworld abstraction
-experiment_cwd: 'experiments/pb_obstacles/pixel'
-lr: 7e-4
-batch_size: 64
+experiment_cwd: 'experiments/pb_obstacles/fullstate'
+lr: 1e-3
+batch_size: 128
 epochs: 50
 accelerator: gpu
 devices: 1
 save_path: ${experiment_cwd}/mdps
 loss:
   grounding_const: 1.
-  kl_const: 0.
-  transition_const: 0.1
+  kl_const: 1
+  transition_const: 1
   reward_const: 1
   tau_const: 1.
-  initset_const: 0.
+  initset_const: 1.
   n_samples: 1
 data:
   data_path: ${experiment_cwd}/data/simple_v1.zip
@@ -26,16 +26,16 @@ data:
   shuffle: True  
   n_reward_samples: 5
   n_options: ${model.n_options}
-  n_out_feats: 4
+  n_out_feats: 10
   state_dim : 4
-  obs_type: pixels
+  obs_type: simple
   gamma: 0.99
 model:
   n_options: 4
-  obs_dims: 4
-  latent_dim: 100
-  encoder: ${loadcfg:${experiment_cwd}/config/models/encoder_residual.yaml}
-  decoder: ${loadcfg:${experiment_cwd}/config/models/decoder_pixelcnn.yaml}
+  obs_dims: ${data.n_out_feats}
+  latent_dim: 4
+  encoder: ${loadcfg:${experiment_cwd}/config/models/encoder_mlp.yaml}
+  decoder: ${loadcfg:${experiment_cwd}/config/models/decoder_mlp.yaml}
   transition: ${loadcfg:${experiment_cwd}/config/models/transition_gaussian.yaml}
   init_class: ${loadcfg:${experiment_cwd}/config/models/init_class_mlp.yaml}
   reward: ${loadcfg:${experiment_cwd}/config/models/reward_mlp.yaml}

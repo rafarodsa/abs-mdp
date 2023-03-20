@@ -2,17 +2,17 @@ features:
   type: conv_residual
   in_width: 100
   in_height: 100
-  color_channels: 3
-  feat_maps: 2
-  kernel_size: 3
-  out_dim:  ${eval:2*${model.latent_dim}}
+  color_channels: 1
+  feat_maps: 128
+  kernel_size: 4
+  out_dim: ${model.latent_dim}
   residual:
     n_layers: 2
     in_channels: ${model.encoder.features.feat_maps}
-    out_channels: 2
+    out_channels: 128
     kernel_size: 3
 dist:
   type: diag_gaussian
   output_dim: ${model.latent_dim}
   min_var: 1.0e-06
-  max_var: 1000000
+  max_var: 1000

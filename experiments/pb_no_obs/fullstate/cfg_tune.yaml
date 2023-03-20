@@ -1,0 +1,23 @@
+experiment_cwd: experiments/pb_no_obs/fullstate
+config: ${experiment_cwd}/config/config.yaml
+study_name: noobs
+direction: minimize
+db: tune.db
+variables:
+  - name: loss.grounding_const
+    min: 0.
+    max: 100
+    type: float
+  - name: loss.kl_const
+    min: 0.
+    max: 100
+    type: float
+  - name: loss.transition_const
+    min: 0.
+    max: 100
+    type: float
+  - name: lr
+    min: 1e-7
+    max: 1e-4
+    type: float
+  

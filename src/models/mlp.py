@@ -10,11 +10,12 @@ from .configs import MLPConfig
 
 def _MLP(input_dim: int, hidden_dim: List[int], output_dim: int = None, activation: str = 'relu'):
     layers = []
+    n = 1 if activation != 'glu' else 2
     for i in range(len(hidden_dim)):
         if i == 0:
-            layers.append(nn.Linear(input_dim, hidden_dim[i]))
+            layers.append(nn.Linear(input_dim, hidden_dim[i] * n))
         else:
-            layers.append(nn.Linear(hidden_dim[i-1], hidden_dim[i]))
+            layers.append(nn.Linear(hidden_dim[i-1], hidden_dim[i] * n))
         if activation == 'relu':
             layers.append(nn.ReLU())
         elif activation == 'sigmoid':
@@ -29,6 +30,8 @@ def _MLP(input_dim: int, hidden_dim: List[int], output_dim: int = None, activati
             layers.append(nn.SELU())
         elif activation == 'gelu':
             layers.append(nn.GELU())
+        elif activation == 'glu':
+            layers.append(nn.GLU())
         elif activation == 'none':
             pass
         else:
@@ -49,7 +52,7 @@ def MLP(cfg: MLPConfig):
     return _MLP(cfg.input_dim, cfg.hidden_dims, cfg.output_dim, cfg.activation)
 
 def DynamicsMLP(cfg):
-    return _MLP(cfg.latent_dim + cfg.n_options, cfg.hidden_dims, cfg.latent_dim, cfg.activation)
+    return _MLP(cfg.latent_dim + cfg.n_options, cfg.hidden_dims, output_dim=cfg.latent_dim, activation=cfg.activation)
     # return ResidualMLP(cfg)
 def RewardMLP(cfg):
     return _MLP(2*cfg.latent_dim + cfg.n_options, cfg.hidden_dims, 1, cfg.activation)

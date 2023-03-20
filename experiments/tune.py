@@ -12,7 +12,7 @@ from optuna.integration import PyTorchLightningPruningCallback
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
-from src.absmdp.det_ibtrainer import AbstractMDPTrainer
+from src.absmdp.ibtrainer import AbstractMDPTrainer
 from src.absmdp.datasets import PinballDataset
 from src.absmdp.utils import CyclicalKLAnnealing
 
@@ -22,10 +22,11 @@ def prepare_config(trial, cfg, variables):
     for var in variables:
         name, min, max, _type = var.name, var.min, var.max, var.type
         _path = name.split('.')
+        x = cfg
         if _type == 'float':
             val = trial.suggest_float(name, min, max)
             for node in _path[:-1]:
-                x = cfg[node] # get to the parent of leave node
+                x = x[node] # get to the parent of leave node
             x[_path[-1]] = val
         else:
             raise NotImplementedError

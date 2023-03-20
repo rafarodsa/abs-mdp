@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch 
 
-from src.absmdp.trainer import AbstractMDPTrainer
+from src.absmdp.vaetrainer import AbstractMDPTrainer
 
 
 def predict_next_states(mdp, states, actions, executed):

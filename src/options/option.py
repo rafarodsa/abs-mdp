@@ -12,7 +12,8 @@ class Option:
         self.initiation = initiation_classifier
         self.policy_factory = policy_func_factory
         self.executing = False
-        self.termination_prob = termination_prob
+        self.termination_prob_factory = termination_prob
+        self.termination_prob = None
         self.name = name
         self.policy = None
         self._step = 0.
@@ -20,6 +21,7 @@ class Option:
     def execute(self, state):
         self.executing = self.initiation(state)
         self.policy = self.policy_factory(state)
+        self.termination_prob = self.termination_prob_factory(state)
         self._step = 0.
         return self.executing
 

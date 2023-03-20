@@ -5,7 +5,7 @@ import pytorch_lightning as pl
 from torch.utils.data import DataLoader, random_split
 from torch.nn import functional as F
 
-from src.models import PixelCNNDecoder, DeconvBlock
+from src.models import PixelCNNDecoder, DeconvBlock, ResidualConvEncoder
 
 import argparse
 from omegaconf import OmegaConf as oc
@@ -13,25 +13,79 @@ from omegaconf import OmegaConf as oc
 import logging
 from PIL import Image
 
+from src.absmdp.datasets import PinballDataset_, PinballDataset
+import zipfile
+from pytorch_lightning.callbacks import ModelCheckpoint
 
+from src.utils.printarr import printarr
+import src.absmdp.configs
+
+import matplotlib.pyplot as plt
+
+
+def load_states(debug):
+    '''
+        Load states from debug dict for PinballDataset
+        return: s, next_s (np.ndarray)
+    '''
+    latent_states = debug['latent_states']
+    s = np.array(list(map(lambda x: x['state'], latent_states))).astype(np.float32)
+    next_s = np.array(list(map(lambda x: x['next_state'], latent_states))).astype(np.float32)
+    return s, next_s
+
+
+def save_images_as_one(samples, obs):
+    _obs = [obs[i] for i in range(obs.shape[0])]
+    _samples = [samples[i] for i in range(samples.shape[0])]
+    _obs = np.concatenate(_obs, axis=1)
+    _samples = np.concatenate(_samples, axis=1)
+    return np.concatenate([_obs, _samples], axis=0)
+
+class TestDataset(PinballDataset_):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.debug = self.load_debug()
+        self.s, self.next_s = load_states(self.debug)
+        self._data = list(zip(self.data, self.s, self.next_s))
+        n = len(self.data)
+        self.data = self.data[:n//6]
+
+    def load_debug(self):
+        with zipfile.ZipFile(self.zfile_name, 'r') as z:
+            with z.open('debug.pt', 'r') as f:
+                debug = torch.load(f)
+        return debug
+
+    def __getitem__(self, idx):
+        datum = super().__getitem__(idx)
+        s = datum.info['state'].astype(np.float32)
+        return (datum.obs, s)#, datum.next_obs, self.next_s[idx])
+    
 
 logger = logging.getLogger(__name__)
 
-class PinballModel(pl.LightningModule):
+class PinballDecoderModel(pl.LightningModule):
     def __init__(self, cfg):
         super().__init__()
         self.deconv = DeconvBlock(cfg.features)
         self.decoder = PixelCNNDecoder(self.deconv, cfg.dist)
         self.lr = cfg.lr
-
+        self.save_hyperparameters()
 
     def forward(self, obs, s):
+        # print(obs.shape, s.shape)
+        # cond = self.deconv(s)
         return self.decoder(obs, s)
 
-    def _run_step(self, x, s):
-        out = self.forward(x, s)
-        idx = (x * 255).long()
-        loss = F.cross_entropy(out.reshape(x.shape[0], 256, -1), idx.reshape(x.shape[0], -1), reduction='sum')/x.shape[0]
+    def _run_step(self, obs, s):
+        s = s[..., :2]
+
+        loss = -self.decoder.log_prob(obs, s).mean()
+
+        # out = self.forward(obs, s)
+        # idx = (obs * 255).long()
+        # loss = F.cross_entropy(out.reshape(obs.shape[0], 256, -1), idx.reshape(obs.shape[0], -1), reduction='sum')/obs.shape[0]
         # log_probs = F.log_softmax(out, dim=1)
         # log_probs = log_probs.gather(1, idx.unsqueeze(1).long()).squeeze(1)
         # loss = -log_probs.reshape(x.shape[0], -1).sum(1).mean()
@@ -47,39 +101,115 @@ class PinballModel(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         obs, s = batch
         loss = self._run_step(obs, s)
-        self.log('val_loss', loss)
+        self.log('val_loss', loss,prog_bar=True)
         logger.info(f'Validation Loss: {loss}')
         return loss
     
     def test_step(self, batch, batch_idx):
         obs, s = batch
         loss = self._run_step(obs, s)
-        self.log('test_loss', loss)
+        self.log('test_loss', loss, prog_bar=True)
         return loss
     
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.lr)
-        
-def load_decoder_cfg(path='experiments/pb_obstacles/pixel/config/config.yaml'):
-    cfg = oc.load(path)
-    return cfg
+    
 
-def load_states(debug):
-    '''
-        Load states from debug dict for PinballDataset
-        return: s, next_s (np.ndarray)
-    '''
-    latent_states = debug['latent_states']
-    s = np.array(list(map(lambda x: x['state'], latent_states)))
-    next_s = np.array(list(map(lambda x: x['next_state'], latent_states)))
-    return s, next_s
+class PinballEncoderModel(pl.LightningModule):
+    def __init__(self, cfg):
+        super().__init__()
+        self.encoder = ResidualConvEncoder(cfg.features)
+        self.lr = cfg.lr
+        
+    def forward(self, obs):
+        # print(obs.shape, s.shape)
+        # cond = self.deconv(s)
+        return self.encoder(obs)
+
+    def _run_step(self, obs, s):
+        s = s[..., :2]
+        out = self.forward(obs)
+        loss = F.mse_loss(out, s)
+        return loss
+
+    def training_step(self, batch, batch_idx):
+        obs, s = batch
+        
+        loss = self._run_step(obs, s)
+        self.log('train_loss', loss)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        obs, s = batch
+        loss = self._run_step(obs, s)
+        self.log('val_loss', loss, prog_bar=True)
+        logger.info(f'Validation Loss: {loss}')
+        return loss
+    
+    def test_step(self, batch, batch_idx):
+        obs, s = batch
+        loss = self._run_step(obs, s)
+        self.log('test_loss', loss,prog_bar=True)
+        return loss
+    
+    def configure_optimizers(self):
+        print(self.lr)
+        return torch.optim.Adam(self.parameters(), lr=self.lr)
+    
+
+class PixelCNNAutoencoder(pl.LightningModule):
+    def __init__(self, cfg):
+        super().__init__()
+        cfg.model.decoder.lr = cfg.lr
+        cfg.model.encoder.lr = cfg.lr
+        self.lr = cfg.lr
+        self.decoder = PinballDecoderModel(cfg.model.decoder)
+        self.encoder = PinballEncoderModel(cfg.model.encoder)
+        self.save_hyperparameters()
+
+    def forward(self, obs):
+        z = self.encoder(obs)
+        out_logits = self.decoder(obs, z)
+        return out_logits
+
+    def _run_step(self, obs):
+        z = self.encoder(obs)
+        return -self.decoder.decoder.log_prob(obs, z).mean()
+
+    def training_step(self, batch, batch_idx):
+        obs, s = batch
+        loss = self._run_step(obs)
+        self.log('train_loss', loss)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        obs, s = batch
+        loss = self._run_step(obs)
+        self.log('val_loss', loss,prog_bar=True)
+        logger.info(f'Validation Loss: {loss}')
+        return loss
+    
+    def test_step(self, batch, batch_idx):
+        obs, s = batch
+        loss = self._run_step(obs)
+        self.log('test_loss', loss, prog_bar=True)
+        return loss
+
+    def configure_optimizers(self):
+        print(self.lr)
+        return torch.optim.Adam(self.parameters(), lr=self.lr)
+     
+def load_cfg(unknown_args, path='experiments/pb_obstacles/pixel/config/config.yaml'):
+    cfg = oc.load(path)
+    cli_config = oc.from_cli(unknown_args)
+    cfg = oc.merge(cfg, cli_config)
+    return cfg
 
 def grayscale(obs):
     return 0.2125 * obs[:, 0] + 0.7154 * obs[:, 1] + 0.0721 * obs[:, 2]
 
 if __name__=='__main__':
-
-
+    torch.set_float32_matmul_precision('medium')
     default_dataset = 'experiments/pb_obstacles/pixel/data/obstacles.pt'
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch-size', type=int, default=64)
@@ -91,94 +221,160 @@ if __name__=='__main__':
     parser.add_argument('--from-ckpt', type=str, default=None)
     parser.add_argument('--inference', action='store_true', default=False)
     parser.add_argument('--grayscale', action='store_true', default=False)
+    parser.add_argument('--model', type=str, default='decoder')
+    parser.add_argument('--num-nodes', type=int, default=1)
+    parser.add_argument('--devices', type=int, default=1)
     parser.add_argument('--n-samples', type=int, default=2)
-    parser.add_argument('-n', type=int, default=8)
-    args, _ = parser.parse_known_args()
+    parser.add_argument('--tag', type=str, default=None)
+    parser.add_argument('--lr', type=float, default=3e-5)
+    parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument('--strategy', type=str, default=None)
+    parser.add_argument('-n', type=int, default=1)
+    args, unknown_args = parser.parse_known_args()
 
-    # load dataset.
-    dataset, _ = torch.load(args.dataset)
-    debug = torch.load(args.dataset.replace('.pt', '_debug.pt'))
-    obs, _, next_obs, _, _, _, _ = zip(*dataset)
-    obs = np.vstack([obs, next_obs]).transpose((0, 3, 1, 2)).astype(np.float32)
-    obs = grayscale(obs)[:, None] if args.grayscale else obs
+    torch.manual_seed(args.seed)
 
+    cfg = load_cfg(unknown_args, args.config)
+    save_path = f'{args.save_path}/{args.tag}' if args.tag is not None else args.save_path
 
-    s, next_s = load_states(debug)
-    states = np.vstack([s, next_s]).astype(np.float32)[:, :2] # only use x, y
-    data = list(zip(list(obs), list(states)))
-    
-    print(f'Loaded dataset with {obs.shape[0]} samples.')
+    data = TestDataset(path_to_file=cfg.data.data_path, obs_type=cfg.data.obs_type, transforms=[])
+
+    print(f'Loaded dataset with {len(data)} samples.')
     # randomly split dataset into train and test
     train_set, val_test, test_set = random_split(data, [0.7, 0.2, 0.1])
 
     # create dataloader
-    train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=args.n)
-    val_loader = DataLoader(val_test, batch_size=args.batch_size, shuffle=False, num_workers=args.n)
+    train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=False)
+    val_loader = DataLoader(val_test, batch_size=args.batch_size, shuffle=False)
     test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False)
+    
 
+    # random choice of images to sanity check
+    
+    batch = next(iter(val_loader))
+    choice = np.random.choice(batch[0].shape[0], 3)
+    
+    coords = (batch[1][choice, :2] * 100).byte().numpy()
+
+
+    obs = (batch[0][choice] * 255).numpy().astype(np.uint8)[:, 0] # remove channel dim
+
+    # plot histogram of grayscale values
+    print(f'Pixel values: {torch.from_numpy(obs).reshape(-1).unique(sorted=True)}')
+
+    obs[np.arange(3), coords[:, 1], coords[:, 0]] = 0
+    print(obs.shape)
+    obs = obs.reshape(-1, obs.shape[-1])
+    # make and save image
+    print(coords)
+    img = Image.fromarray(obs)
+    samples_path = f'{save_path}/samples'
+    os.makedirs(samples_path, exist_ok=True)
+    img.save(f'{samples_path}/sanity.png')
+    
     # create model
-    cfg = load_decoder_cfg()
-    decoder_cfg = cfg.model.decoder
-    decoder_cfg.lr = cfg.lr
+    if args.model == 'decoder':
+        model_cfg = cfg.model.decoder
+        model_cfg.lr = args.lr
+        model = PinballDecoderModel(model_cfg)
+    elif args.model == 'encoder':
+        model_cfg = cfg.model.encoder
+        model_cfg.lr = args.lr
+        model = PinballEncoderModel(model_cfg)
+    elif args.model == 'autoencoder':
+        oc.resolve(cfg)
+        model = PixelCNNAutoencoder(cfg)
+    else:
+        raise ValueError(f'{args.model} is not known')
 
-    model = PinballModel(decoder_cfg)
 
     if args.from_ckpt is not None:
         print(f'Loading checkpoint at {args.from_ckpt}')
     # train model
+   
+
+    checkpoint_callback = ModelCheckpoint(
+        monitor='val_loss',
+        dirpath=f'{save_path}/ckpts/',
+        filename='pixelcnn-pb-{epoch:02d}-{val_loss:.2f}'+f'_{args.model}',
+        save_top_k=3
+    )
+
+    trainer = pl.Trainer(
+                        accelerator=args.accelerator, 
+                        devices=args.devices,
+                        num_nodes=args.num_nodes, 
+                        max_epochs=args.epochs,
+                        callbacks=[checkpoint_callback],
+                        strategy=args.strategy,
+                        # gradient_clip_val=1.0,
+                        detect_anomaly=True,
+                        track_grad_norm=2,
+                        # overfit_batches=5
+                    )
+    
     if not args.inference:
-        trainer = pl.Trainer(
-                            accelerator=args.accelerator, 
-                            gpus=1 if args.accelerator=='gpu' else None, 
-                            max_epochs=args.epochs,
-                        )
-
         trainer.fit(model, train_loader, val_loader, ckpt_path=args.from_ckpt)
-
+    
         # save model
-        os.makedirs(args.save_path, exist_ok=True)
+        os.makedirs(save_path, exist_ok=True)
         
-        trainer.save_checkpoint(f'{args.save_path}/pinball.ckpt')
-        print(f'Checkpoint saved at {args.save_path}/pinball.ckpt')
-        torch.save(model.state_dict(), f'{args.save_path}/pinball.pt')
-        print(f'Model params saved at {args.save_path}/pinball.pt')
+        trainer.save_checkpoint(f'{save_path}/pinball_{args.model}.ckpt')
+        print(f'Checkpoint saved at {save_path}/pinball_{args.model}.ckpt')
+        torch.save(model.state_dict(), f'{save_path}/pinball_{args.model}.pt')
+        print(f'Model params saved at {save_path}/pinball_{args.model}.pt')
         # TODO: this is failing to resolve.
         # oc.save(oc.resolve(cfg), f'{args.save_path}/config.yaml')
         # print(f'Model config saved at {args.save_path}/config.yaml')
+
+        trainer.test(model, test_loader)
+
     else:
         if args.from_ckpt is None:
-            model.load_state_dict(torch.load(f'{args.save_path}/pinball.pt'))
+            model.load_state_dict(torch.load(f'{save_path}/pinball_{args.model}.pt'))
         else:
-            model.load_from_checkpoint(args.from_ckpt, cfg=decoder_cfg)
+            model = model.load_from_checkpoint(args.from_ckpt, cfg=model_cfg)
+            model.eval()
+            print(f'Checkpoint loaded from {args.from_ckpt}')
+        
         # sample
         device = torch.device('cuda')
-        model.to(device)
+        model = model.to(device)
         decoder = model.decoder
         
+        trainer.test(model, test_loader)
+
         obs, states = list(zip(*list(test_set)))
         states = np.vstack(states)
-        obs = np.array(obs)*255
+        obs = np.array(list(map(lambda x: x.numpy(), obs)))*255
         choice = np.random.choice(states.shape[0], args.n_samples)
         
-        s_obs = obs[choice].astype(np.uint8).transpose((0,2,3,1))
-        if s_obs.shape[-1] == 1:
-            s_obs = s_obs[..., 0]
+        _obs = obs[choice]
+        s_obs = _obs.astype(np.uint8)[:,0] 
+        # s_obs = obs[choice].astype(np.uint8).transpose((0,2,3,1))
+        # if s_obs.shape[-1] == 1:
+            # s_obs = s_obs[..., 0]
             
-        samples_path = f'{args.save_path}/samples'
+        samples_path = f'{save_path}/samples'
         os.makedirs(samples_path, exist_ok=True)
         for i in range(s_obs.shape[0]):
             img = Image.fromarray(s_obs[i])
             img.save(f'{samples_path}/obs_{i}.png')
             print(f'Ground obs {i} save as {samples_path}/obs_{i}.png')
 
-
         print(f'Sampling... {args.n_samples} samples')
         with torch.no_grad():
-            h = torch.from_numpy(states[choice]).to(device)
-            s = decoder.sample(h)
+            h = torch.from_numpy(states[choice, :2]).to(device)
+            # d = decoder.to(device).distribution(h)
+            _obs = torch.from_numpy(_obs/255).to(device)
+            # printarr(h, _obs)
+            # print(d.log_prob(_obs))
+            s = model.to(device).decoder.sample(h)
         
         
+        s = s/(cfg.model.decoder.dist.color_levels-1) * 255
         imgs = s.cpu().permute(0,2,3,1).numpy().astype(np.uint8)
+        printarr(s, s_obs)
         if imgs.shape[-1] == 1:
             imgs = imgs[..., 0]
         for i in range(imgs.shape[0]):
@@ -186,4 +382,7 @@ if __name__=='__main__':
             img.save(f'{samples_path}/image_{i}.png')
             print(f'Sample {i} save as {samples_path}/image_{i}.png')
 
-       
+        img = save_images_as_one(s.cpu().numpy()[:,0], s_obs).astype(np.uint8)
+        printarr(img)
+        img = Image.fromarray(img)
+        img.save(f'{samples_path}/sample.png')

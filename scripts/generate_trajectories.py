@@ -3,19 +3,54 @@
     email: rrs@brown.edu
     date: 20 February 2023
 """
-import os
+import os, io
 from functools import reduce
 
 import numpy as np
 import torch, argparse
 from tqdm import tqdm
-
+import zipfile
 
 from joblib import Parallel, delayed
 
 from scripts.utils import collect_trajectory
 from envs.pinball.pinball_gym import PinballEnvContinuous as Pinball
-from envs.pinball.controllers_pinball import create_position_controllers as OptionFactory
+from envs.pinball.controllers_pinball import create_position_controllers_v0 as OptionFactory
+from envs.pinball.controllers_pinball import create_position_options as OptionFactory2
+
+from PIL import Image
+
+from src.absmdp.datasets import ObservationImgFile as ObservationFile
+
+def preprocess_img(img_array):
+    img = (img_array * 255).astype(np.uint8)
+    return Image.fromarray(img)
+
+def save_and_compress(trajectories, zfile):
+    trajectories = [save_and_compress_trajectory(trajectory, id, zfile) for id, trajectory in enumerate(trajectories)]
+    return trajectories
+
+def save_and_compress_trajectory(trajectory, trajectory_id, zfile):
+
+    if len(trajectory) < 1:
+        return trajectory
+    
+    obs = [preprocess_img(t.obs) for t in trajectory] + [preprocess_img(trajectory[-1].next_obs)]
+    fnames = [f'tj_{trajectory_id}_obs_{id}.png' for id in range(len(obs))]
+
+    byte_streams = [io.BytesIO() for fn in fnames]
+    for i, bs, fn in zip(obs, byte_streams, fnames):
+        i.save(bs, format='png')
+        zfile.writestr(fn, bs.getvalue())
+
+    timesteps = list(range(len(obs)))
+    obs = [ObservationFile(trajectory_id, i) for i in timesteps[:-1]]
+    next_obs = [ObservationFile(trajectory_id, i) for i in timesteps[1:]]
+    
+    trajectory = [t.modify(obs=o, next_obs=next_o) for t, o, next_o in zip(trajectory, obs, next_obs)]
+
+    return trajectory
+
 
 if __name__== "__main__":
 
@@ -31,7 +66,7 @@ if __name__== "__main__":
     dataset_name = 'pinball_simple_obs.pt'
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--save-path', type=str, default=dataset_file_path+dataset_name)
+    parser.add_argument('--save-path', type=str, default=dataset_file_path)
     parser.add_argument('--env-config', type=str, default=configuration_file)
     parser.add_argument('--num-traj', type=int, default=num_traj)
     parser.add_argument('--max-horizon', type=int, default=100)
@@ -41,7 +76,9 @@ if __name__== "__main__":
     parser.add_argument('--image-size', type=int, default=100)
     args = parser.parse_args()
 
-
+    dir, name = os.path.split(args.save_path)
+    os.makedirs(dir, exist_ok=True)
+    zfile = zipfile.ZipFile(args.save_path, 'w')
     ######## DATA GENERATION #######
 
     trajectories = []  # (o, a, o', rewards, executed, duration, initiation_masks, info)
@@ -51,13 +88,18 @@ if __name__== "__main__":
     env = Pinball(config=args.env_config, width=grid_size, height=grid_size, render_mode='rgb_array') 
 
 
-    options = OptionFactory(env)
+    options = OptionFactory2(env)
     max_exec_time = args.max_exec_time
     
     options_desc = {i: str(o) for i, o in enumerate(options)}
 
     trajectories = Parallel(n_jobs=args.n_jobs)(delayed(collect_trajectory)(env, options, obs_type=args.observation, max_exec_time=max_exec_time, horizon=args.max_horizon) for i in tqdm(range(args.num_traj)))        
     
+   
+    if args.observation == 'pixel':
+        trajectories = save_and_compress(trajectories, zfile)
+
+
     ##### Print dataset statistics
     transition_samples = reduce(lambda x, acc: x + acc, trajectories, [])
     n_samples = len(transition_samples)
@@ -85,7 +127,7 @@ if __name__== "__main__":
         next_s_executed = next_s[idx][_executed==1]
         state_change = next_s_executed - s_executed
         state_change_min, state_change_max = state_change.min(0), state_change.max(0)
-        state_change_mean = state_change.mean(0)
+        state_change_mean, state_change_std = state_change.mean(0), state_change.std(0)
 
         stats[i] = {
             'prob_executions': n_executions,
@@ -95,7 +137,8 @@ if __name__== "__main__":
             'max_reward': option_rewards.max(),
             'state_change_min': state_change_min,
             'state_change_max': state_change_max,
-            'state_change_mean': state_change_mean
+            'state_change_mean': state_change_mean,
+            'state_change_std': state_change_std
         }
 
         print(f'--------Option-{i}: {options_desc[i]}---------')
@@ -103,7 +146,7 @@ if __name__== "__main__":
         print(f"Average duration {avg_duration}")
         print(f"Average reward {option_rewards.mean()}. Max reward: {option_rewards.max()}. Min reward: {option_rewards.min()}")
         print(f"Reward length: mean: {np.array(_r_len)[idx].mean()}, max: {np.array(_r_len)[idx].max()}, min: {np.array(_r_len)[idx].min()}")
-        print(f"State change: mean: {state_change_mean}, max: {state_change_max}, min: {state_change_min}")
+        print(f"State change: mean: {state_change_mean}, max: {state_change_max}, min: {state_change_min}, std {state_change_std}")
     
     debug = {
         'latent_states': info,
@@ -113,10 +156,16 @@ if __name__== "__main__":
 
     ########### SAVE DATASET ###########
     
-    dir, name = os.path.split(args.save_path)
-    os.makedirs(dir, exist_ok=True)
-    torch.save(trajectories, args.save_path)
+    
+
+    # zfile = zipfile.ZipFile(save_path, 'w')
+    bs = io.BytesIO()
     print('---------------------------------')
-    print(f'Dataset saved at {args.save_path}')
-    torch.save(debug, args.save_path.replace('.pt', '_debug.pt'))
-    print(f'Debug info saved at {args.save_path.replace(".pt", "_debug.pt")}')
+    print(f'Dataset saved at {args.save_path}/transitions.pt')
+    torch.save(trajectories, bs)
+    zfile.writestr('transitions.pt', bs.getvalue())
+
+    bs = io.BytesIO()
+    torch.save(debug, bs)
+    zfile.writestr('debug.pt', bs.getvalue())
+    print(f'Debug info saved at {args.save_path}/debug.pt')

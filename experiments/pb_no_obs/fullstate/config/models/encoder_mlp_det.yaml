@@ -4,7 +4,6 @@ features:
   output_dim: ${model.latent_dim}
   hidden_dims:
   - 64
-  - 64
   activation: relu
 dist:
   type: deterministic

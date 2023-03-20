@@ -59,28 +59,33 @@ def _intersect(edge, initial_position, final_position):
         alpha, beta = np.float('inf'), np.float('inf')
     return alpha, beta
 
-def termination(goal_position, std_dev=0.001):
+def termination_position(init_state, distance, std_dev=0.001):
     """
         Factory for termination probability.
     """
+    goal_position = (init_state + distance)
     def __termination(state):
+        distance = (state-goal_position)[:2]
         if isinstance(std_dev, float):
-            z = np.linalg.norm(state-goal_position)/std_dev
+            z = np.linalg.norm(distance)/std_dev
         else:
-            z = np.linalg.norm((state-goal_position)/std_dev)
+            z = np.linalg.norm(distance/std_dev)
         tail_prob = 1-erf(z/np.sqrt(2))
         return tail_prob
     return __termination
 
-def termination_velocity(std_dev=0.001):
+def termination_velocity(init_state, distance, std_dev=0.001):
     """
         Factory for termination probability when velocity is close to zero
     """
+    goal_state = init_state + distance
+    goal_state[2:] = 0. # zero velocity
     def __termination(state):
+        error = goal_state - state
         if isinstance(std_dev, float):
-            z = np.linalg.norm(state[..., 2:])/std_dev
+            z = np.linalg.norm(error)/std_dev
         else:
-            z = np.linalg.norm((state[..., 2:])/std_dev)
+            z = np.linalg.norm(error/std_dev)
         tail_prob = 1-erf(z/np.sqrt(2))
         return tail_prob
     return __termination
@@ -145,21 +150,55 @@ def position_controller_continuous(goal, kp_vel, ki_vel, kp_pos, kd_pos):
 def position_controller_factory(init_state, distance, continuous=True):
     return position_controller_continuous(init_state + distance, 5, 0.01, 100, 0.) if continuous else position_controller_discrete(init_state+distance, 10, 0.1, 100, 0.)
 
-def create_position_controllers(env, translation_distance=1/10):
+def create_position_controllers_v0(env, translation_distance=1/10):
+    '''
+        Creates options for moving the agent in the four directions by a fixed distance.
+        Velocity is zero.
+    '''
     position_options = []
     controller_factory = position_controller_factory
     std_dev_vel = 0.01
     for y in [-1., 1.]:
-        o = Option(initiation_set(env, np.array([0., y*translation_distance])),
-               partial(controller_factory, distance=np.array([0., y*translation_distance, 0., 0.]), continuous=isinstance(env.action_space, spaces.Box)),
-               termination_velocity(std_dev=std_dev_vel),
+        distance = np.array([0., y*translation_distance, 0., 0.])
+        o = Option(initiation_set(env, distance[:2]),
+               partial(controller_factory, distance=distance, continuous=isinstance(env.action_space, spaces.Box)),
+               partial(termination_velocity, distance=distance, std_dev=std_dev_vel),
                name=f"{'+' if y > 0 else '-'}Y"
         )
         position_options.append(o)
     for x in [-1., 1.]:
-        o = Option(initiation_set(env, np.array([x*translation_distance, 0.])),
-               partial(controller_factory, distance=np.array([x*translation_distance, 0., 0., 0.]), continuous=isinstance(env.action_space, spaces.Box)),
-               termination_velocity(std_dev=std_dev_vel),
+        distance = np.array([x*translation_distance, 0., 0., 0.])
+        o = Option(initiation_set(env, distance[:2]),
+               partial(controller_factory, distance=distance, continuous=isinstance(env.action_space, spaces.Box)),
+               partial(termination_velocity, distance=distance, std_dev=std_dev_vel),
+               name=f"{'+' if x > 0 else '-'}X"
+        )
+        position_options.append(o)
+    
+    
+    return position_options
+
+def create_position_options(env, translation_distance=1/15):
+    '''
+        Creates options for moving the agent in the four directions by a fixed distance.
+        Velocity is zero.
+    '''
+    position_options = []
+    controller_factory = position_controller_factory
+    std_dev_vel = 0.01
+    for y in [-1., 1.]:
+        distance = np.array([0., y*translation_distance, 0., 0.])
+        o = Option(initiation_set(env, distance[:2]),
+               partial(controller_factory, distance=distance, continuous=isinstance(env.action_space, spaces.Box)),
+               partial(termination_position, distance=distance, std_dev=std_dev_vel),
+               name=f"{'+' if y > 0 else '-'}Y"
+        )
+        position_options.append(o)
+    for x in [-1., 1.]:
+        distance = np.array([x*translation_distance, 0., 0., 0.])
+        o = Option(initiation_set(env, distance[:2]),
+               partial(controller_factory, distance=distance, continuous=isinstance(env.action_space, spaces.Box)),
+               partial(termination_position, distance=distance, std_dev=std_dev_vel),
                name=f"{'+' if x > 0 else '-'}X"
         )
         position_options.append(o)
