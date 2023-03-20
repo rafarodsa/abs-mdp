@@ -272,8 +272,6 @@ class PixelCNNDistribution(nn.Module):
                 sample = sample.reshape(n_samples, -1, self.decoder.data_channels, width, height)
             return sample
         
-        
-
 
 
 class PixelCNNDecoder(nn.Module):
@@ -306,6 +304,98 @@ class PixelCNNDecoder(nn.Module):
         _, _, skip = self.stack(x_v, x_h, cond)
         out = self.output(F.relu(self.conv(F.relu(skip))))
         out = out.reshape(x.shape[0], self.color_levels, self.data_channels, width, height) # (batch_size, 256, data_channels, width, height)
+        return out 
+
+    def sample(self, h, n_samples=1, device=None):
+        '''
+            h: embedding/latent feature maps.
+        '''
+        cond = self.features(h) # batch, channels, width, height
+        if n_samples > 1:
+            cond = cond.repeat_interleave(n_samples, dim=0) # batch*n, channels, width, height
+
+        width, height = cond.shape[-2:]
+        _device = h.get_device() if device is None else device
+        sample = torch.zeros(cond.shape[0], self.data_channels, width, height).to(_device)
+        with tqdm(total=width*height) as pbar:
+            for i in range(width):
+                for j in range(height):
+                    for c in range(self.data_channels):
+                        out = self.forward(sample, h)
+                        out = out[..., c, i, j]
+                        out = torch.softmax(out, dim=1)
+                        pixel = torch.multinomial(out, 1).squeeze(-1)
+                        sample[..., :, c, i, j] = pixel
+                    pbar.update(1)
+        if n_samples > 1:
+            sample = sample.reshape(n_samples, -1, self.data_channels, width, height)
+        return sample
+
+
+    def distribution(self, h):
+        '''
+            return function to evaluate the distribution log q(x|h).
+            h: embedding/latent feature maps, 
+        '''
+        cond = self.features(h)
+
+        return PixelCNNDistribution(self, cond)
+
+    
+    def log_prob(self, x, h):
+        '''
+            x: input image/generating image
+            h: embedding/latent feature maps, 
+        '''
+        out = self.forward(x, h)
+        out = F.log_softmax(out, dim=1) # N x color_levels x data_channels x H x W
+        # print(out.shape)
+        idx = (x * (self.color_levels-1)).long() # N x data_channels x H x W
+        # printarr(out, idx)
+        log_probs = -F.nll_loss(out, idx, reduction='none').reshape(x.shape[0], -1).sum(-1)
+        return log_probs
+    
+
+    @staticmethod
+    def PixelCNNDecoderDist(cfg):
+        return partial(PixelCNNDecoder, cfg=cfg)
+
+    def freeze(self):
+        for p in self.parameters():
+            p.requires_grad_ = False
+        return self
+    
+
+class PixelCNNDecoderLogistic(nn.Module):
+    def __init__(self, features, cfg):
+        
+        super().__init__()
+        self.features = features
+        self.data_channels = cfg.color_channels
+        self.width, self.height = cfg.out_width, cfg.out_height
+        self.n_components = 10 
+        self.causal_block = GatedPixelCNNLayer(cfg.color_channels, cfg.feats_maps * self.data_channels, kernel_size=cfg.kernel_size, data_channels=self.data_channels, residual=False, mask_type='A')
+       
+        self.stack = PixelCNNStack(cfg.feats_maps * self.data_channels, cfg.kernel_size, cfg.n_layers, data_channels=self.data_channels)
+        # TODO: maybe reshape and then 1-conv. or masked 1-conv for output
+        self.conv = nn.Conv2d(cfg.feats_maps * self.data_channels, 128, kernel_size=1, stride=1)
+        self.output = nn.Conv2d(128, self.n_components * 3 * self.data_channels, kernel_size=1, stride=1, padding='same')
+        # self.output = MaskedConv2d(cfg.feats_maps * self.data_channels, 256 * self.data_channels, kernel_size=1, stride=1, padding='same', mask_type='A')
+    def forward(self, x, h):
+        '''
+            x: input image/generating image
+            h: embedding/latent feature maps, 
+        '''
+        cond = self.features(h)
+        return self._pixelcnn_stack(x, cond)
+    
+    def _pixelcnn_stack(self, x, cond):
+        # TODO: generalize this for multiple batch dimensions.
+        width, height = self.width, self.height #cond.shape[-2:]
+        x_v, x_h, _ = self.causal_block(x, x)
+        _, _, skip = self.stack(x_v, x_h, cond)
+        out = self.output(F.relu(self.conv(F.relu(skip))))
+        out = out.reshape(x.shape[0], self.n_components * 3, self.data_channels, width, height) # (batch_size, 3 * num_components, data_channels, width, height)
         return out 
 
     def sample(self, h, n_samples=1, device=None):
