@@ -18,14 +18,15 @@ class MaskedLinear(nn.Linear):
 
 
 class MADE(nn.Module):
-    def __init__(self, input_dim, hidden_dims, order=None, permute=False, sample=False):
+    def __init__(self, input_dim, hidden_dims, order=None, activation='relu', permute=False, sample=False):
         super(MADE, self).__init__()
         self.input_dim = input_dim
         self.output_dim = input_dim
         self.hidden_dims = hidden_dims
+        self.activation = activation
         self.layers = nn.ModuleList(self._create_layers(order=order, permute=permute, sample=sample))
 
-    
+
     def forward(self, x):
         for layer in self.layers:
             x = layer(x)
@@ -60,14 +61,14 @@ class MADE(nn.Module):
             if not sample:
                 # distribute equally
                 n = in_dim-max_in.min()
-                max_out = np.arange(h_dim) % n + max_in.min()
+                max_out = np.mod(np.arange(h_dim), n) + max_in.min()
             else:
                 maxes = np.arange(max_in.min(), in_dim)
                 max_out = np.random.choice(maxes, h_dim, replace=True)
 
             mask = self._mask(in_dim, h_dim, max_in, max_out)
             layers.append(MaskedLinear(in_dim, h_dim, mask=mask))
-            layers.append(nn.ReLU())
+            layers.append(self._activation(self.activation))
             in_dim = h_dim
             max_in = max_out
             masks.append(mask)
@@ -84,6 +85,19 @@ class MADE(nn.Module):
 
         return layers
     
+    def _activation(self, name):
+        if name == 'relu':
+            return nn.ReLU()
+        elif name == 'sigmoid':
+            return nn.Sigmoid()
+        elif name == 'tanh':
+            return nn.Tanh()
+        elif name == 'leaky_relu':
+            return nn.LeakyReLU()
+        elif name == 'elu':
+            return nn.ELU()
+        else:
+            raise NotImplementedError('Activation function not implemented')
 
 if __name__=='__main__':
    NN=MADE(3, [10,  10], sample=True)
