@@ -14,9 +14,7 @@ class IAFTrainer(L.LightningModule):
         self.iaf = IAF(2, [128, 128], n_layers)
     
     def forward(self, x):
-        with torch.no_grad():
-            z = self.iaf.inverse(x)
-        _x, log_det = self.iaf(z)
+        z, log_det = self.iaf.inverse(x)
 
         # assert torch.allclose(x, _x, atol=1e-5), 'x != _x'
         return z, log_det
@@ -24,7 +22,7 @@ class IAFTrainer(L.LightningModule):
     def training_step(self, batch, batch_idx):
         x = batch
         z, log_s = self(x)
-        nll = -log_s + 0.5 * (z**2).sum(-1) + 0.5 * np.log(2*np.pi)
+        nll = log_s + 0.5 * (z**2).sum(-1) + 0.5 * np.log(2*np.pi)
         loss = nll.mean()
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         return loss

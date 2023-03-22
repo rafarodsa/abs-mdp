@@ -27,14 +27,16 @@ class IAFBlock(nn.Module):
         return z, m, s
     
     def inverse(self, z):
-        with torch.no_grad():
-            x = torch.zeros_like(z)
-            for j in range(self.input_dim):
-                i = self.order[j]
-                s = torch.clamp(torch.exp(self.scale(x)), min=1e-5)
-                # x[:, i-1] = (z[:, i-1] - self.mean(x)[:, i-1] * (1-s[:, i-1])) / s[:, i-1]
-                x[:, i-1] = (z[:, i-1] - self.mean(x)[:, i-1]) / s[:, i-1]
-        return x
+        x = torch.zeros_like(z)
+        log_s = 0
+        for j in range(self.input_dim):
+            i = self.order[j]
+            s = torch.clamp(torch.exp(self.scale(x)), min=1e-12)
+            log_s = torch.log(s)
+            mask = F.one_hot(torch.tensor(i-1), num_classes=self.input_dim).to(x.device).bool().unsqueeze(0)
+            _x = (z - self.mean(x)) / s
+            x = x + mask * _x
+        return x, log_s
 
 
 class IAF(nn.Module):
@@ -43,7 +45,7 @@ class IAF(nn.Module):
         self.input_dim = input_dim
         self.hidden_dims = hidden_dims
         self.num_blocks = num_blocks
-        self.blocks = nn.ModuleList([IAFBlock(input_dim, hidden_dims, reverse=False, sample=sample) for i in range(num_blocks)])
+        self.blocks = nn.ModuleList([IAFBlock(input_dim, hidden_dims, reverse=(i%2==0), sample=sample) for i in range(num_blocks)])
 
     def forward(self, x):
         '''
@@ -62,6 +64,8 @@ class IAF(nn.Module):
             x: sample from final distribution
         '''
         _x = x
+        log_s = 0
         for block in reversed(self.blocks):
-            _x = block.inverse(_x)
-        return _x    
+            _x, _log_s  = block.inverse(_x)
+            log_s += _log_s
+        return _x, log_s.sum(-1)
