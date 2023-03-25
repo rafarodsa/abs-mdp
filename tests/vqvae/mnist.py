@@ -89,9 +89,19 @@ if __name__ == "__main__":
     parser.add_argument('--reconstruct', action='store_true')
     args, _ = parser.parse_known_args()
 
+
+
     # Load Binarized MNIST
-    transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(0.5, 0.5), transforms.Grayscale(num_output_channels=1)])
+    transform = transforms.Compose([transforms.ToTensor(), transforms.Grayscale(num_output_channels=1), transforms.Normalize((0.1307,), (0.3081,))])
     train_dataset = MNIST(root='data', train=True, download=True, transform=transform)
+    
+    # data = iter(train_dataset)
+    # imgs = [i for i, label in data]
+    # imgs = torch.stack(imgs)
+
+    # transform = transforms.Compose([transforms.ToTensor(), transforms.Grayscale(num_output_channels=1), lambda img: (img - mean)/(std+1e-8)])
+    train_dataset = MNIST(root='data', train=True, download=True, transform=transform)
+    
     train_set, val_set = torch.utils.data.random_split(train_dataset, [0.8, 0.2])
     test_dataset = MNIST(root='data', train=False, download=True, transform=transform)
     train_loader = DataLoader(train_set, batch_size=64, shuffle=True)
@@ -101,7 +111,7 @@ if __name__ == "__main__":
     # Train
     if not args.reconstruct:
         print('Training...')
-        model = VQVAE(MNISTEncoder(256), MNISTDecoder(256), codebook_size=20, embedding_dim=256, commitment_const=0.25, lr=2e-4)
+        model = VQVAE(MNISTEncoder(256), MNISTDecoder(256), codebook_size=10, embedding_dim=256, commitment_const=0.25, lr=2e-4)
 
         
         trainer.fit(model, train_loader, val_loader)
@@ -110,7 +120,7 @@ if __name__ == "__main__":
         torch.save(model.state_dict(), 'vqvae.pt')
     else:
         #load model
-        model = VQVAE(MNISTEncoder(256), MNISTDecoder(256), codebook_size=8, embedding_dim=256, commitment_const=0.25, lr=2e-5)
+        model = VQVAE(MNISTEncoder(256), MNISTDecoder(256), codebook_size=10, embedding_dim=256, commitment_const=0.25, lr=2e-5)
         model.load_state_dict(torch.load('vqvae.pt'))
         model.eval()
         # test
@@ -122,6 +132,8 @@ if __name__ == "__main__":
         imgs, _ = imgs
         with torch.no_grad():
             recon, z, z_q = model(imgs)
+        recon = torch.clamp(recon * 0.3081 + 0.1307, min=0, max=1)
+        imgs = torch.clamp(imgs * 0.3081 + 0.1307, min=0, max=1)
     
         to_plot = torch.cat([imgs, recon], dim=-1).reshape(-1, 56).numpy()
         to_plot = Image.fromarray((to_plot * 255).astype('uint8'))
