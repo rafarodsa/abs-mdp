@@ -86,10 +86,13 @@ def collect_trajectory(env, options, obs_type='simple', max_exec_time=200, horiz
     '''
     trajectory = []
     infos = []
+    # print('Collecting trajectory...')
     s = env.reset()
+    # print('Sampled initial state...')
     o = np.array(env.render()) if obs_type == 'pixel' else np.array(s)
     executed = True
     done = False
+    
     for t in range(horizon): # execute t options in sequence
         if done: # episode terminated
             break

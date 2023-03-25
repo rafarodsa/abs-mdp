@@ -15,6 +15,7 @@ from collections import UserDict, deque
 from matplotlib.path import Path
 
 
+
 class GoalPinballModel(PinballModel):
     def set_target_pos(self, target_pos):
         self.target_pos = target_pos
@@ -24,8 +25,10 @@ class GoalPinballModel(PinballModel):
         self.ball = BallModel(start_position=start_pos, radius=self._ball_rad)
     
     def set_initial_state(self, state):
-        self.set_initial_pos(state[:2])
-        self.ball.add_impulse(state[2]*5, state[3]*5)
+        # self.set_initial_pos(state[:2])
+        # self.ball.add_impulse(state[2]*5, state[3]*5)
+        self.ball.position[0], self.ball.position[1] = state[:2]
+        self.ball.xdot, self.ball.ydot = state[2:]
 
 
 
@@ -106,9 +109,20 @@ class PinballEnv(gym.Env):
     def _get_points_outside_obstacles(self, points):
         points_mask = np.ones(points.shape[0], dtype=np.bool8)
         for obstacle in self._obstacles:
-            points_mask = np.logical_and(np.logical_not(obstacle.contains_points(points, radius=0.05)), points_mask)
-
+            in_obstacle = obstacle.contains_points(points, radius=0.)
+            # print(in_obstacle)
+            points_mask = np.logical_and(np.logical_not(in_obstacle), points_mask)
+        # print('points_mask', points_mask)
+        # print('points', points[points_mask], 'points.shape', points[points_mask].shape[0])
         return points[points_mask]
+    
+    def is_valid_state(self, state):
+        # print('state', state[:2])
+        self._get_points_outside_obstacles(np.array(state[:2]).reshape(1, 2))
+        for obstacle in self._obstacles:
+            if obstacle.contains_points([state[:2]], radius=0.):
+                return False
+        return True
 
     def reset(self, state=None):
         self.pinball = PinballModel(self.configuration) 
@@ -191,7 +205,9 @@ class PinballEnvContinuous(PinballEnv):
     def reset(self, state=None):
         if state is None:
             state = self.sample_initial_positions(1)[0]
-
+       
+        assert self.is_valid_state(state), f"Invalid state [{state[0]}, {state[1]}]"
+       
         self.pinball.set_initial_state(state)
         return state
 
@@ -248,9 +264,10 @@ if __name__=="__main__":
                                     height=size, 
                                     render_mode="rgb_array")
     pixel_pinball = PinballPixelWrapper(pinball, n_frames=5)
-    pinball.reset([0.5, 0.5, 0., 0.])
+    # pinball.reset([0.74, 0.5, 0., 0.])
+    pinball.reset([0.609, 0.758, 0., 0.])
     imgs = []
-    for i in range(10):
+    for i in range(1):
         a = [0.9, 0.9]
         next_s, _, _, _, _ = pinball.step(a)
         imgs.append(pinball.render())
