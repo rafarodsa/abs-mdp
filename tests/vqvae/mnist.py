@@ -20,7 +20,7 @@ class MNISTEncoder(nn.Module):
         super().__init__()
         self.conv1 = nn.Conv2d(1, hidden_channels, 4, stride=2, padding=1)
         self.conv2 = nn.Conv2d(hidden_channels, hidden_channels, 4, stride=2, padding=1)
-
+        self.batch_norm = nn.BatchNorm2d(1)
         # 2 3x3 residual blocks
         self.res1 = nn.Sequential(
             nn.Conv2d(hidden_channels, hidden_channels, kernel_size=3, stride=1, padding='same'),
@@ -36,6 +36,7 @@ class MNISTEncoder(nn.Module):
         )
 
     def forward(self, x):
+        x = self.batch_norm(x)
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = F.relu(self.res1(x) + x)
@@ -92,26 +93,19 @@ if __name__ == "__main__":
 
 
     # Load Binarized MNIST
-    transform = transforms.Compose([transforms.ToTensor(), transforms.Grayscale(num_output_channels=1), transforms.Normalize((0.1307,), (0.3081,))])
-    train_dataset = MNIST(root='data', train=True, download=True, transform=transform)
-    
-    # data = iter(train_dataset)
-    # imgs = [i for i, label in data]
-    # imgs = torch.stack(imgs)
-
-    # transform = transforms.Compose([transforms.ToTensor(), transforms.Grayscale(num_output_channels=1), lambda img: (img - mean)/(std+1e-8)])
+    transform = transforms.Compose([transforms.ToTensor(), transforms.Grayscale(num_output_channels=1)])
     train_dataset = MNIST(root='data', train=True, download=True, transform=transform)
     
     train_set, val_set = torch.utils.data.random_split(train_dataset, [0.8, 0.2])
     test_dataset = MNIST(root='data', train=False, download=True, transform=transform)
-    train_loader = DataLoader(train_set, batch_size=64, shuffle=True)
+    train_loader = DataLoader(train_set, batch_size=128, shuffle=True)
     val_loader = DataLoader(val_set, batch_size=128, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=128, shuffle=True)
     trainer = pl.Trainer(max_epochs=100, accelerator='gpu')
     # Train
     if not args.reconstruct:
         print('Training...')
-        model = VQVAE(MNISTEncoder(256), MNISTDecoder(256), codebook_size=10, embedding_dim=256, commitment_const=0.25, lr=2e-4)
+        model = VQVAE(MNISTEncoder(256), MNISTDecoder(256), codebook_size=10, embedding_dim=256, commitment_const=0.25, lr=3e-5)
 
         
         trainer.fit(model, train_loader, val_loader)

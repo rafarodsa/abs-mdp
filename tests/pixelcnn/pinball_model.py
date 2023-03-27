@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader, random_split
 from torch.nn import functional as F
 
 from src.models import PixelCNNDecoder, DeconvBlock, ResidualConvEncoder
+from src.models.pixelcnn import PixelCNNDecoder2, DeconvBlock2
 
 import argparse
 from omegaconf import OmegaConf as oc
@@ -70,6 +71,7 @@ class PinballDecoderModel(pl.LightningModule):
         super().__init__()
         self.deconv = DeconvBlock(cfg.features)
         self.decoder = PixelCNNDecoder(self.deconv, cfg.dist)
+        self.batch_norm = torch.nn.BatchNorm2d(1)
         self.lr = cfg.lr
         self.save_hyperparameters()
 
@@ -80,7 +82,7 @@ class PinballDecoderModel(pl.LightningModule):
 
     def _run_step(self, obs, s):
         s = s[..., :2]
-
+        obs = self.batch_norm(obs)
         loss = -self.decoder.log_prob(obs, s).mean()
 
         # out = self.forward(obs, s)
