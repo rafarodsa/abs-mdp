@@ -15,13 +15,35 @@ import lightning as L
 from src.models.quantized_logistic import QuantizedLogisticMixture
 from src.utils.printarr import printarr
 
-# class Conv2d(nn.Conv2d):
-#     def __init__(self, *args, **kwargs):
-#         super().__init__(*args, **kwargs)
-#         nn.utils.weight_norm(self)
 
-def Conv2d(*args, **kwargs):
-    return nn.utils.weight_norm(nn.Conv2d(*args, **kwargs))
+def down_shift(x):
+#    B, C, H, W = x.shape
+#    return torch.cat([torch.zeros([B, C, 1, W], device=x.device), x[:,:,:H-1,:]], 2)
+    return F.pad(x, (0,0,1,0))[:,:,:-1,:]
+
+def right_shift(x):
+#    B, C, H, W = x.shape
+#    return torch.cat([torch.zeros([B, C, H, 1], device=x.device), x[:,:,:,:W-1]], 3)
+    return F.pad(x, (1,0))[:,:,:,:-1]
+
+class Conv2d(nn.Conv2d):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        nn.utils.weight_norm(self)
+
+class DownShiftedConv2d(Conv2d):
+    def forward(self, x):
+        # pad H above and W on each side
+        Hk, Wk = self.kernel_size
+        x = F.pad(x, ((Wk-1)//2, (Wk-1)//2, Hk-1, 0))
+        return down_shift(super().forward(x))
+
+class DownRightShiftedConv2d(Conv2d):
+    def forward(self, x):
+        # pad above and on left (ie shift input down and right)
+        Hk, Wk = self.kernel_size
+        x = F.pad(x, (Wk-1, 0, Hk-1, 0))
+        return right_shift(super().forward(x))
 
 class MaskedConv2d(nn.Module):
     """
@@ -125,8 +147,8 @@ class GatedResidualBlock(nn.Module):
             if c is not None:
                 h = h + self.conditional(c)
                 v = v + self.conditional(c)
-            h = h[:, :h.shape[1]//2, :, :] * torch.sigmoid(h[:, h.shape[1]//2:, :, :])
-            v = v[:, :v.shape[1]//2, :, :] * torch.sigmoid(v[:, v.shape[1]//2:, :, :])
+            h = h_x + h[:, :h.shape[1]//2, :, :] * torch.sigmoid(h[:, h.shape[1]//2:, :, :])
+            v = v_x + v[:, :v.shape[1]//2, :, :] * torch.sigmoid(v[:, v.shape[1]//2:, :, :])
         else:
             h = _h_x
             v = None
@@ -134,7 +156,7 @@ class GatedResidualBlock(nn.Module):
                 h = self.dropout(h)
             if c is not None:
                 h = h + self.conditional(c)
-            h = h[:, :h.shape[1]//2, :, :] * torch.sigmoid(h[:, h.shape[1]//2:, :, :])
+            h = h_x + h[:, :h.shape[1]//2, :, :] * torch.sigmoid(h[:, h.shape[1]//2:, :, :])
       
         return (v, h) if v is not None else h
 
@@ -163,7 +185,7 @@ class AttentionBlock(nn.Module):
         queries = self.conv_queries(torch.cat([x, background], dim=1)).reshape(x.shape[0], self.key_channels, -1) # b x k x (hxw)
         keys = keys.reshape(x.shape[0], self.key_channels, -1) # b x k x (hxw)
         values = values.reshape(x.shape[0], self.value_channels, -1) # b x c x (hxw)
-        logits = torch.einsum('bct, bcj->btj', keys, queries) # b x (hxw) x (hxw)
+        logits = torch.einsum('bct, bcj->btj', keys, queries) / (self.key_channels ** -0.5) # b x (hxw) x (hxw)
 
         if self.dropout is not None:
             logits = self.dropout(logits)
