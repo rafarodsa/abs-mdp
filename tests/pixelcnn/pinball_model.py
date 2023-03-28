@@ -60,7 +60,8 @@ class TestDataset(PinballDataset_):
     def __getitem__(self, idx):
         datum = super().__getitem__(idx)
         s = datum.info['state'].astype(np.float32)
-        return (datum.obs, s)#, datum.next_obs, self.next_s[idx])
+        noise = torch.randn_like(datum.obs) * 5 / 255
+        return (datum.obs+noise, s)#, datum.next_obs, self.next_s[idx])
     
 
 logger = logging.getLogger(__name__)
@@ -306,10 +307,10 @@ if __name__=='__main__':
                         num_nodes=args.num_nodes, 
                         max_epochs=args.epochs,
                         callbacks=[checkpoint_callback],
-                        strategy=args.strategy,
+                        # strategy=args.strategy,
                         # gradient_clip_val=1.0,
                         detect_anomaly=True,
-                        track_grad_norm=2,
+                        # track_grad_norm=2,
                         # overfit_batches=5
                     )
     

@@ -35,7 +35,26 @@ model:
   obs_dims: 4
   latent_dim: 2
   encoder: ${loadcfg:${experiment_cwd}/config/models/encoder_residual.yaml}
-  decoder: ${loadcfg:${experiment_cwd}/config/models/decoder_pixelcnn.yaml}
+  decoder:
+    features:
+      type: deconv
+      input_dim: ${model.latent_dim}
+      mlp_hidden: 128
+      in_channels: 32
+      out_width: 100
+      out_height: 100
+      out_channels: 32
+      color_channels: 1 # 3 for RGB, 1 for grayscale
+    dist:
+      type: pixelcnn
+      in_channels: ${model.decoder.features.in_channels} 
+      color_channels: ${model.decoder.features.color_channels} 
+      feats_maps: ${model.decoder.features.out_channels}
+      kernel_size: 5
+      n_layers: 10
+      out_width: 100
+      out_height: 100
+      color_levels: 16
   transition: ${loadcfg:${experiment_cwd}/config/models/transition_gaussian.yaml}
   init_class: ${loadcfg:${experiment_cwd}/config/models/init_class_mlp.yaml}
   reward: ${loadcfg:${experiment_cwd}/config/models/reward_mlp.yaml}
