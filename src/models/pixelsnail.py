@@ -256,6 +256,46 @@ class PixelSNAIL(nn.Module):
         return self.out_conv(self.activation(h))
 
 
+
+def build_ema_optimizer(optimizer_cls):
+    class Optimizer(optimizer_cls):
+        def __init__(self, *args, polyak=0.9997, **kwargs):
+            if not 0.0 <= polyak <= 1.0:
+                raise ValueError("Invalid polyak decay rate: {}".format(polyak))
+            super().__init__(*args, **kwargs)
+            self.defaults['polyak'] = polyak
+
+        def step(self, closure=None):
+            super().step(closure)
+
+            # update exponential moving average after gradient update to parameters
+            for group in self.param_groups:
+                for p in group['params']:
+                    state = self.state[p]
+
+                    # state initialization
+                    if 'ema' not in state:
+                        state['ema'] = torch.zeros_like(p.data)
+
+                    # ema update
+                    state['ema'] -= (1 - self.defaults['polyak']) * (state['ema'] - p.data)
+
+        def swap_ema(self):
+            """ substitute exponential moving average values into parameter values """
+            for group in self.param_groups:
+                for p in group['params']:
+                    data = p.data
+                    state = self.state[p]
+                    p.data = state['ema']
+                    state['ema'] = data
+
+        def __repr__(self):
+            s = super().__repr__()
+            return self.__class__.__mro__[1].__name__ + ' (\npolyak: {}\n'.format(self.defaults['polyak']) + s.partition('\n')[2]
+
+    return Optimizer
+
+
 class PixelSNAILTrainerMNIST(L.LightningModule):
     def __init__(self, n_channels=128, n_blocks=2, lr=2e-4):
         super().__init__()
@@ -299,7 +339,7 @@ class PixelSNAILTrainerMNIST(L.LightningModule):
         return n_bits
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        optimizer = build_ema_optimizer(torch.optim.Adam)(self.parameters(), lr=self.lr)
         return optimizer
     
 
