@@ -257,11 +257,11 @@ class PixelSNAIL(nn.Module):
 
 
 class PixelSNAILTrainerMNIST(L.LightningModule):
-    def __init__(self, n_channels=128, n_blocks=2, lr=3e-5):
+    def __init__(self, n_channels=64, n_blocks=10, lr=2e-3):
         super().__init__()
         self.lr = lr
         self.model = PixelSNAIL(input_dims=(1, 28, 28), n_channels=n_channels, n_blocks=n_blocks)
-        self.embedding = nn.Embedding(10, 128)
+        self.embedding = nn.Embedding(10, n_channels)
         self.save_hyperparameters()
     
     def forward(self, x, cond=None):
@@ -309,20 +309,20 @@ def test_pixelsnail_mnist():
     from torch.utils.data import DataLoader
 
     model = PixelSNAILTrainerMNIST()
-    trainer = L.Trainer(max_epochs=1, accelerator='gpu')
+    trainer = L.Trainer(max_epochs=10, accelerator='gpu')
     _transforms = transforms.Compose([transforms.ToTensor(), transforms.Grayscale()])
     
     dataset = MNIST('data', train=True, download=True, transform=_transforms)
     # split
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [55000, 5000])
-    train_dataloader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=4)
-    val_dataloader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=4)
+    train_dataloader = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=4)
+    val_dataloader = DataLoader(val_dataset, batch_size=128, shuffle=False, num_workers=4)
     # train
     trainer.fit(model, train_dataloader, val_dataloader)
     # test
     test_dataset = MNIST('data', train=False, download=True, transform=_transforms)
     test_dataloader = DataLoader(test_dataset, batch_size=32, shuffle=False, num_workers=4)
-    trainer.test(test_dataloaders=test_dataloader)
+    trainer.test(model, test_dataloader)
 
 
 if __name__=='__main__': 
