@@ -297,7 +297,7 @@ def build_ema_optimizer(optimizer_cls):
 
 
 class PixelSNAILTrainerMNIST(L.LightningModule):
-    def __init__(self, n_channels=128, n_blocks=2, lr=2e-4):
+    def __init__(self, n_channels=128, n_blocks=2, lr=3e-5):
         super().__init__()
         self.lr = lr
         self.model = PixelSNAIL(input_dims=(1, 28, 28), n_channels=n_channels, n_blocks=n_blocks)
@@ -321,13 +321,13 @@ class PixelSNAILTrainerMNIST(L.LightningModule):
     def training_step(self, batch, batch_idx):
         x, label = batch
         loss = self._run_step(x, label)
-        self.log('train_loss', loss)
+        self.log('train_loss', loss, prog_bar=True)
         return loss
     
     def validation_step(self, batch, batch_idx):
         x, label = batch
         loss = self._run_step(x, label)
-        self.log('val_loss', loss)
+        self.log('val_loss', loss, prog_bar=True)
         return loss
     
     def test_step(self, batch, batch_idx):
