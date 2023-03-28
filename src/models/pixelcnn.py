@@ -99,7 +99,7 @@ class GatedPixelCNNLayer(nn.Module):
     """
         PixelCNN layer.
     """
-    def __init__(self, in_channels, out_channels=32, kernel_size=3, data_channels=1, mask_type='B', residual=True):
+    def __init__(self, in_channels, out_channels=32, kernel_size=3, data_channels=1, mask_type='B', residual=True, dropout=True):
         super().__init__()
         self.kernel_size = kernel_size
         self.in_channels = in_channels
@@ -115,6 +115,7 @@ class GatedPixelCNNLayer(nn.Module):
         self.residual = nn.Conv2d(_out_channels // 2, _out_channels // 2, kernel_size=1, stride=1, padding='same') if residual else None
         self.conditional = nn.Conv2d(self.in_channels, _out_channels, kernel_size=1, stride=1, padding='same')
         self.dropout = nn.Dropout(0.5)
+        self.do_dropout = dropout
 
 
     def forward(self, vertical, horizontal, conditional=None):
@@ -135,7 +136,7 @@ class GatedPixelCNNLayer(nn.Module):
         
         _skip = self.skip(_horizontal)
         if self.residual is not None:
-            _residual = self.residual(_horizontal)# out_channels
+            _residual = self.dropout(self.residual(_horizontal)) if self.do_dropout else self.residual(_horizontal)# out_channels
             _horizontal = horizontal + _residual
 
         return _vertical, _horizontal, _skip
@@ -162,7 +163,6 @@ class DeconvBlock(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         # self.mlp = nn.Linear(cfg.input_dim, cfg.in_channels)
-
         feat_maps = cfg.out_channels
         hidden_dim = cfg.mlp_hidden
         self.mlp_1 = nn.Linear(cfg.input_dim, hidden_dim)
@@ -173,152 +173,17 @@ class DeconvBlock(nn.Module):
         self.deconv2 = nn.ConvTranspose2d(feat_maps * cfg.color_channels, feat_maps * cfg.color_channels, kernel_size=3, stride=2, padding=0)
         self.deconv3 = nn.ConvTranspose2d(feat_maps * cfg.color_channels, feat_maps* cfg.color_channels, kernel_size=3, stride=2, padding=0)
         self.conv1 = nn.Conv2d(feat_maps* cfg.color_channels, feat_maps* cfg.color_channels, kernel_size=3, stride=1, padding='same')
-        self.conv2 = nn.Conv2d(feat_maps * cfg.color_channels, feat_maps * cfg.color_channels, kernel_size=3, stride=1, padding='same')
+        self.conv2 = nn.Conv2d(feat_maps * cfg.color_channels, feat_maps * cfg.color_channels, kernel_size=2, stride=1, padding='valid')
         self.conv3 = nn.Conv2d(feat_maps * cfg.color_channels, cfg.out_channels * cfg.color_channels, kernel_size=4, stride=1, padding='valid')
     
     def forward(self, x):
-       
-
-
-        # x = x * 100
-        # device = x.get_device() if x.is_cuda else 'cpu'
-        # i = torch.zeros(x.shape[0], 100,100).to(device)
-        # idx = x.long()
-        # i[torch.arange(x.shape[0]).long(), idx[:, 0], idx[:, 1]] = 1.
-        # print(i[0].argmax(dim=0), i[0].argmax(dim=0).argmax())
-        # print(idx[0])
-        # t = i.argmax(dim=1)
-        # coords_x, coords_y = t.max(dim=1)#, t.argmax(dim=1)
-        # print(coords_x, coords_y)
-        # assert torch.allclose(idx, torch.cat([coords_x.unsqueeze(1), coords_y.unsqueeze(1)], dim=1))
-        # i = i.unsqueeze(1)
-        # x = self.relu(self.conv0(i)
-
         x = self.mlp_2(self.relu(self.mlp_1(x)))
         x = self.relu(self.conv0(x.reshape(x.shape[0], 1, 12, 12)))
         x = self.conv1(self.relu(self.deconv1(x)))
         x = self.conv2(self.relu(self.deconv2(x)))
-        x = self.conv3(self.relu(self.deconv3(self.relu(x))))
+        # printarr(x)
+        # x = self.conv3(self.relu(self.deconv3(self.relu(x))))
         return x
-
-
-class DeconvBlock2(nn.Module):
-    def __init__(self, cfg):
-        super().__init__()
-        # self.mlp = nn.Linear(cfg.input_dim, cfg.in_channels)
-
-        feat_maps = cfg.out_channels
-        hidden_dim = cfg.mlp_hidden
-        self.mlp_1 = nn.Linear(cfg.input_dim, hidden_dim)
-        self.mlp_2 = nn.Linear(hidden_dim, 12 * 12)
-        self.relu = nn.ReLU()
-        self.conv0 = nn.Conv2d(1, feat_maps * cfg.color_channels, kernel_size=1, stride=1, padding='same')
-        self.deconv1 = nn.ConvTranspose2d(feat_maps * cfg.color_channels, feat_maps * cfg.color_channels, kernel_size=3, stride=2, padding=0)
-        self.conv1 = nn.Conv2d(feat_maps* cfg.color_channels, feat_maps* cfg.color_channels, kernel_size=3, stride=1, padding='same')
-
-    def forward(self, x):
-        x = self.mlp_2(self.relu(self.mlp_1(x)))
-        x = self.relu(self.conv0(x.reshape(x.shape[0], 1, 12, 12)))
-        x = self.conv1(self.relu(self.deconv1(x)))
-        return self.relu(x)
-
-class PixelCNNDecoder2(nn.Module):
-    def __init__(self, features, cfg):
-        
-        super().__init__()
-        self.features = features
-        self.data_channels = cfg.color_channels
-        self.width, self.height = cfg.out_width, cfg.out_height
-        self.color_levels = cfg.color_levels
-        self.causal_block = GatedPixelCNNLayer(cfg.color_channels, cfg.feats_maps * self.data_channels, kernel_size=cfg.kernel_size, data_channels=self.data_channels, residual=False, mask_type='A')
-        self.stack = PixelCNNStack(cfg.feats_maps * self.data_channels, cfg.kernel_size, cfg.n_layers, data_channels=self.data_channels)
-        feat_maps = cfg.feats_maps
-        self.deconv2 = nn.ConvTranspose2d(feat_maps * cfg.color_channels, feat_maps * cfg.color_channels, kernel_size=3, stride=2, padding=0)
-        self.deconv3 = nn.ConvTranspose2d(feat_maps * cfg.color_channels, feat_maps* cfg.color_channels, kernel_size=3, stride=2, padding=0)
-        self.conv = nn.Conv2d(cfg.feats_maps * self.data_channels, 128, kernel_size=1, stride=1)
-        self.output = nn.Conv2d(128, self.color_levels * self.data_channels, kernel_size=1, stride=1, padding='same')
-        # self.output = MaskedConv2d(cfg.feats_maps * self.data_channels, 256 * self.data_channels, kernel_size=1, stride=1, padding='same', mask_type='A')
-    def forward(self, x, h):
-        '''
-            x: input image/generating image
-            h: embedding/latent feature maps, 
-        '''
-        cond = self.features(h)
-        return self._pixelcnn_stack(x, cond)
-    
-    def _pixelcnn_stack(self, x, cond):
-        # TODO: generalize this for multiple batch dimensions.
-        width, height = self.width, self.height #cond.shape[-2:]
-        x_v, x_h, _ = self.causal_block(x, x)
-        _, _, skip = self.stack(x_v, x_h, cond)
-        out = self.deconv2(F.relu(skip))
-        out = self.deconv3(F.relu(out))
-        out = self.conv(F.relu(out))
-        out = self.output(F.relu(out))
-        printarr(out)
-        out = out.reshape(x.shape[0], self.color_levels, self.data_channels, width, height) # (batch_size, 256, data_channels, width, height)
-        return out 
-
-    def sample(self, h, n_samples=1, device=None):
-        '''
-            h: embedding/latent feature maps.
-        '''
-        cond = self.features(h) # batch, channels, width, height
-        if n_samples > 1:
-            cond = cond.repeat_interleave(n_samples, dim=0) # batch*n, channels, width, height
-
-        width, height = cond.shape[-2:]
-        _device = h.get_device() if device is None else device
-        sample = torch.zeros(cond.shape[0], self.data_channels, width, height).to(_device)
-        with tqdm(total=width*height) as pbar:
-            for i in range(width):
-                for j in range(height):
-                    for c in range(self.data_channels):
-                        out = self.forward(sample/(self.color_levels-1), h)
-                        out = out[..., c, i, j]
-                        out = torch.softmax(out, dim=1)
-                        pixel = torch.multinomial(out, 1).squeeze(-1)
-                        sample[..., :, c, i, j] = pixel
-                    pbar.update(1)
-        if n_samples > 1:
-            sample = sample.reshape(n_samples, -1, self.data_channels, width, height)
-        return sample
-
-
-    def distribution(self, h):
-        '''
-            return function to evaluate the distribution log q(x|h).
-            h: embedding/latent feature maps, 
-        '''
-        cond = self.features(h)
-
-        return PixelCNNDistribution(self, cond)
-
-    
-    def log_prob(self, x, h):
-        '''
-            x: input image/generating image
-            h: embedding/latent feature maps, 
-        '''
-        out = self.forward(x, h)
-        out = F.log_softmax(out, dim=1) # N x color_levels x data_channels x H x W
-        # print(out.shape)
-        idx = (x * (self.color_levels-1)).long() # N x data_channels x H x W
-        # printarr(out, idx)
-        log_probs = -F.nll_loss(out, idx, reduction='none').reshape(x.shape[0], -1).sum(-1)
-        return log_probs
-    
-
-    @staticmethod
-    def PixelCNNDecoderDist(cfg):
-        return partial(PixelCNNDecoder, cfg=cfg)
-
-    def freeze(self):
-        for p in self.parameters():
-            p.requires_grad_ = False
-        return self
-    
-
 
 class PixelCNNDistribution(nn.Module):
         def __init__(self, decoder, h):
@@ -402,7 +267,7 @@ class PixelCNNDecoder(nn.Module):
         self.data_channels = cfg.color_channels
         self.width, self.height = cfg.out_width, cfg.out_height
         self.color_levels = cfg.color_levels
-        self.causal_block = GatedPixelCNNLayer(cfg.color_channels, cfg.feats_maps * self.data_channels, kernel_size=cfg.kernel_size, data_channels=self.data_channels, residual=False, mask_type='A')
+        self.causal_block = GatedPixelCNNLayer(cfg.color_channels, cfg.feats_maps * self.data_channels, kernel_size=cfg.kernel_size, data_channels=self.data_channels, residual=False, mask_type='A', dropout=False)
        
         self.stack = PixelCNNStack(cfg.feats_maps * self.data_channels, cfg.kernel_size, cfg.n_layers, data_channels=self.data_channels)
         # TODO: maybe reshape and then 1-conv. or masked 1-conv for output
@@ -469,10 +334,10 @@ class PixelCNNDecoder(nn.Module):
         '''
         out = self.forward(x, h)
         out = F.log_softmax(out, dim=1) # N x color_levels x data_channels x H x W
-        # print(out.shape)
-        idx = (x * (self.color_levels-1)).long() # N x data_channels x H x W
-        # printarr(out, idx)
+        idx = (x * (self.color_levels-1)).long()#.unsqueeze(1) # N x data_channels x H x W
         log_probs = -F.nll_loss(out, idx, reduction='none').reshape(x.shape[0], -1).sum(-1)
+        # log_probs = torch.gather(out, dim=1, index=idx).reshape(x.shape[0], -1).sum(-1)
+        
         return log_probs
     
 

@@ -6,7 +6,6 @@ from torch.utils.data import DataLoader, random_split
 from torch.nn import functional as F
 
 from src.models import PixelCNNDecoder, DeconvBlock, ResidualConvEncoder
-from src.models.pixelcnn import PixelCNNDecoder2, DeconvBlock2
 
 import argparse
 from omegaconf import OmegaConf as oc
@@ -43,14 +42,14 @@ def save_images_as_one(samples, obs):
     return np.concatenate([_obs, _samples], axis=0)
 
 class TestDataset(PinballDataset_):
-
+    MEAN, STD = 0.716529905796051, 0.3007461726665497
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.debug = self.load_debug()
         self.s, self.next_s = load_states(self.debug)
         self._data = list(zip(self.data, self.s, self.next_s))
         n = len(self.data)
-        self.data = self.data[:n//6]
+        self.data = self.data[:n//3]
 
     def load_debug(self):
         with zipfile.ZipFile(self.zfile_name, 'r') as z:
@@ -59,58 +58,59 @@ class TestDataset(PinballDataset_):
         return debug
 
     def __getitem__(self, idx):
+
         datum = super().__getitem__(idx)
         s = datum.info['state'].astype(np.float32)
-        noise = torch.randn_like(datum.obs) * 5 / 255
-        return (datum.obs+noise, s)#, datum.next_obs, self.next_s[idx])
+        noise = torch.randn_like(datum.obs) * 2 / 255
+        obs = (datum.obs - self.MEAN)/self.STD 
+        # obs = (datum.obs - self.mean)/self.std
+        obs = datum.obs
+        idx = datum.obs
+        return (torch.clamp(obs+noise, min=0, max=1), s, idx)#, datum.next_obs, self.next_s[idx])
     
 
 logger = logging.getLogger(__name__)
+
 
 class PinballDecoderModel(pl.LightningModule):
     def __init__(self, cfg):
         super().__init__()
         self.deconv = DeconvBlock(cfg.features)
         self.decoder = PixelCNNDecoder(self.deconv, cfg.dist)
-        self.batch_norm = torch.nn.BatchNorm2d(1)
         self.lr = cfg.lr
         self.save_hyperparameters()
 
     def forward(self, obs, s):
-        # print(obs.shape, s.shape)
-        # cond = self.deconv(s)
         return self.decoder(obs, s)
 
-    def _run_step(self, obs, s):
+    def _run_step(self, obs, s, idx):
         s = s[..., :2]
-        obs = self.batch_norm(obs)
-        loss = -self.decoder.log_prob(obs, s).mean()
-
-        # out = self.forward(obs, s)
-        # idx = (obs * 255).long()
-        # loss = F.cross_entropy(out.reshape(obs.shape[0], 256, -1), idx.reshape(obs.shape[0], -1), reduction='sum')/obs.shape[0]
-        # log_probs = F.log_softmax(out, dim=1)
-        # log_probs = log_probs.gather(1, idx.unsqueeze(1).long()).squeeze(1)
-        # loss = -log_probs.reshape(x.shape[0], -1).sum(1).mean()
-        # assert torch.allclose(loss, _loss)
-        return loss
+        # loss = -self.decoder.log_prob(obs, s).mean()
+        mean, std = obs.mean(0).detach(), obs.std(0).detach()
+        # _obs = (obs - mean)/(std + 1e-12)
+        _obs = obs
+        out = self.decoder(_obs, s)
+        log_probs = F.log_softmax(out, dim=1)
+        idx = (_obs * (self.decoder.color_levels-1)).long()
+        log_probs = -F.nll_loss(log_probs, idx, reduction='none').reshape(obs.shape[0], -1).sum(-1)
+        return -log_probs.mean()
 
     def training_step(self, batch, batch_idx):
-        obs, s = batch
-        loss = self._run_step(obs, s)
+        obs, s, idx = batch
+        loss = self._run_step(obs, s, idx)
         self.log('train_loss', loss)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        obs, s = batch
-        loss = self._run_step(obs, s)
+        obs, s, idx = batch
+        loss = self._run_step(obs, s, idx)
         self.log('val_loss', loss,prog_bar=True)
         logger.info(f'Validation Loss: {loss}')
         return loss
     
     def test_step(self, batch, batch_idx):
-        obs, s = batch
-        loss = self._run_step(obs, s)
+        obs, s, idx = batch
+        loss = self._run_step(obs, s, idx)
         self.log('test_loss', loss, prog_bar=True)
         return loss
     
@@ -180,20 +180,20 @@ class PixelCNNAutoencoder(pl.LightningModule):
         return -self.decoder.decoder.log_prob(obs, z).mean()
 
     def training_step(self, batch, batch_idx):
-        obs, s = batch
+        obs, s, idx = batch
         loss = self._run_step(obs)
         self.log('train_loss', loss)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        obs, s = batch
+        obs, s, idx = batch
         loss = self._run_step(obs)
         self.log('val_loss', loss,prog_bar=True)
         logger.info(f'Validation Loss: {loss}')
         return loss
     
     def test_step(self, batch, batch_idx):
-        obs, s = batch
+        obs, s, idx = batch
         loss = self._run_step(obs)
         self.log('test_loss', loss, prog_bar=True)
         return loss
@@ -256,8 +256,8 @@ if __name__=='__main__':
     
     batch = next(iter(val_loader))
     choice = np.random.choice(batch[0].shape[0], 3)
-    
-    coords = (batch[1][choice, :2] * 100).byte().numpy()
+    grid_size = 50
+    coords = (batch[1][choice, :2] * grid_size).byte().numpy()
 
 
     obs = (batch[0][choice] * 255).numpy().astype(np.uint8)[:, 0] # remove channel dim
@@ -337,9 +337,9 @@ if __name__=='__main__':
             model.load_state_dict(torch.load(f'{save_path}/pinball_{args.model}.pt'))
         else:
             model = model.load_from_checkpoint(args.from_ckpt, cfg=model_cfg)
-            model.eval()
+            
             print(f'Checkpoint loaded from {args.from_ckpt}')
-        
+        model.eval()
         # sample
         device = torch.device('cuda')
         model = model.to(device)
@@ -347,7 +347,7 @@ if __name__=='__main__':
         
         trainer.test(model, test_loader)
 
-        obs, states = list(zip(*list(test_set)))
+        obs, states, idx = list(zip(*list(test_set)))
         states = np.vstack(states)
         obs = np.array(list(map(lambda x: x.numpy(), obs)))*255
         choice = np.random.choice(states.shape[0], args.n_samples)
@@ -367,13 +367,62 @@ if __name__=='__main__':
 
         print(f'Sampling... {args.n_samples} samples')
         with torch.no_grad():
-            h = torch.from_numpy(states[choice, :2]).to(device)
-            # d = decoder.to(device).distribution(h)
             _obs = torch.from_numpy(_obs/255).to(device)
-            # printarr(h, _obs)
-            # print(d.log_prob(_obs))
-            s = model.to(device).decoder.sample(h)
-        
+            if args.model == 'decoder':
+                h = torch.from_numpy(states[choice, :2]).to(device)
+                s = model.to(device).decoder.sample(h)
+                
+
+            elif args.model == 'autoencoder':
+                h = model.to(device).encoder(_obs)
+                s = model.to(device).decoder.decoder.sample(h)
+                probs_samples = torch.softmax(model.to(device).decoder(s, h), dim=1)
+                probs_truth = torch.softmax(model.to(device).decoder(_obs, h), dim=1)
+
+                max_probs_samples = probs_samples.max(dim=1).values.reshape(-1, 50)
+                max_probs_truth = probs_truth.max(dim=1).values.reshape(-1, 50)
+                max_probs = torch.cat([max_probs_samples, max_probs_truth], dim=-1)
+                
+                # select 'correct' probs
+                selected_probs_samples = probs_samples.gather(dim=1, index=(_obs * 255).long().unsqueeze(1)).reshape(-1, 50)
+                selected_probs_obs = probs_truth.gather(dim=1, index=(_obs * 255).long().unsqueeze(1)).reshape(-1, 50)
+                selected_probs = torch.cat([selected_probs_samples, selected_probs_obs], dim=-1)
+                plt.figure()
+                im = plt.imshow(selected_probs.cpu().numpy(), cmap='hot', interpolation='nearest')
+                plt.colorbar(im)
+                plt.savefig('selected_probs.png')
+
+                printarr(max_probs, selected_probs)
+                # Image.fromarray((max_probs.cpu().numpy() * 255).astype(np.uint8)).save('probs.png')
+                # heatmax
+                plt.figure()
+                im = plt.imshow(max_probs.cpu().numpy(), cmap='hot', interpolation='nearest')
+                plt.colorbar(im)
+                plt.savefig('max_probs.png')
+                
+
+                # plot histogram
+                plt.figure()
+                ball_indices = (states[choice, :2] * 50).astype(np.int64)
+                ball_probs_sample = probs_samples.cpu()[0, :, 0, ball_indices[0, 1], ball_indices[0, 0]]
+                ball_probs_obs = probs_truth.cpu()[0, :, 0, ball_indices[0, 1], ball_indices[0, 0]]
+                plt.subplot(2,2,1)
+                plt.bar(np.arange(255), ball_probs_sample)
+                plt.title('sample dist')
+                plt.subplot(2,2,2)
+                plt.bar(np.arange(255), ball_probs_obs)
+                plt.title('obs dist')
+                
+                ball_probs_sample = probs_samples.cpu()[0, :, 0, ball_indices[0, 1], ball_indices[0, 0]+1]
+                ball_probs_obs = probs_truth.cpu()[0, :, 0, ball_indices[0, 1], ball_indices[0, 0]+1]
+                plt.subplot(2,2,3)
+                plt.bar(np.arange(255), ball_probs_sample)
+                plt.subplot(2,2,4)
+                plt.bar(np.arange(255), ball_probs_obs)
+
+                plt.savefig('ball_histograms.png')
+
+
         
         s = s/(cfg.model.decoder.dist.color_levels-1) * 255
         imgs = s.cpu().permute(0,2,3,1).numpy().astype(np.uint8)

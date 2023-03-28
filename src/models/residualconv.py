@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from src.utils.printarr import printarr
 
 ##  Pixel Encoder Models
 class ConvResidualLayer(nn.Module):
@@ -30,10 +31,10 @@ class ResidualStack(nn.Module):
 class ResidualConvEncoder(nn.Module):
     def __init__(self, cfg):
         super().__init__()
-        self.conv_1 = nn.Conv2d(cfg.color_channels, cfg.feat_maps, kernel_size=cfg.kernel_size, stride=2)
+        self.conv_1 = nn.Conv2d(cfg.color_channels, cfg.feat_maps, kernel_size=cfg.kernel_size, stride=2, padding='valid')
         self.norm_1 = nn.LayerNorm([cfg.feat_maps, cfg.in_width, cfg.in_height])
         
-        self.conv_2 = nn.Conv2d(cfg.feat_maps, cfg.feat_maps, kernel_size=cfg.kernel_size, stride=2)
+        self.conv_2 = nn.Conv2d(cfg.feat_maps, cfg.feat_maps, kernel_size=cfg.kernel_size, stride=2,  padding='valid')
         self.norm_2 = nn.LayerNorm([cfg.feat_maps, cfg.in_width, cfg.in_height])
         # self.max_pool_2 = nn.AvgPool2d(kernel_size=2, stride=2, padding=1)
         
@@ -52,7 +53,7 @@ class ResidualConvEncoder(nn.Module):
     def forward(self, x):
         x = self.relu(self.conv_1(x))
         x = self.relu(self.conv_2(x))
-
+        # printarr(x)
         x = self.max_pool_1(self.residual_stack(x))
         x = x.reshape(x.shape[0], -1)
         x = self.linear(x)

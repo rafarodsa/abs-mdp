@@ -76,7 +76,7 @@ def linear_projection(datum, linear_projection):
 
 class PinballDataset_(torch.utils.data.Dataset):
     IMG_FORMAT = 'tj_{}_obs_{}.png'
-
+    
     def __init__(self, path_to_file, n_reward_samples=5, transforms=None, obs_type='full', dtype=torch.float32):
         self.zfile_name = path_to_file
         self.zfile = zipfile.ZipFile(self.zfile_name) if obs_type == 'pixels' else None
@@ -195,7 +195,7 @@ class PinballDataset(pl.LightningDataModule):
         self._load_linear_transform()
         self.transforms = [
                             partial(compute_return, gamma=cfg.gamma), 
-                            partial(one_hot_actions, cfg.n_options),
+                            partial(one_hot_actions, cfg.n_options)
                         ]
         if linear_projection and self.obs_type != 'pixels':
             self.transforms.append(partial(linear_projection, linear_projection=self.linear_transform))
