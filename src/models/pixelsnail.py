@@ -259,7 +259,7 @@ class PixelSNAIL(nn.Module):
 
 def build_ema_optimizer(optimizer_cls):
     class Optimizer(optimizer_cls):
-        def __init__(self, *args, polyak=0.9997, **kwargs):
+        def __init__(self, *args, polyak=0.9995, **kwargs):
             if not 0.0 <= polyak <= 1.0:
                 raise ValueError("Invalid polyak decay rate: {}".format(polyak))
             super().__init__(*args, **kwargs)
@@ -279,6 +279,7 @@ def build_ema_optimizer(optimizer_cls):
 
                     # ema update
                     state['ema'] -= (1 - self.defaults['polyak']) * (state['ema'] - p.data)
+            self.swap_ema()
 
         def swap_ema(self):
             """ substitute exponential moving average values into parameter values """
@@ -297,7 +298,7 @@ def build_ema_optimizer(optimizer_cls):
 
 
 class PixelSNAILTrainerMNIST(L.LightningModule):
-    def __init__(self, n_channels=64, n_blocks=10, lr=2e-3):
+    def __init__(self, n_channels=64, n_blocks=10, lr=2e-4):
         super().__init__()
         self.lr = lr
         self.model = PixelSNAIL(input_dims=(1, 28, 28), n_channels=n_channels, n_blocks=n_blocks)
@@ -342,14 +343,18 @@ class PixelSNAILTrainerMNIST(L.LightningModule):
         optimizer = build_ema_optimizer(torch.optim.Adam)(self.parameters(), lr=self.lr)
         return optimizer
     
-
+    # def on_before_zero_grad(self, *args, **kwargs):
+    #     optimizer = self.optimizers().optimizer
+    #     optimizer.swap_ema()
+        
+    
 def test_pixelsnail_mnist():
     from torchvision.datasets import MNIST
     from torchvision import transforms
     from torch.utils.data import DataLoader
 
     model = PixelSNAILTrainerMNIST()
-    trainer = L.Trainer(max_epochs=10, accelerator='gpu')
+    trainer = L.Trainer(max_epochs=20, accelerator='gpu')
     _transforms = transforms.Compose([transforms.ToTensor(), transforms.Grayscale()])
     
     dataset = MNIST('data', train=True, download=True, transform=_transforms)
