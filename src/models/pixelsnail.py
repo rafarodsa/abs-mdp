@@ -342,6 +342,8 @@ class PixelSNAILTrainerMNIST(L.LightningModule):
         optimizer = build_ema_optimizer(torch.optim.Adam)(self.parameters(), lr=self.lr)
         return optimizer
     
+    
+    
 
 def test_pixelsnail_mnist():
     from torchvision.datasets import MNIST
