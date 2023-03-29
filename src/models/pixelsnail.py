@@ -26,10 +26,14 @@ def right_shift(x):
 #    return torch.cat([torch.zeros([B, C, H, 1], device=x.device), x[:,:,:,:W-1]], 3)
     return F.pad(x, (1,0))[:,:,:,:-1]
 
+
+def concat_elu(x):
+    return F.elu(torch.cat([x, -x], dim=1))
+
 class Conv2d(nn.Conv2d):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        nn.utils.weight_norm(self)
+        # nn.utils.weight_norm(self)
 
 class DownShiftedConv2d(Conv2d):
     def forward(self, x):
@@ -110,8 +114,8 @@ class MaskedConv2d(nn.Module):
 
     def forward(self, x):
         # printarr(self.mask, self.conv.weight_g, self.conv.weight_v, self.conv.weight)
-        self.conv.weight_v = nn.Parameter(self.conv.weight_v * self.mask)
-        # self.conv.weight = nn.Parameter(self.conv.weight * self.mask)
+        # self.conv.weight_v = nn.Parameter(self.conv.weight_v * self.mask)
+        self.conv.weight = nn.Parameter(self.conv.weight * self.mask)
         return self.conv(x)
 
     def _get_device(self):
@@ -126,10 +130,10 @@ class MaskedConv2d(nn.Module):
 class GatedResidualBlock(nn.Module):
     def __init__(self, n_channels=128, kernel_size=1, mask_type='B', dropout=0.5):
         super().__init__()
-        self.activation = nn.ELU()
-        self.vertical_stack = MaskedConv2d(n_channels, 2*n_channels, kernel_size, stride=1, padding='same', mask_type=mask_type, type='vertical')
-        self.link = MaskedConv2d(2*n_channels, 2*n_channels, kernel_size=1, stride=1, padding=0, mask_type='B', type='horizontal')
-        self.horizontal_stack = MaskedConv2d(n_channels, 2*n_channels, kernel_size, stride=1, padding='same', mask_type=mask_type, type='horizontal')
+        self.activation = concat_elu
+        self.vertical_stack = MaskedConv2d(2*n_channels, 2*n_channels, kernel_size, stride=1, padding='same', mask_type=mask_type, type='vertical')
+        self.link = MaskedConv2d(2*2*n_channels, 2*n_channels, kernel_size=1, stride=1, padding=0, mask_type='B', type='horizontal')
+        self.horizontal_stack = MaskedConv2d(2*n_channels, 2*n_channels, kernel_size, stride=1, padding='same', mask_type=mask_type, type='horizontal')
         self.conditional = Conv2d(n_channels, 2*n_channels, kernel_size=1, stride=1)
         self.dropout = nn.Dropout(dropout) if dropout > 0 else None
 
@@ -185,14 +189,58 @@ class AttentionBlock(nn.Module):
         queries = self.conv_queries(torch.cat([x, background], dim=1)).reshape(x.shape[0], self.key_channels, -1) # b x k x (hxw)
         keys = keys.reshape(x.shape[0], self.key_channels, -1) # b x k x (hxw)
         values = values.reshape(x.shape[0], self.value_channels, -1) # b x c x (hxw)
-        logits = torch.einsum('bct, bcj->btj', keys, queries) / (self.key_channels ** -0.5) # b x (hxw) x (hxw)
+
+        def test_attention(keys, queries, values):
+            B, K, N = keys.shape
+            _, V, _ = values.shape  
+            device = keys.get_device()
+
+
+            logits = torch.zeros(B, N, N).to(device) - 1e10
+            for i in range(N):
+                for j in range(0, i): # causal
+                    k = keys[:, :, i] # ith key. B x K 
+                    q = queries[:, :, j] # jth queries B x K
+                    
+                    logit  = (k * q).sum(-1) # logit ij (B)
+                    logits[:, i, j] = logit
+            
+            _values = torch.zeros(B, V, N).to(device)
+            weights = F.softmax(logits/(K ** 0.5), dim=2) * torch.tril(torch.ones_like(logits), diagonal=-1) # B x K x Q
+            
+            # for i in range(N):
+            #     v = (values * weights[:, i:i+1]).sum(dim=2) # B x V
+            #     _values[:, :, i] = v
+            
+            _values = torch.matmul(weights, values.permute(0, 2, 1)).permute(0, 2, 1)
+
+
+            s = weights.sum(dim=2)
+            s[:, 0] = 1
+            assert torch.allclose(s, torch.ones_like(s))
+
+            causal = torch.triu(weights)
+            assert torch.allclose(torch.zeros_like(causal), causal), f'{causal[0]} {causal[3]}'
+
+            return _values, weights
+
+
+        logits = torch.einsum('bct, bcj->btj', keys, queries) / (self.key_channels ** 0.5) # b x (hxw) x (hxw)
 
         if self.dropout is not None:
             logits = self.dropout(logits)
-        
+
         weights = F.softmax(logits, dim=2) * self.causal_mask # b x (hxw) x (hxw)
         weights = weights / (torch.sum(weights, dim=2, keepdim=True) + 1e-8) # b x (hxw) x (hxw)  # re-normalize
-        out = torch.einsum('bct, btj->bcj', values, weights) # b x c x (hxw)
+        out = torch.einsum('btj, bvj->bvt', weights, values) # b x c x (hxw)
+        # s = weights.sum(dim=2)
+        # s[:, 0] = 1
+        # assert torch.allclose(s, torch.ones_like(s))    
+
+        # _values, _weights = test_attention(keys, queries, values)
+        # assert torch.allclose(weights, _weights)
+        # assert torch.allclose(out, _values), f'{(out-_values)[0]}'
+        
         # printarr(background, x, residual, logits, self.causal_mask, queries, keys, values, out)
         return out.reshape(x.shape[0], -1, x.shape[2], x.shape[3]) # b x c x h x w
     
@@ -298,7 +346,7 @@ def build_ema_optimizer(optimizer_cls):
 
 
 class PixelSNAILTrainerMNIST(L.LightningModule):
-    def __init__(self, n_channels=64, n_blocks=10, lr=2e-4):
+    def __init__(self, n_channels=64, n_blocks=10, lr=0.8e-4):
         super().__init__()
         self.lr = lr
         self.model = PixelSNAIL(input_dims=(1, 28, 28), n_channels=n_channels, n_blocks=n_blocks)
@@ -306,7 +354,8 @@ class PixelSNAILTrainerMNIST(L.LightningModule):
         self.save_hyperparameters()
     
     def forward(self, x, cond=None):
-        cond = self.embedding(cond).reshape(x.shape[0], -1, 1, 1)
+        # cond = self.embedding(cond).reshape(x.shape[0], -1, 1, 1)
+        cond=None
         return self.model(x, cond)
     
     def _run_step(self, x, label):
@@ -341,6 +390,7 @@ class PixelSNAILTrainerMNIST(L.LightningModule):
 
     def configure_optimizers(self):
         optimizer = build_ema_optimizer(torch.optim.Adam)(self.parameters(), lr=self.lr)
+        # optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         return optimizer
     
     
@@ -359,7 +409,7 @@ def test_pixelsnail_mnist():
     # split
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [55000, 5000])
     train_dataloader = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=4)
-    val_dataloader = DataLoader(val_dataset, batch_size=128, shuffle=False, num_workers=4)
+    val_dataloader = DataLoader(val_dataset, batch_size=64, shuffle=False, num_workers=4)
     # train
     trainer.fit(model, train_dataloader, val_dataloader)
     # test
