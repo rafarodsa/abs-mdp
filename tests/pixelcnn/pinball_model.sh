@@ -26,4 +26,4 @@ export PYTHONFAULTHANDLER=1
 # export NCCL_SOCKET_IFNAME=^docker0,lo
 
 # run script from above
-srun python tests/pixelcnn/pinball_model.py --config experiments/pb_obstacles/pixel/config/test_decoder.yaml --devices 2 --epochs 100 --batch-size 64 --lr 2e-4 --strategy ddp --save-path ./ckpts_full --inference
+srun python tests/pixelcnn/pinball_model.py --config experiments/pb_obstacles/pixel/config/test_decoder.yaml --devices 2 --epochs 100 --batch-size 64 --lr 2e-4 --strategy ddp --save-path ./ckpts_full

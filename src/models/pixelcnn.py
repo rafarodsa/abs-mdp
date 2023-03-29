@@ -126,7 +126,7 @@ class GatedPixelCNNLayer(nn.Module):
         
         _link = self.link(_vertical)
         _color_channels = 0. #self.channels_conv(horizontal) # TODO: check masked conv is working
-        _horizontal = _horizontal + _link + _color_channels
+        _horizontal = self.dropout(_horizontal + _link + _color_channels)
         
         _vin = _vertical + _cond
         _hin = _horizontal + _cond

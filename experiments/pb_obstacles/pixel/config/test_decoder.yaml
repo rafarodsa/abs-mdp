@@ -50,8 +50,8 @@ model:
       in_channels: ${model.decoder.features.in_channels} 
       color_channels: ${model.decoder.features.color_channels} 
       feats_maps: ${model.decoder.features.out_channels}
-      kernel_size: 49
-      n_layers: 5
+      kernel_size: 7
+      n_layers: 10
       out_width: 50
       out_height: 50
       color_levels: 255

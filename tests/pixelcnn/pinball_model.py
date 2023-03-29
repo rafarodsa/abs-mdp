@@ -49,7 +49,7 @@ class TestDataset(PinballDataset_):
         self.s, self.next_s = load_states(self.debug)
         self._data = list(zip(self.data, self.s, self.next_s))
         n = len(self.data)
-        self.data = self.data[:n//3]
+        self.data = self.data[:n]
 
     def load_debug(self):
         with zipfile.ZipFile(self.zfile_name, 'r') as z:

@@ -88,7 +88,7 @@ class PinballEnv(gym.Env):
         total_points = 0
         vels = np.zeros((N, 2))
         while total_points < N:
-            points = self._get_points_outside_obstacles(np.random.uniform(size=(N, 2)))
+            points = self._get_points_outside_obstacles(np.random.uniform(0.1, 0.9, size=(N, 2)))
             all_points.append(points)
             total_points += points.shape[0]
         return np.hstack([np.vstack(all_points)[:N], vels])
@@ -101,7 +101,7 @@ class PinballEnv(gym.Env):
         total_points = 0
         vels = np.random.uniform(size=(N, 2))
         while total_points < N:
-            points = self._get_points_outside_obstacles(np.random.uniform(size=(N, 2)))
+            points = self._get_points_outside_obstacles(np.random.uniform(0.1, 0.9, size=(N, 2)))
             all_points.append(points)
             total_points += points.shape[0]
         return np.hstack([np.vstack(all_points)[:N], vels])
