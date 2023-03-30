@@ -2,6 +2,10 @@
     PixelSNAIL model
     author: Rafael Rodriguez-Sanchez
     date: 28 March 2023
+
+    Inspired by the following implementations:
+        https://github.com/rosinality/vq-vae-2-pytorch/
+        https://github.com/neocxi/pixelsnail-public
 '''
 
 
@@ -17,15 +21,10 @@ from src.utils.printarr import printarr
 
 
 def down_shift(x):
-#    B, C, H, W = x.shape
-#    return torch.cat([torch.zeros([B, C, 1, W], device=x.device), x[:,:,:H-1,:]], 2)
     return F.pad(x, (0,0,1,0))[:,:,:-1,:]
 
 def right_shift(x):
-#    B, C, H, W = x.shape
-#    return torch.cat([torch.zeros([B, C, H, 1], device=x.device), x[:,:,:,:W-1]], 3)
     return F.pad(x, (1,0))[:,:,:,:-1]
-
 
 def concat_elu(x):
     return F.elu(torch.cat([x, -x], dim=1))
@@ -33,150 +32,68 @@ def concat_elu(x):
 class Conv2d(nn.Conv2d):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # nn.utils.weight_norm(self)
+        nn.utils.weight_norm(self)
 
 class DownShiftedConv2d(Conv2d):
     def forward(self, x):
         # pad H above and W on each side
         Hk, Wk = self.kernel_size
         x = F.pad(x, ((Wk-1)//2, (Wk-1)//2, Hk-1, 0))
-        return down_shift(super().forward(x))
+        return super().forward(x)
 
 class DownRightShiftedConv2d(Conv2d):
     def forward(self, x):
         # pad above and on left (ie shift input down and right)
         Hk, Wk = self.kernel_size
         x = F.pad(x, (Wk-1, 0, Hk-1, 0))
-        return right_shift(super().forward(x))
-
-class MaskedConv2d(nn.Module):
-    """
-        Implements Masked CNN for 3D inputs.
-    """
-    def __init__(self, in_channels, out_channels, kernel_size, stride, padding, data_channels=1, mask_type='A', type='vertical'):
-        """
-                data_channels: number of color channel (1 for grayscale/binary, 3 for RGB)
-                mask_type: 'A' (do not include current value as input) or 'B' (include current value as input)
-        """
-        super().__init__()
-        self.data_channels = data_channels
-        self.mask_type = mask_type
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-
-        x_c, y_c = (kernel_size // 2, kernel_size // 2) if isinstance(kernel_size, int) else (kernel_size[1] // 2, kernel_size[0] // 2)
-        k_x, k_y = (kernel_size, kernel_size) if isinstance(kernel_size, int) else (kernel_size[1], kernel_size[0])
-
-        self.conv = Conv2d(in_channels, out_channels, kernel_size, stride, padding)
-        self._mask = np.zeros(self.conv.weight.size())
-       
-        if type == 'vertical':
-            self._mask[:, :, :y_c, :] = 1.
-
-        if type == 'horizontal':
-            self._mask[:, :, y_c, :x_c + 1] = 1.
-
-            for o in range(self.data_channels):
-                for i in range(o+1, self.data_channels):
-                    self._mask[self._color_mask(i, o), y_c, x_c] = 0.
-            
-            if mask_type == 'A': 
-                for c in range(data_channels):
-                    self._mask[self._color_mask(c, c), y_c, x_c] = 0.
-
-
-
-        self.device = self.conv.weight.get_device()
-        self._mask = torch.from_numpy(self._mask).type(self.conv.weight.dtype)
-        self.register_buffer('mask', self._mask)
-
-     
-        idx_x, idx_y = torch.arange(0, k_x), torch.arange(0, k_y)
-        if type == 'vertical':
-            assert torch.all(self.mask[:, :, idx_y < y_c] == 1) and torch.all(self.mask[:, :, idx_y >= y_c] == 0)
-        elif mask_type == 'A':
-            assert torch.all(self.mask[:, :, idx_y == y_c, idx_x < x_c] == 1) and torch.all(self.mask[:, :, idx_y == y_c, idx_x >= x_c] == 0) and torch.all(self.mask[:, :, idx_y != y_c] == 0)
-        else:
-            assert torch.all(self.mask[:, :, idx_y == y_c, idx_x <= x_c] == 1) and torch.all(self.mask[:, :, idx_y == y_c, idx_x > x_c] == 0) and torch.all(self.mask[:, :, idx_y != y_c] == 0)
-
-
-
-    def _color_mask(self, in_c, out_c):
-        """
-            Indices for masking weights.
-            For RGB: B is conditioned (G,B), G is conditioned on R.
-        """
-        a = np.arange(self.out_channels) % self.data_channels == out_c
-        b = np.arange(self.in_channels) % self.data_channels == in_c
-
-        return a[:, None] * b[None, :]
-
-
-    def forward(self, x):
-        # printarr(self.mask, self.conv.weight_g, self.conv.weight_v, self.conv.weight)
-        # self.conv.weight_v = nn.Parameter(self.conv.weight_v * self.mask)
-        self.conv.weight = nn.Parameter(self.conv.weight * self.mask)
-        return self.conv(x)
-
-    def _get_device(self):
-        try:
-            self.device = self.conv.weight.get_device()
-            if self.device < 0:
-                self.device = torch.device('cpu', 0)
-        except RuntimeError:
-            self.device = torch.device('cpu', 0)
-
+        return super().forward(x)
 
 class GatedResidualBlock(nn.Module):
-    def __init__(self, n_channels=128, kernel_size=1, mask_type='B', dropout=0.5):
+    def __init__(self, n_channels=128, kernel_size=1, conv_fn=DownShiftedConv2d, activation='concat_elu', dropout=0.5):
         super().__init__()
-        self.activation = concat_elu
-        self.vertical_stack = MaskedConv2d(2*n_channels, 2*n_channels, kernel_size, stride=1, padding='same', mask_type=mask_type, type='vertical')
-        self.link = MaskedConv2d(2*2*n_channels, 2*n_channels, kernel_size=1, stride=1, padding=0, mask_type='B', type='horizontal')
-        self.horizontal_stack = MaskedConv2d(2*n_channels, 2*n_channels, kernel_size, stride=1, padding='same', mask_type=mask_type, type='horizontal')
-        self.conditional = Conv2d(n_channels, 2*n_channels, kernel_size=1, stride=1)
+        if activation == 'concat_elu':
+            self.activation = concat_elu
+            factor = 2
+        elif activation == 'elu':
+            self.activation = nn.ELU()
+            factor = 1
+        elif activation == 'relu':
+            self.activation = nn.ReLU()
+            factor = 1
+        
+        self.causalconv = conv_fn(factor*n_channels, n_channels, kernel_size, stride=1)
+        self.shortcut = Conv2d(n_channels, factor*n_channels, kernel_size=1, stride=1)
+        self.conditional = Conv2d(n_channels, factor*n_channels, kernel_size=1, stride=1)
+        self.pregate = conv_fn(factor*n_channels, 2*n_channels, kernel_size=1, stride=1)
         self.dropout = nn.Dropout(dropout) if dropout > 0 else None
 
+    def forward(self, x, shortcut=None, cond=None):
+        _x = self.causalconv(self.activation(x))
+        _x = self.activation(_x)
+        if shortcut is not None:
+            _x = _x + self.shortcut(shortcut)
+        if cond is not None:
+            _x = _x + self.conditional(cond)
+        if self.dropout is not None:
+            _x = self.dropout(_x)
 
-    def forward(self, h_x, v_x=None, c=None):
-        
-        _h_x = self.horizontal_stack(self.activation(h_x))
-        if v_x is not None:
-            _v_x = self.vertical_stack(self.activation(v_x))
-            h = self.link(self.activation(_v_x)) + _h_x
-            v = _v_x 
-            if self.dropout is not None:
-                h = self.dropout(h)
-                v = self.dropout(v)
-            if c is not None:
-                h = h + self.conditional(c)
-                v = v + self.conditional(c)
-            h = h_x + h[:, :h.shape[1]//2, :, :] * torch.sigmoid(h[:, h.shape[1]//2:, :, :])
-            v = v_x + v[:, :v.shape[1]//2, :, :] * torch.sigmoid(v[:, v.shape[1]//2:, :, :])
-        else:
-            h = _h_x
-            v = None
-            if self.dropout is not None:
-                h = self.dropout(h)
-            if c is not None:
-                h = h + self.conditional(c)
-            h = h_x + h[:, :h.shape[1]//2, :, :] * torch.sigmoid(h[:, h.shape[1]//2:, :, :])
-      
-        return (v, h) if v is not None else h
+        _x = self.pregate(_x)
+        _x = _x[:, :_x.shape[1]//2] * torch.sigmoid(_x[:, _x.shape[1]//2:])
+        return x + _x
 
 
 class AttentionBlock(nn.Module):
-    def __init__(self, causal_mask, n_in_channels=128, input_channels=1, value_channels=128, key_channels=16, n_background_channels=2, dropout=0.5):
+    def __init__(self, causal_mask, n_in_channels=128, value_channels=128, key_channels=16, n_background_channels=2, dropout=0.5):
         super().__init__()
         self.key_channels = key_channels
         self.value_channels = value_channels
         self.conv_keys_values = nn.Sequential(
-                                        GatedResidualBlock(n_in_channels + n_background_channels + input_channels, mask_type='B', dropout=dropout),
-                                        Conv2d(n_in_channels + n_background_channels + input_channels, value_channels + key_channels, kernel_size=1, stride=1)
+                                        GatedResidualBlock(2*n_in_channels + n_background_channels, dropout=dropout),
+                                        Conv2d(2*n_in_channels + n_background_channels, value_channels + key_channels, kernel_size=1, stride=1)
                                 )
         self.conv_queries = nn.Sequential(
-                                        GatedResidualBlock(1 + n_background_channels, mask_type='B', dropout=dropout),
-                                        Conv2d(1 + n_background_channels, key_channels, kernel_size=1, stride=1)
+                                        GatedResidualBlock(n_in_channels + n_background_channels, dropout=dropout),
+                                        Conv2d(n_in_channels + n_background_channels, key_channels, kernel_size=1, stride=1)
                                 )
         
         self.dropout = nn.Dropout(dropout) if dropout > 0 else None
@@ -233,6 +150,8 @@ class AttentionBlock(nn.Module):
         weights = F.softmax(logits, dim=2) * self.causal_mask # b x (hxw) x (hxw)
         weights = weights / (torch.sum(weights, dim=2, keepdim=True) + 1e-8) # b x (hxw) x (hxw)  # re-normalize
         out = torch.einsum('btj, bvj->bvt', weights, values) # b x c x (hxw)
+        
+        ####### TEST ########
         # s = weights.sum(dim=2)
         # s[:, 0] = 1
         # assert torch.allclose(s, torch.ones_like(s))    
@@ -242,6 +161,7 @@ class AttentionBlock(nn.Module):
         # assert torch.allclose(out, _values), f'{(out-_values)[0]}'
         
         # printarr(background, x, residual, logits, self.causal_mask, queries, keys, values, out)
+        #### END TEST ########
         return out.reshape(x.shape[0], -1, x.shape[2], x.shape[3]) # b x c x h x w
     
 
@@ -249,7 +169,7 @@ class SNAILBlock(nn.Module):
     def __init__(self, causal_mask, n_channels=128, kernel_size=2, key_channels=16, value_channels=128, n_residuals=4, dropout=0.5):
         super().__init__()
         self.n_residuals = n_residuals
-        self.gated_residuals = nn.ModuleList([GatedResidualBlock(n_channels=n_channels, kernel_size=kernel_size, dropout=dropout) for _ in range(n_residuals)])
+        self.gated_residuals = nn.ModuleList([GatedResidualBlock(n_channels=n_channels, kernel_size=kernel_size, dropout=dropout, conv_fn=DownRightShiftedConv2d) for _ in range(n_residuals)])
         self.attention = AttentionBlock(causal_mask=causal_mask, n_in_channels=n_channels, key_channels=key_channels, value_channels=value_channels, dropout=dropout)
         self.activation = nn.ELU()
         self.attention_conv = Conv2d(value_channels, n_channels, kernel_size=1, stride=1)
@@ -257,14 +177,14 @@ class SNAILBlock(nn.Module):
         self.out = Conv2d(n_channels, n_channels, kernel_size=1, stride=1)
 
 
-    def forward(self, x, residual, background, cond=None):
-        v, h = residual
+    def forward(self, residual, background, cond=None):
+        h = residual
         for i in range(self.n_residuals):
-            v, h = self.gated_residuals[i](v_x=v, h_x=h, c=cond)
-        attn = self.attention_conv(self.activation(self.attention(x, h, background)))
+            _h = self.gated_residuals[i](x=h, cond=cond)
+        attn = self.attention_conv(self.activation(self.attention(h, _h, background)))
         h = self.activation(self.residual_conv(self.activation(h)))
         out = self.out(self.activation(attn + h))
-        return v, self.activation(out)
+        return self.activation(out)
     
 
 class PixelSNAIL(nn.Module):
@@ -276,15 +196,16 @@ class PixelSNAIL(nn.Module):
         self.input_dims = input_dims
         self.n_log_components = n_log_components
 
-        _, H, W = input_dims
+        I, H, W = input_dims
 
         # causal mask
         causal_mask = torch.tril(torch.ones((1, H * W, H * W)), diagonal=-1)
         self.register_buffer('causal_mask', causal_mask)
 
         # layers
-        self.proj_conv = nn.Conv2d(1, n_channels, kernel_size=1, stride=1)
-        self.causal_conv = GatedResidualBlock(n_channels, kernel_size=3, mask_type='A')
+        self.causal_horizontal = DownRightShiftedConv2d(I, n_channels, kernel_size=(1, 2), stride=1)
+        self.causal_vertical = DownShiftedConv2d(I, n_channels, kernel_size=(2, 3), stride=1)
+
         self.blocks = nn.ModuleList([SNAILBlock(causal_mask=self.causal_mask, n_channels=n_channels, kernel_size=kernel_size, key_channels=key_channels, value_channels=value_channels, n_residuals=n_residuals, dropout=dropout) for _ in range(n_blocks)])
         self.out_conv = nn.Conv2d(n_channels, 3 * n_log_components, kernel_size=1, stride=1)
         self.activation = nn.ELU()
@@ -296,11 +217,11 @@ class PixelSNAIL(nn.Module):
         self.register_buffer('background', torch.cat([background_h, background_w], dim=1).float())
 
     def forward(self, x, cond=None):
-        _x = self.proj_conv(x)
-        h = self.causal_conv(_x, _x)
+        v_x = down_shift(self.causal_vertical(x))
+        h_x = right_shift(self.causal_horizontal(x))
+        h = v_x + h_x  # causal input
         for i in range(self.n_blocks):
-            h = self.blocks[i](x, h, self.background, cond)
-        _, h = h
+            h = self.blocks[i](h, self.background, cond)
         return self.out_conv(self.activation(h))
 
 
@@ -392,8 +313,6 @@ class PixelSNAILTrainerMNIST(L.LightningModule):
         optimizer = build_ema_optimizer(torch.optim.Adam)(self.parameters(), lr=self.lr)
         # optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         return optimizer
-    
-    
     
 
 def test_pixelsnail_mnist():
