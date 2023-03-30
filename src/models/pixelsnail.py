@@ -83,7 +83,7 @@ class GatedResidualBlock(nn.Module):
 
 
 class AttentionBlock(nn.Module):
-    def __init__(self, causal_mask, n_in_channels=128, value_channels=128, key_channels=16, n_background_channels=2, dropout=0.5, n_heads=2):
+    def __init__(self, causal_mask, n_in_channels=128, value_channels=128, key_channels=16, n_background_channels=2, dropout=0.5, n_heads=8):
         super().__init__()
         self.key_channels = key_channels
         self.value_channels = value_channels
