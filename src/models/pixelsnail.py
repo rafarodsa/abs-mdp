@@ -83,17 +83,18 @@ class GatedResidualBlock(nn.Module):
 
 
 class AttentionBlock(nn.Module):
-    def __init__(self, causal_mask, n_in_channels=128, value_channels=128, key_channels=16, n_background_channels=2, dropout=0.5):
+    def __init__(self, causal_mask, n_in_channels=128, value_channels=128, key_channels=16, n_background_channels=2, dropout=0.5, n_heads=2):
         super().__init__()
         self.key_channels = key_channels
         self.value_channels = value_channels
+        self.n_heads = n_heads
         self.conv_keys_values = nn.Sequential(
                                         GatedResidualBlock(2*n_in_channels + n_background_channels, dropout=dropout),
-                                        Conv2d(2*n_in_channels + n_background_channels, value_channels + key_channels, kernel_size=1, stride=1)
+                                        Conv2d(2*n_in_channels + n_background_channels, value_channels + key_channels * n_heads, kernel_size=1, stride=1)
                                 )
         self.conv_queries = nn.Sequential(
                                         GatedResidualBlock(n_in_channels + n_background_channels, dropout=dropout),
-                                        Conv2d(n_in_channels + n_background_channels, key_channels, kernel_size=1, stride=1)
+                                        Conv2d(n_in_channels + n_background_channels, key_channels * n_heads, kernel_size=1, stride=1)
                                 )
         
         self.dropout = nn.Dropout(dropout) if dropout > 0 else None
@@ -102,10 +103,10 @@ class AttentionBlock(nn.Module):
     def forward(self, x, residual, background):
 
         background = background.expand(x.shape[0], -1, -1, -1)
-        keys, values = self.conv_keys_values(torch.cat([x, residual, background], dim=1)).split([self.key_channels, self.value_channels], dim=1)
-        queries = self.conv_queries(torch.cat([x, background], dim=1)).reshape(x.shape[0], self.key_channels, -1) # b x k x (hxw)
-        keys = keys.reshape(x.shape[0], self.key_channels, -1) # b x k x (hxw)
-        values = values.reshape(x.shape[0], self.value_channels, -1) # b x c x (hxw)
+        keys, values = self.conv_keys_values(torch.cat([x, residual, background], dim=1)).split([self.key_channels * self.n_heads, self.value_channels], dim=1)
+        queries = self.conv_queries(torch.cat([x, background], dim=1)).reshape(x.shape[0], self.n_heads, self.key_channels, -1) # b x n_heads x k x (hxw)
+        keys = keys.reshape(x.shape[0], self.n_heads, self.key_channels, -1) # b x n_heads x k x (hxw)
+        values = values.reshape(x.shape[0], self.n_heads, self.value_channels // self.n_heads, -1) # b x n_heads x c x (hxw)
 
         def test_attention(keys, queries, values):
             B, K, N = keys.shape
@@ -142,14 +143,14 @@ class AttentionBlock(nn.Module):
             return _values, weights
 
 
-        logits = torch.einsum('bct, bcj->btj', keys, queries) / (self.key_channels ** 0.5) # b x (hxw) x (hxw)
+        logits = torch.einsum('bhct, bhcj->bhtj', keys, queries) / (self.key_channels ** 0.5) # b x n_heads x (hxw) x (hxw)
 
         if self.dropout is not None:
             logits = self.dropout(logits)
 
-        weights = F.softmax(logits, dim=2) * self.causal_mask # b x (hxw) x (hxw)
+        weights = F.softmax(logits, dim=2) * self.causal_mask.unsqueeze(1) # b x n_heads x (hxw) x (hxw)
         weights = weights / (torch.sum(weights, dim=2, keepdim=True) + 1e-8) # b x (hxw) x (hxw)  # re-normalize
-        out = torch.einsum('btj, bvj->bvt', weights, values) # b x c x (hxw)
+        out = torch.einsum('bhtj, bhvj->bhvt', weights, values) # b x n_heads x c // n_heads x (hxw)
         
         ####### TEST ########
         # s = weights.sum(dim=2)
@@ -163,7 +164,8 @@ class AttentionBlock(nn.Module):
         # printarr(background, x, residual, logits, self.causal_mask, queries, keys, values, out)
         #### END TEST ########
         return out.reshape(x.shape[0], -1, x.shape[2], x.shape[3]) # b x c x h x w
-    
+
+
 
 class SNAILBlock(nn.Module):
     def __init__(self, causal_mask, n_channels=128, kernel_size=2, key_channels=16, value_channels=128, n_residuals=4, dropout=0.5):
