@@ -64,9 +64,7 @@ class QuantizedLogisticMixture(torch.distributions.Distribution):
         samples = _mu + _s * (torch.log(u) - torch.log(1.-u))
         return torch.clamp(samples, min=-1, max=1) # batch x n_samples
 
-
-
-
+    
 
 
         
