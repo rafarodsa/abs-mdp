@@ -25,8 +25,6 @@ class GoalPinballModel(PinballModel):
         self.ball = BallModel(start_position=start_pos, radius=self._ball_rad)
     
     def set_initial_state(self, state):
-        # self.set_initial_pos(state[:2])
-        # self.ball.add_impulse(state[2]*5, state[3]*5)
         self.ball.position[0], self.ball.position[1] = state[:2]
         self.ball.xdot, self.ball.ydot = state[2:]
 
@@ -88,10 +86,12 @@ class PinballEnv(gym.Env):
         total_points = 0
         vels = np.zeros((N, 2))
         while total_points < N:
-            points = self._get_points_outside_obstacles(np.random.uniform(size=(N, 2)))
+            _p = np.random.uniform(low=0.02, high=0.98, size=(N, 2))
+            points = self._get_points_outside_obstacles(_p)
             all_points.append(points)
             total_points += points.shape[0]
-        return np.hstack([np.vstack(all_points)[:N], vels])
+        pos = np.vstack(all_points)[:N]
+        return np.hstack([pos, vels])
 
     def sample_init_states(self, N):
         """
@@ -101,7 +101,8 @@ class PinballEnv(gym.Env):
         total_points = 0
         vels = np.random.uniform(size=(N, 2))
         while total_points < N:
-            points = self._get_points_outside_obstacles(np.random.uniform(size=(N, 2)))
+            
+            points = self._get_points_outside_obstacles(_p)
             all_points.append(points)
             total_points += points.shape[0]
         return np.hstack([np.vstack(all_points)[:N], vels])
@@ -110,15 +111,15 @@ class PinballEnv(gym.Env):
         points_mask = np.ones(points.shape[0], dtype=np.bool8)
         for obstacle in self._obstacles:
             in_obstacle = obstacle.contains_points(points, radius=0.)
-            # print(in_obstacle)
             points_mask = np.logical_and(np.logical_not(in_obstacle), points_mask)
+           
         # print('points_mask', points_mask)
         # print('points', points[points_mask], 'points.shape', points[points_mask].shape[0])
         return points[points_mask]
     
     def is_valid_state(self, state):
         # print('state', state[:2])
-        self._get_points_outside_obstacles(np.array(state[:2]).reshape(1, 2))
+        # self._get_points_outside_obstacles(np.array(state[:2]).reshape(1, 2))
         for obstacle in self._obstacles:
             if obstacle.contains_points([state[:2]], radius=0.):
                 return False
@@ -206,7 +207,7 @@ class PinballEnvContinuous(PinballEnv):
         if state is None:
             state = self.sample_initial_positions(1)[0]
        
-        if self.is_valid_state(state):
+        if not self.is_valid_state(state):
             raise ValueError(f"Invalid state [{state[0]}, {state[1]}]")
             
         self.pinball.set_initial_state(state)
@@ -266,13 +267,18 @@ if __name__=="__main__":
                                     render_mode="rgb_array")
     pixel_pinball = PinballPixelWrapper(pinball, n_frames=5)
     # pinball.reset([0.74, 0.5, 0., 0.])
-    pinball.reset([0.609, 0.758, 0., 0.])
+    # pinball.reset([0.609, 0.758, 0., 0.])
+    pinball.reset()
     imgs = []
-    for i in range(1):
-        a = [0.9, 0.9]
-        next_s, _, _, _, _ = pinball.step(a)
-        imgs.append(pinball.render())
-        _s = pinball.reset(next_s)
+    for _  in range(10):
+        for i in range(10):
+            a = [0.9, 0.9]
+            next_s, _, _, _, _ = pinball.step(a)
+            imgs.append(pinball.render())
+        plt.imshow(np.array(imgs).mean(0))
+        plt.show()
+        imgs = []
+        pinball.reset()
+        # _s = pinball.reset(next_s)
         
-    plt.imshow(np.array(imgs).mean(0))
-    plt.show()
+    
