@@ -45,6 +45,24 @@ class QuantizedLogisticMixture(torch.distributions.Distribution):
         log_probs = log_probs + torch.log_softmax(self.logit_probs, dim=-1)
         return torch.sum(torch.logsumexp(log_probs, dim=-1).reshape(x.shape[0], -1), dim=-1)
         
+    def sample(self, c, i, j, n_samples=1):
+        '''
+            locs: [batch, n_components]
+            log_scales: [batch, n_components]
+            mix_logits: [batch, n_components]
+        '''
+        # printarr(locs, log_scales, mix_logits)
+        locs, log_scales, mix_logits = self.loc[:, c, i, j], self.log_scale[:, c, i, j], self.logit_probs[:, c, i, j]
+        m = locs.shape[0] # batch
+        scales = torch.exp(torch.clamp(log_scales, min=-7))
+        probs = torch.softmax(mix_logits, dim=-1) # batch x n_components
+        mix_idx = torch.multinomial(probs, n_samples)# batch x n_samples
+        u = torch.rand(m, n_samples).to(probs.get_device()) # batch x n_samples x 1
+        u = (1-2e-5) * u + 1e-5
+        _mu = torch.gather(locs, dim=-1, index=mix_idx.long()) # batch x n_samples
+        _s = torch.gather(scales, dim=-1, index=mix_idx.long())
+        samples = _mu + _s * (torch.log(u) - torch.log(1.-u))
+        return torch.clamp(samples, min=-1, max=1) # batch x n_samples
 
 
 

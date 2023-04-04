@@ -206,7 +206,8 @@ class PinballEnvContinuous(PinballEnv):
         if state is None:
             state = self.sample_initial_positions(1)[0]
        
-        assert self.is_valid_state(state), f"Invalid state [{state[0]}, {state[1]}]"
+        if not self.is_valid_state(state):
+            print(f"Invalid state [{state[0]}, {state[1]}]")
        
         self.pinball.set_initial_state(state)
         return state

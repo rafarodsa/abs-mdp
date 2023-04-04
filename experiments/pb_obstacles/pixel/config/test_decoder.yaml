@@ -17,7 +17,7 @@ loss:
   initset_const: 0.
   n_samples: 1
 data:
-  data_path: ${experiment_cwd}/data/simple_v1.zip
+  data_path: ${experiment_cwd}/data/simple-25.zip
   batch_size: ${batch_size}
   num_workers: 1
   train_split: 0.8
@@ -41,9 +41,9 @@ model:
       input_dim: ${model.latent_dim}
       mlp_hidden: 128
       in_channels: 32
-      out_width: 100
-      out_height: 100
-      out_channels: 32
+      out_width: 25
+      out_height: 25
+      out_channels: 64
       color_channels: 1 # 3 for RGB, 1 for grayscale
     dist:
       type: pixelcnn
@@ -52,8 +52,8 @@ model:
       feats_maps: ${model.decoder.features.out_channels}
       kernel_size: 5
       n_layers: 10
-      out_width: 100
-      out_height: 100
+      out_width: 25
+      out_height: 25
       color_levels: 16
   transition: ${loadcfg:${experiment_cwd}/config/models/transition_gaussian.yaml}
   init_class: ${loadcfg:${experiment_cwd}/config/models/init_class_mlp.yaml}
