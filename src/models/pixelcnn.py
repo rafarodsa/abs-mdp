@@ -166,39 +166,22 @@ class DeconvBlock(nn.Module):
         feat_maps = cfg.out_channels
         hidden_dim = cfg.mlp_hidden
         self.mlp_1 = nn.Linear(cfg.input_dim, hidden_dim)
-        self.mlp_2 = nn.Linear(hidden_dim, 12 * 12)
+        self.mlp_2 = nn.Linear(hidden_dim, 13 * 13)
         self.relu = nn.ReLU()
         self.conv0 = nn.Conv2d(1, feat_maps * cfg.color_channels, kernel_size=1, stride=1, padding='same')
         self.deconv1 = nn.ConvTranspose2d(feat_maps * cfg.color_channels, feat_maps * cfg.color_channels, kernel_size=3, stride=2, padding=0)
-        self.deconv2 = nn.ConvTranspose2d(feat_maps * cfg.color_channels, feat_maps * cfg.color_channels, kernel_size=3, stride=2, padding=0)
-        self.deconv3 = nn.ConvTranspose2d(feat_maps * cfg.color_channels, feat_maps* cfg.color_channels, kernel_size=3, stride=2, padding=0)
-        self.conv1 = nn.Conv2d(feat_maps* cfg.color_channels, feat_maps* cfg.color_channels, kernel_size=3, stride=1, padding='same')
-        self.conv2 = nn.Conv2d(feat_maps * cfg.color_channels, feat_maps * cfg.color_channels, kernel_size=3, stride=1, padding='same')
-        self.conv3 = nn.Conv2d(feat_maps * cfg.color_channels, cfg.out_channels * cfg.color_channels, kernel_size=4, stride=1, padding='valid')
+        # self.deconv2 = nn.ConvTranspose2d(feat_maps * cfg.color_channels, feat_maps * cfg.color_channels, kernel_size=3, stride=2, padding=0)
+        # self.deconv3 = nn.ConvTranspose2d(feat_maps * cfg.color_channels, feat_maps* cfg.color_channels, kernel_size=3, stride=2, padding=0)
+        self.conv1 = nn.Conv2d(feat_maps* cfg.color_channels, feat_maps* cfg.color_channels, kernel_size=3, stride=1, padding='valid')
+        # self.conv2 = nn.Conv2d(feat_maps * cfg.color_channels, feat_maps * cfg.color_channels, kernel_size=3, stride=1, padding='same')
+        # self.conv3 = nn.Conv2d(feat_maps * cfg.color_channels, cfg.out_channels * cfg.color_channels, kernel_size=4, stride=1, padding='valid')
     
     def forward(self, x):
-       
-
-
-        # x = x * 100
-        # device = x.get_device() if x.is_cuda else 'cpu'
-        # i = torch.zeros(x.shape[0], 100,100).to(device)
-        # idx = x.long()
-        # i[torch.arange(x.shape[0]).long(), idx[:, 0], idx[:, 1]] = 1.
-        # print(i[0].argmax(dim=0), i[0].argmax(dim=0).argmax())
-        # print(idx[0])
-        # t = i.argmax(dim=1)
-        # coords_x, coords_y = t.max(dim=1)#, t.argmax(dim=1)
-        # print(coords_x, coords_y)
-        # assert torch.allclose(idx, torch.cat([coords_x.unsqueeze(1), coords_y.unsqueeze(1)], dim=1))
-        # i = i.unsqueeze(1)
-        # x = self.relu(self.conv0(i)
-
         x = self.mlp_2(self.relu(self.mlp_1(x)))
-        x = self.relu(self.conv0(x.reshape(x.shape[0], 1, 12, 12)))
+        x = self.relu(self.conv0(x.reshape(x.shape[0], 1, 13, 13)))
         x = self.conv1(self.relu(self.deconv1(x)))
-        x = self.conv2(self.relu(self.deconv2(x)))
-        x = self.conv3(self.relu(self.deconv3(self.relu(x))))
+        # x = self.conv2(self.relu(self.deconv2(x)))
+        # x = self.conv3(self.relu(self.deconv3(self.relu(x))))
         return x
 
 
@@ -315,22 +298,23 @@ class PixelCNNDecoder(nn.Module):
         cond = self.features(h) # batch, channels, width, height
         if n_samples > 1:
             cond = cond.repeat_interleave(n_samples, dim=0) # batch*n, channels, width, height
-
+        
         width, height = cond.shape[-2:]
         _device = h.get_device() if device is None else device
         sample = torch.zeros(cond.shape[0], self.data_channels, width, height).to(_device)
+        printarr(cond, sample)
         with tqdm(total=width*height) as pbar:
             for i in range(width):
                 for j in range(height):
                     for c in range(self.data_channels):
-                        out = self.forward(sample/(self.color_levels-1), h)
+                        out = self._pixelcnn_stack(sample/(self.color_levels-1), cond)
                         out = out[..., c, i, j]
                         out = torch.softmax(out, dim=1)
                         pixel = torch.multinomial(out, 1).squeeze(-1)
                         sample[..., :, c, i, j] = pixel
                     pbar.update(1)
         if n_samples > 1:
-            sample = sample.reshape(n_samples, -1, self.data_channels, width, height)
+            sample = sample.reshape(-1, n_samples, self.data_channels, width, height)
         return sample
 
 

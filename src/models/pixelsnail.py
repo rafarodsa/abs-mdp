@@ -98,6 +98,7 @@ class AttentionBlock(nn.Module):
                                 )
         
         self.dropout = nn.Dropout(dropout) if dropout > 0 else None
+        self.register_buffer('causal_order', causal_mask.sum(-1, keepdims=True))
         self.register_buffer('causal_mask', causal_mask)
 
     def forward(self, x, residual, background):
@@ -148,8 +149,11 @@ class AttentionBlock(nn.Module):
         if self.dropout is not None:
             logits = self.dropout(logits)
 
-        weights = F.softmax(logits, dim=2) * self.causal_mask.unsqueeze(1) # b x n_heads x (hxw) x (hxw)
-        weights = weights / (torch.sum(weights, dim=2, keepdim=True) + 1e-8) # b x (hxw) x (hxw)  # re-normalize
+        
+        weights = F.softmax(logits + (1-self.causal_mask) * -1e10, dim=3)    # b x n_heads x (hxw) x (hxw)
+        weights = weights * (self.causal_order != 0).unsqueeze(0)  # zero out first variable
+
+
         out = torch.einsum('bhtj, bhvj->bhvt', weights, values) # b x n_heads x c // n_heads x (hxw)
         
         ####### TEST ########
@@ -190,7 +194,7 @@ class SNAILBlock(nn.Module):
     
 
 class PixelSNAIL(nn.Module):
-    def __init__(self, input_dims=(1, 50, 50), n_channels=256, kernel_size=3, key_channels=16, value_channels=128, n_blocks=4, n_residuals=4, n_log_components=10, dropout=0.5):
+    def __init__(self, input_dims=(1, 50, 50), n_channels=256, kernel_size=2, key_channels=16, value_channels=128, n_blocks=4, n_residuals=4, n_log_components=10, dropout=0.5):
         super().__init__()
         self.n_channels = n_channels
         self.n_residuals = n_residuals
@@ -269,26 +273,30 @@ def build_ema_optimizer(optimizer_cls):
 
 
 class PixelSNAILTrainerMNIST(L.LightningModule):
-    def __init__(self, n_channels=64, n_blocks=10, lr=0.8e-4):
+    def __init__(self, n_channels=128, n_blocks=10, lr=1e-4):
         super().__init__()
         self.lr = lr
-        self.model = PixelSNAIL(input_dims=(1, 28, 28), n_channels=n_channels, n_blocks=n_blocks)
+        self.model = PixelSNAIL(input_dims=(1, 28, 28), n_channels=n_channels, n_blocks=n_blocks, dropout=0.1)
         self.embedding = nn.Embedding(10, n_channels)
         self.save_hyperparameters()
     
     def forward(self, x, cond=None):
-        # cond = self.embedding(cond).reshape(x.shape[0], -1, 1, 1)
-        cond=None
+        cond = self.embedding(cond).reshape(x.shape[0], -1, 1, 1)
+        # cond=None
         return self.model(x, cond)
     
     def _run_step(self, x, label):
         # printarr(x)
         x = x * 2 - 1 
-        params = self.forward(x, label).permute(0, 2, 3, 1).contiguous()
+        params = self.forward(x, label).permute(0, 2, 3, 1).contiguous().unsqueeze(1) # permute and add color channel
         n_c = self.model.n_log_components
+
         logistic = QuantizedLogisticMixture(loc=params[..., :n_c], log_scale=params[..., n_c:2*n_c], logit_probs=params[..., 2*n_c:])
         log_probs = logistic.log_prob(x)
         loss = -log_probs.mean()
+        # out = self.forward(x, label)
+        # loss = F.cross_entropy(out, ((x+1)*255/2).long().squeeze(), reduction='sum')/x.shape[0]
+
         return loss
     
     def training_step(self, batch, batch_idx):
@@ -312,25 +320,25 @@ class PixelSNAILTrainerMNIST(L.LightningModule):
         return n_bits
 
     def configure_optimizers(self):
-        optimizer = build_ema_optimizer(torch.optim.Adam)(self.parameters(), lr=self.lr)
-        # optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        # optimizer = build_ema_optimizer(torch.optim.RAdam)(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.RAdam(self.parameters(), lr=self.lr)
         return optimizer
     
 
-def test_pixelsnail_mnist():
+def test_pixelsnail_mnist(generate=False):
     from torchvision.datasets import MNIST
     from torchvision import transforms
     from torch.utils.data import DataLoader
 
     model = PixelSNAILTrainerMNIST()
-    trainer = L.Trainer(max_epochs=20, accelerator='gpu')
+    trainer = L.Trainer(max_epochs=20, accelerator='gpu', limit_train_batches=0.2, limit_val_batches=0.1)
     _transforms = transforms.Compose([transforms.ToTensor(), transforms.Grayscale()])
     
     dataset = MNIST('data', train=True, download=True, transform=_transforms)
     # split
-    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [55000, 5000])
-    train_dataloader = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=4)
-    val_dataloader = DataLoader(val_dataset, batch_size=64, shuffle=False, num_workers=4)
+    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [0.9, 0.1])
+    train_dataloader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=4)
+    val_dataloader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=4)
     # train
     trainer.fit(model, train_dataloader, val_dataloader)
     # test
@@ -339,5 +347,8 @@ def test_pixelsnail_mnist():
     trainer.test(model, test_dataloader)
 
 
+
+
 if __name__=='__main__': 
+    torch.set_float32_matmul_precision('medium')
     test_pixelsnail_mnist()

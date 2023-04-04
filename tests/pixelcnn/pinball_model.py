@@ -49,7 +49,7 @@ class TestDataset(PinballDataset_):
         self.s, self.next_s = load_states(self.debug)
         self._data = list(zip(self.data, self.s, self.next_s))
         n = len(self.data)
-        self.data = self.data[:n//6]
+        self.data = self.data[:n]
 
     def load_debug(self):
         with zipfile.ZipFile(self.zfile_name, 'r') as z:
@@ -60,8 +60,9 @@ class TestDataset(PinballDataset_):
     def __getitem__(self, idx):
         datum = super().__getitem__(idx)
         s = datum.info['state'].astype(np.float32)
-        noise = torch.randn_like(datum.obs) * 5 / 255
-        return (datum.obs+noise, s)#, datum.next_obs, self.next_s[idx])
+        noise = torch.randn_like(datum.obs) * 1 / 255
+        obs = torch.clamp(datum.obs+noise, min=0, max=1)
+        return (obs, s)#, datum.next_obs, self.next_s[idx])
     
 
 logger = logging.getLogger(__name__)
@@ -75,22 +76,11 @@ class PinballDecoderModel(pl.LightningModule):
         self.save_hyperparameters()
 
     def forward(self, obs, s):
-        # print(obs.shape, s.shape)
-        # cond = self.deconv(s)
         return self.decoder(obs, s)
 
     def _run_step(self, obs, s):
         s = s[..., :2]
-
         loss = -self.decoder.log_prob(obs, s).mean()
-
-        # out = self.forward(obs, s)
-        # idx = (obs * 255).long()
-        # loss = F.cross_entropy(out.reshape(obs.shape[0], 256, -1), idx.reshape(obs.shape[0], -1), reduction='sum')/obs.shape[0]
-        # log_probs = F.log_softmax(out, dim=1)
-        # log_probs = log_probs.gather(1, idx.unsqueeze(1).long()).squeeze(1)
-        # loss = -log_probs.reshape(x.shape[0], -1).sum(1).mean()
-        # assert torch.allclose(loss, _loss)
         return loss
 
     def training_step(self, batch, batch_idx):
@@ -255,7 +245,8 @@ if __name__=='__main__':
     batch = next(iter(val_loader))
     choice = np.random.choice(batch[0].shape[0], 3)
     
-    coords = (batch[1][choice, :2] * 100).byte().numpy()
+    grid_size = 25
+    coords = (batch[1][choice, :2] * grid_size).byte().numpy()
 
 
     obs = (batch[0][choice] * 255).numpy().astype(np.uint8)[:, 0] # remove channel dim
@@ -365,12 +356,13 @@ if __name__=='__main__':
 
         print(f'Sampling... {args.n_samples} samples')
         with torch.no_grad():
+            model.eval()
             h = torch.from_numpy(states[choice, :2]).to(device)
             # d = decoder.to(device).distribution(h)
             _obs = torch.from_numpy(_obs/255).to(device)
             # printarr(h, _obs)
             # print(d.log_prob(_obs))
-            s = model.to(device).decoder.sample(h)
+            s = model.to(device).decoder.sample(h, n_samples=10).mean(dim=1)
         
         
         s = s/(cfg.model.decoder.dist.color_levels-1) * 255
