@@ -307,8 +307,10 @@ class PinballViewDistractor(PinballView):
         if self.distractors is not None:
             self.background_surface = pygame.Surface(self.screen.get_size())
             d = np.random.choice(len(self.distractors))
-            surf = pygame.surfarray.make_surface((self.distractors[d] * 255).astype(np.uint8))
-            self.background_surface.blit(surf, [0, 0])
+            img = (self.distractors[d] * 255).astype(np.uint8)
+            surf = pygame.surfarray.make_surface(img)
+            center = np.array(self.screen.get_size()) / 2 - np.array(img.shape)[:2]/ 2
+            self.background_surface.blit(surf, center)
             for obs in self.model.obstacles:
                 pygame.draw.polygon(self.background_surface, self.DARK_GRAY, list(map(self._to_pixels, obs.points)), 0)
 
@@ -329,10 +331,10 @@ if __name__=="__main__":
     transforms = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])
     trainset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transforms)
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=1, shuffle=True, num_workers=2)
-    dataiter = [d.squeeze().permute(1,0).numpy() for d, l in iter(trainloader)]
+    dataiter = [d.expand(3,-1,-1,-1).squeeze().permute(2,1,0).numpy() for d, l in iter(trainloader)]
 
 
-    size = 28
+    size = 50
 
     pinball = PinballDistractors(
                                     config="/Users/rrs/Desktop/abs-mdp/envs/pinball/configs/pinball_simple_single.cfg", 
