@@ -329,7 +329,7 @@ if __name__=="__main__":
     transforms = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])
     trainset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transforms)
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=1, shuffle=True, num_workers=2)
-    dataiter = [d.squeeze().numpy() for d, l in iter(trainloader)]
+    dataiter = [d.squeeze().permute(1,0).numpy() for d, l in iter(trainloader)]
 
 
     size = 28
