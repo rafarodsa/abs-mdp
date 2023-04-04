@@ -365,6 +365,7 @@ if __name__=='__main__':
 
         print(f'Sampling... {args.n_samples} samples')
         with torch.no_grad():
+            model.eval()
             h = torch.from_numpy(states[choice, :2]).to(device)
             # d = decoder.to(device).distribution(h)
             _obs = torch.from_numpy(_obs/255).to(device)

@@ -312,8 +312,8 @@ class PixelSNAILTrainerMNIST(L.LightningModule):
         return n_bits
 
     def configure_optimizers(self):
-        optimizer = build_ema_optimizer(torch.optim.Adam)(self.parameters(), lr=self.lr)
-        # optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        # optimizer = build_ema_optimizer(torch.optim.Adam)(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.RAdam(self.parameters(), lr=self.lr)
         return optimizer
     
 

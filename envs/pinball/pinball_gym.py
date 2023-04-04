@@ -199,15 +199,16 @@ class PinballEnvContinuous(PinballEnv):
     GOAL_REWARD = 10000
     def __init__(self, config, start_pos=None, target_pos=None, width=500, height=500, render_mode=None):
         super().__init__(config, start_pos, target_pos, width, height, render_mode)
-        self.action_space = spaces.Box(low=-self.MAX_SPEED, high=self.MAX_SPEED, shape=(2,), dtype=np.float64)
+        self.action_space = spaces.Box(low=-self.MAX_SPEED, high=self.MAX_SPEED, shape=(2,), dtype=np.float32)
         self.pinball = PinballModelContinuous(config)
     
     def reset(self, state=None):
         if state is None:
             state = self.sample_initial_positions(1)[0]
        
-        assert self.is_valid_state(state), f"Invalid state [{state[0]}, {state[1]}]"
-       
+        if self.is_valid_state(state):
+            raise ValueError(f"Invalid state [{state[0]}, {state[1]}]")
+            
         self.pinball.set_initial_state(state)
         return state
 

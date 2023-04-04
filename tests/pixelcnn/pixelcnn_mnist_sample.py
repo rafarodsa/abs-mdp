@@ -41,9 +41,7 @@ def mix_logistic_sample(locs, log_scales, mix_logits, n_samples=1):
     _mu = torch.gather(locs, dim=-1, index=mix_idx.long()) # batch x n_samples
     _s = torch.gather(scales, dim=-1, index=mix_idx.long())
     samples = _mu + _s * (torch.log(u) - torch.log(1.-u))
-    # printarr(samples, _mu, _s, u, mix_idx, probs)
     return torch.clamp(samples, min=-1, max=1)
-    # return samples
 
 def sigmoid(x):
     return np.where(
