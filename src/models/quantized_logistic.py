@@ -46,9 +46,7 @@ class QuantizedLogisticMixture(torch.distributions.Distribution):
         return torch.sum(torch.logsumexp(log_probs, dim=-1).reshape(x.shape[0], -1), dim=-1)
         
 
-
-
-
+    
 
 
         

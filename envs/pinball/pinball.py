@@ -408,9 +408,14 @@ class PinballView:
         """ Blit the ball onto the background surface """
         self.screen.blit(self.background_surface, (0, 0))
         
-        pygame.draw.circle(self.screen, self.BALL_COLOR,
-                           self._to_pixels(self.model.ball.position), int(self.model.ball.radius*self.screen.get_width()))
-
+        rad = int(self.model.ball.radius*self.screen.get_width())
+        pos = self._to_pixels(self.model.ball.position)
+        if rad >=1:
+            pygame.draw.circle(self.screen, self.BALL_COLOR, pos, rad)
+        else:
+            # draw pixel
+            self.screen.fill(self.BALL_COLOR, (pos, (1, 1)))
+                               
 
 def run_pinballview(width, height, configuration):
     """ Controller function for a :class:`PinballView`
