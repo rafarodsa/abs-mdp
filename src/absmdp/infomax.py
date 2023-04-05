@@ -46,20 +46,23 @@ class InfomaxAbstraction(pl.LightningModule):
 		z = torch.tanh(self.encoder(state))
 		t_in = torch.cat([z, action], dim=-1)
 		q_s_prime = self.grounding.distribution(self.transition.distribution(t_in).mean + z)
+		# q_s_prime = self.grounding.distribution(self.transition.distribution(t_in).mean)
 		q_s = self.decoder.distribution(z) 
 		return q_s, q_s_prime
 
 	def _run_step(self, s, a, next_s, initset_s):
 		# sample encoding of (s, s')
-		z = torch.tanh(self.encoder(s))
-		next_z  = torch.tanh(self.encoder(next_s))
+		z = torch.tanh(self.encoder(s)) 
+		z = z + torch.randn_like(z) * 1e-3
+		next_z = torch.tanh(self.encoder(next_s)) + torch.randn_like(z) * 1e-3
 
 		actions = a # dims: (batch, n_actions)
 		inferred_z = z #torch.randn(z.shape).to(z.get_device()) * q_z.std + z 
 		
 		next_z_pred, _, _ = self.transition.sample_n_dist(torch.cat([inferred_z, actions], dim=-1))
 		next_z_pred = next_z_pred.squeeze() + z
-		next_s_q_pred = self.grounding.distribution(next_z_pred.squeeze())
+		# next_z_pred = next_z_pred.squeeze()
+		next_s_q_pred = self.grounding.distribution(next_z.squeeze())
 		infomax_loss = self.infomax_loss(next_s, next_s_q_pred, n_samples=1)
 		
 		transition_loss = self.transition_loss(z.detach(), next_z.detach(), a)
@@ -113,6 +116,7 @@ class InfomaxAbstraction(pl.LightningModule):
 	
 	def transition_loss(self, z, next_z, action):
 		return -self.transition.distribution(torch.cat([z, action], dim=-1)).log_prob(next_z-z)
+		# return -self.transition.distribution(torch.cat([z, action], dim=-1)).log_prob(next_z)
 
 	def inference_loss(self, z, inferred_q):
 		return -inferred_q.detach().log_prob(z)

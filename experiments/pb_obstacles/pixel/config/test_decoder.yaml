@@ -54,7 +54,7 @@ model:
       n_layers: 10
       out_width: 25
       out_height: 25
-      color_levels: 16
+      color_levels: 256
   transition: ${loadcfg:${experiment_cwd}/config/models/transition_gaussian.yaml}
   init_class: ${loadcfg:${experiment_cwd}/config/models/init_class_mlp.yaml}
   reward: ${loadcfg:${experiment_cwd}/config/models/reward_mlp.yaml}

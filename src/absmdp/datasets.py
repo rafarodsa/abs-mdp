@@ -169,7 +169,8 @@ class PinballDataset_(torch.utils.data.Dataset):
 
     def _process_pixel_obs(self, obs):
         r,g,b = obs[:, :, 0], obs[:, :, 1], obs[:, :, 2]
-        return (0.2989 * r + 0.5870 * g + 0.1140 * b)[np.newaxis] / 255
+        noise = np.random.randn(*r.shape) * 1/255
+        return np.clip((0.2989 * r + 0.5870 * g + 0.1140 * b)[np.newaxis] / 255 + noise, 0, 1)
     
     def _filter_failed_executions(self, data):
         return [datum for datum in data if datum.executed == 1]

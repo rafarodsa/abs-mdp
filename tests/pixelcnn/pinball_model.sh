@@ -2,8 +2,8 @@
 
 # SLURM SUBMIT SCRIPT
 #SBATCH --nodes=1             # This needs to match Trainer(num_nodes=...)
-#SBATCH --gres=gpu:2
-#SBATCH --ntasks-per-node=2   # This needs to match Trainer(devices=...)
+#SBATCH --gres=gpu:3
+#SBATCH --ntasks-per-node=3   # This needs to match Trainer(devices=...)
 #SBATCH --mem=32g
 #SBATCH --time=0-12:00:00
 #SBATCH -p 3090-gcondo
@@ -26,4 +26,4 @@ export PYTHONFAULTHANDLER=1
 # export NCCL_SOCKET_IFNAME=^docker0,lo
 
 # run script from above
-srun python tests/pixelcnn/pinball_model.py --config experiments/pb_obstacles/pixel/config/test_decoder.yaml --devices 2 --epochs 2500 --batch-size 64 --lr 1e-4 --strategy ddp --save-path ./ckpts_full --from-ckpt ckpts_full/pinball_decoder.ckpt
+srun python tests/pixelcnn/pinball_model.py --config experiments/pb_obstacles/pixel/config/test_decoder.yaml --devices 3 --epochs 600 --batch-size 64 --lr 1e-5 --strategy ddp --save-path ./ckpts-25

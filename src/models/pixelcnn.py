@@ -192,7 +192,6 @@ class PixelCNNDistribution(nn.Module):
             self.h = h
         
         def forward(self, x):
-            print(self.h)
             return self.decoder._pixelcnn_stack(x, self.h)
             
         def log_prob(self, x):
