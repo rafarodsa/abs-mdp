@@ -106,7 +106,12 @@ def collect_trajectory(env, options, obs_type='simple', max_exec_time=200, horiz
 
         option_n = np.random.choice(len(options), p=initiation_mask_s/np.sum(initiation_mask_s)) # sample option uniformly
         option = options[option_n]
-        o, next_o, rewards, executed, duration, info = execute_option(env, np.array(s), option, obs_type=obs_type, max_exec_time=max_exec_time)
+        try:
+            o, next_o, rewards, executed, duration, info = execute_option(env, np.array(s), option, obs_type=obs_type, max_exec_time=max_exec_time)
+        except:
+            print('Error executing option')
+            trajectory = []
+            break
         next_s = next_o if obs_type == 'simple' else info['next_state']
         rewards = rewards + [0] * (max_exec_time - len(rewards))
         done = info['done']

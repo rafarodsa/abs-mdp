@@ -165,30 +165,34 @@ class PixelCNNAutoencoder(pl.LightningModule):
 
     def _run_step(self, obs):
         z = self.encoder(obs)
-        return -self.decoder.decoder.log_prob(obs, z).mean()
+        z_norm = z.pow(2).sum(-1)
+        z_norm = torch.minimum(z_norm-1e-2, torch.zeros_like(z_norm))
+        z = z + torch.randn_like(z) * 1e-3
+        return -self.decoder.decoder.log_prob(obs, z).mean(), -z_norm.mean()
 
     def training_step(self, batch, batch_idx):
         obs, s = batch
-        loss = self._run_step(obs)
+        nll_loss, norm = self._run_step(obs)
+        loss = nll_loss + norm
         self.log('train_loss', loss)
         return loss
 
     def validation_step(self, batch, batch_idx):
         obs, s = batch
-        loss = self._run_step(obs)
+        loss, _ = self._run_step(obs)
         self.log('val_loss', loss,prog_bar=True)
         logger.info(f'Validation Loss: {loss}')
         return loss
     
     def test_step(self, batch, batch_idx):
         obs, s = batch
-        loss = self._run_step(obs)
+        loss, _ = self._run_step(obs)
         self.log('test_loss', loss, prog_bar=True)
         return loss
 
     def configure_optimizers(self):
         print(self.lr)
-        return torch.optim.Adam(self.parameters(), lr=self.lr)
+        return torch.optim.RMSprop(self.parameters(), lr=self.lr)
      
 def load_cfg(unknown_args, path='experiments/pb_obstacles/pixel/config/config.yaml'):
     cfg = oc.load(path)
@@ -217,7 +221,7 @@ if __name__=='__main__':
     parser.add_argument('--devices', type=int, default=1)
     parser.add_argument('--n-samples', type=int, default=2)
     parser.add_argument('--tag', type=str, default=None)
-    parser.add_argument('--lr', type=float, default=3e-5)
+    parser.add_argument('--lr', type=float, default=2e-4)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--strategy', type=str, default=None)
     parser.add_argument('-n', type=int, default=1)
@@ -275,6 +279,8 @@ if __name__=='__main__':
         model = PinballEncoderModel(model_cfg)
     elif args.model == 'autoencoder':
         oc.resolve(cfg)
+        model_cfg = cfg
+        model_cfg.lr = args.lr
         model = PixelCNNAutoencoder(cfg)
     else:
         raise ValueError(f'{args.model} is not known')
@@ -357,12 +363,14 @@ if __name__=='__main__':
         print(f'Sampling... {args.n_samples} samples')
         with torch.no_grad():
             model.eval()
-            h = torch.from_numpy(states[choice, :2]).to(device)
-            # d = decoder.to(device).distribution(h)
             _obs = torch.from_numpy(_obs/255).to(device)
-            # printarr(h, _obs)
-            # print(d.log_prob(_obs))
-            s = model.to(device).decoder.sample(h, n_samples=10).mean(dim=1)
+            if args.model == 'decoder':
+                h = torch.from_numpy(states[choice, :2]).to(device)
+                s = model.to(device).decoder.sample(h, n_samples=10).mean(dim=1)
+            else:
+                h = model.to(device).encoder(_obs)
+                s = model.to(device).decoder.decoder.sample(h, n_samples=10).mean(dim=1)
+            
         
         
         s = s/(cfg.model.decoder.dist.color_levels-1) * 255

@@ -49,6 +49,7 @@ def train_mdp(cfg, ckpt):
     trainer = pl.Trainer(
                         accelerator=cfg.accelerator,
                         devices=cfg.devices,
+                        num_nodes=1,
                         max_epochs=cfg.epochs, 
                         auto_scale_batch_size=True,
                         default_root_dir=f'{cfg.save_path}/mdp_train',
