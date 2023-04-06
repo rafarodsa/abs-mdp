@@ -7,7 +7,7 @@ features:
   kernel_size: 4
   out_dim: ${model.latent_dim}
   residual:
-    n_layers: 5
+    n_layers: 3
     in_channels: ${model.encoder.features.feat_maps}
     out_channels: 64
     kernel_size: 5

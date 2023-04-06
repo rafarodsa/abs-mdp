@@ -200,8 +200,13 @@ class PinballEnvContinuous(PinballEnv):
             state = self.sample_initial_positions(1)[0]
        
         if not self.is_valid_state(state):
+<<<<<<< HEAD
             print(f"Invalid state [{state[0]}, {state[1]}]")
        
+=======
+            raise ValueError(f"Invalid state [{state[0]}, {state[1]}]")
+            
+>>>>>>> pixel-models
         self.pinball.set_initial_state(state)
         return state
 
