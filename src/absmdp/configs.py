@@ -67,10 +67,3 @@ class TrainerConfig:
     loss: VAELossConfig = MISSING
     model: AbstractMDPConfig = MISSING
     data: Any = MISSING
-
-
-@dataclass
-class ExperimentConfig:
-    name: str = MISSING
-    trainer: TrainerConfig = TrainerConfig()
-    seed: int = 0

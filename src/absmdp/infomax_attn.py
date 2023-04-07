@@ -9,11 +9,11 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pytorch_lightning as pl
+import lightning as pl
 
 
 from src.models.factories import build_distribution, build_model
-
+from src.models.optimizer_factories import build_optimizer, build_scheduler
 from src.utils.symlog import symlog
 from src.absmdp.configs import TrainerConfig
 
@@ -29,6 +29,7 @@ class InfomaxAbstraction(pl.LightningModule):
 		super().__init__()
 		oc.resolve(cfg)
 		self.save_hyperparameters()
+		self.cfg = cfg
 		self.data_cfg = cfg.data
 		self.obs_dim = cfg.model.obs_dims
 		self.latent_dim = cfg.model.latent_dim
@@ -47,7 +48,7 @@ class InfomaxAbstraction(pl.LightningModule):
 		self.grounding = build_distribution(cfg.model.decoder)
 		self.decoder = build_distribution(cfg.model.decoder)
 		self.initsets = build_model(cfg.model.init_class)
-		self.lr = cfg.lr
+		self.lr = cfg.optimizer.params.lr
 		self.hyperparams = cfg.loss
 		self.kl_const =  self.hyperparams.kl_const
 
@@ -55,7 +56,6 @@ class InfomaxAbstraction(pl.LightningModule):
 		z = self.encoder(state)
 		t_in = torch.cat([z, action], dim=-1)
 		next_z = self.transition.distribution(t_in).mean + z
-		# q_s_prime = self.grounding.distribution(torch.cat([next_z, torch.zeros_like(action)], dim=-1))
 		q_s_prime = self.grounding.distribution(t_in)
 		q_s = self.decoder.distribution(torch.cat([next_z, torch.zeros_like(action)], dim=-1))
 		return q_s, q_s_prime
@@ -68,12 +68,7 @@ class InfomaxAbstraction(pl.LightningModule):
 		next_z  = self.encoder(next_s) + torch.rand_like(z) * 1e-2
 
 		actions = a # dims: (batch, n_actions)
-		inferred_z = z #torch.randn(z.shape).to(z.get_device()) * q_z.std + z 
-		
-		# t_in = self.projection(F.relu(self.attn(inferred_z, actions)))
 		t_in = z.squeeze()
-		# next_z_pred, _, _ = self.transition.sample_n_dist(torch.cat([t_in, actions], dim=-1))
-		# next_z_pred = next_z_pred.squeeze() + z
 		t_in = torch.cat([t_in, actions], dim=-1)
 		next_s_q_pred = self.grounding.distribution(t_in.squeeze())
 		infomax_loss = self.infomax_loss(next_s, next_s_q_pred, n_samples=1)
@@ -85,18 +80,13 @@ class InfomaxAbstraction(pl.LightningModule):
 		transition_loss = self.transition_loss(z.detach(), next_z.detach(), a)
 
 		# decode next latent state
-		# q_next_s = self.decoder.distribution(next_z)
-		# q_s = self.decoder.distribution(z)
 		self.decoder.load_state_dict(self.grounding.state_dict())
-		
 		q_s = self.decoder.freeze().distribution(z_in)
 		info_loss_z = -self.info_bottleneck(s, q_s) + info_loss_z
 		
 		# initsets
 		initset_pred = torch.sigmoid(self.initsets(z))
 		initset_loss = F.binary_cross_entropy(initset_pred, initset_s)
-
-		
 
 		return infomax_loss, transition_loss, info_loss_z, initset_loss, z_norm
 
@@ -136,7 +126,6 @@ class InfomaxAbstraction(pl.LightningModule):
 		attn_value = torch.einsum('bh,bhv->bv', attn_weights, value)
 		return attn_value
 
-
 	def infomax_loss(self, next_s, q_next_s, n_samples=1):
 		if n_samples == 1:
 			return -q_next_s.log_prob(next_s)
@@ -154,7 +143,7 @@ class InfomaxAbstraction(pl.LightningModule):
 
 	def training_step(self, batch, batch_idx):
 		loss, logs = self.step(batch, batch_idx)
-		self.log_dict({f"train_{k}": v for k, v in logs.items()}, on_step=True, on_epoch=False)
+		self.log_dict({f"train_{k}": v for k, v in logs.items()}, on_step=True, on_epoch=False, logger=True)
 		self.log_dict({'nll': logs['infomax']}, on_step=True, prog_bar=True, logger=True)
 		return loss
 
@@ -167,17 +156,17 @@ class InfomaxAbstraction(pl.LightningModule):
 		return nll_loss
 		
 	def configure_optimizers(self):
-
-		optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
-		# scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
-		# return {"optimizer": optimizer, "scheduler": scheduler, "monitor": "nll_loss"}
-		scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1, end_factor=0.1, total_iters=750)
+		optimizer = build_optimizer(self.cfg.optimizer, self.parameters())
+		scheduler = build_scheduler(self.cfg.scheduler, optimizer)
 		return {"optimizer": optimizer, "scheduler": scheduler}
+	
 	@staticmethod
 	def load_config(path):
 		try:
 			with open(path, "r") as f:
-				cfg = oc.merge(oc.structured(TrainerConfig), oc.load(f))
+				#TODO add structured configs when they have settled.
+				# cfg = oc.merge(oc.structured(TrainerConfig), oc.load(f))
+				cfg = oc.load(f)
 				return cfg
 		except FileNotFoundError:
 			raise ValueError(f"Could not find config file at {path}")

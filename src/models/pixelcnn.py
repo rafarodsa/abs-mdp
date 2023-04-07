@@ -161,8 +161,6 @@ class PixelCNNStack(nn.Module):
 class DeconvBlock(nn.Module):
     def __init__(self, cfg):
         super().__init__()
-        # self.mlp = nn.Linear(cfg.input_dim, cfg.in_channels)
-
         feat_maps = cfg.out_channels
         hidden_dim = cfg.mlp_hidden
         self.mlp_1 = nn.Linear(cfg.input_dim, hidden_dim)
@@ -170,18 +168,12 @@ class DeconvBlock(nn.Module):
         self.relu = nn.ReLU()
         self.conv0 = nn.Conv2d(1, feat_maps * cfg.color_channels, kernel_size=1, stride=1, padding='same')
         self.deconv1 = nn.ConvTranspose2d(feat_maps * cfg.color_channels, feat_maps * cfg.color_channels, kernel_size=3, stride=2, padding=0)
-        # self.deconv2 = nn.ConvTranspose2d(feat_maps * cfg.color_channels, feat_maps * cfg.color_channels, kernel_size=3, stride=2, padding=0)
-        # self.deconv3 = nn.ConvTranspose2d(feat_maps * cfg.color_channels, feat_maps* cfg.color_channels, kernel_size=3, stride=2, padding=0)
         self.conv1 = nn.Conv2d(feat_maps* cfg.color_channels, feat_maps* cfg.color_channels, kernel_size=3, stride=1, padding='valid')
-        # self.conv2 = nn.Conv2d(feat_maps * cfg.color_channels, feat_maps * cfg.color_channels, kernel_size=3, stride=1, padding='same')
-        # self.conv3 = nn.Conv2d(feat_maps * cfg.color_channels, cfg.out_channels * cfg.color_channels, kernel_size=4, stride=1, padding='valid')
-    
+
     def forward(self, x):
         x = self.mlp_2(self.relu(self.mlp_1(x)))
         x = self.relu(self.conv0(x.reshape(x.shape[0], 1, 13, 13)))
         x = self.conv1(self.relu(self.deconv1(x)))
-        # x = self.conv2(self.relu(self.deconv2(x)))
-        # x = self.conv3(self.relu(self.deconv3(self.relu(x))))
         return x
 
 
@@ -272,7 +264,7 @@ class PixelCNNDecoder(nn.Module):
         # TODO: maybe reshape and then 1-conv. or masked 1-conv for output
         self.conv = nn.Conv2d(cfg.feats_maps * self.data_channels, 128, kernel_size=1, stride=1)
         self.output = nn.Conv2d(128, self.color_levels * self.data_channels, kernel_size=1, stride=1, padding='same')
-        # self.output = MaskedConv2d(cfg.feats_maps * self.data_channels, 256 * self.data_channels, kernel_size=1, stride=1, padding='same', mask_type='A')
+        
     def forward(self, x, h):
         '''
             x: input image/generating image

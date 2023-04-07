@@ -1,44 +1,69 @@
-import pytorch_lightning as pl
+import lightning as pl
 
 from src.absmdp.infomax_attn import InfomaxAbstraction, AbstractMDPTrainer
 from src.absmdp.mdp import AbstractMDP
 
-
 from src.absmdp.datasets import PinballDataset
 from omegaconf import OmegaConf as oc
 import argparse
-import torch
+import torch, random, numpy as np
 import logging
-from pytorch_lightning.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks import ModelCheckpoint, ModelSummary, RichProgressBar
+from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
+
+
+def set_seeds(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.enabled = False
+    np.random.seed(seed)
+    random.seed(seed)
+
 
 # load the config
-def save_model(trainer, save_path):
-    pass
-
-def run(cfg, ckpt=None):
+def run(cfg, ckpt=None, args=None):
     
+    set_seeds(cfg.seed)
+
     checkpoint_callback = ModelCheckpoint(
         monitor='nll_loss',
         dirpath=f'{cfg.save_path}/phi_train/ckpts/',
         filename='infomax-pb-{epoch:02d}-{nll_loss:.2f}',
         save_top_k=3
     )
+
+    logger = TensorBoardLogger(
+        save_dir=f'{cfg.save_path}/phi_train/logs/',
+        name='infomax-pb',
+    )
+
+    csv_logger = CSVLogger(
+        save_dir=f'{cfg.save_path}/phi_train/csv_logs/',
+        name='infomax-pb',
+    )    
+
     model = InfomaxAbstraction(cfg) 
     data = PinballDataset(cfg.data)
+    
     # training
     trainer = pl.Trainer(
                         accelerator=cfg.accelerator,
                         devices=cfg.devices,
+                        num_nodes=args.num_nodes,
+                        strategy=args.strategy,
                         max_epochs=cfg.epochs, 
-                        auto_scale_batch_size=True,
                         default_root_dir=f'{cfg.save_path}/phi_train',
                         log_every_n_steps=15,
-                        callbacks=[checkpoint_callback]
+                        callbacks=[checkpoint_callback, ModelSummary(max_depth=1)], 
+                        logger=[logger, csv_logger],
                     )
     trainer.fit(model, data, ckpt_path=ckpt)
     return model
 
-def train_mdp(cfg, ckpt):
+def train_mdp(cfg, ckpt, args):
     if ckpt is None:
         raise ValueError("Must provide an abstraction checkpoint to train MDP. Run abstraction first.")
 
@@ -49,7 +74,8 @@ def train_mdp(cfg, ckpt):
     trainer = pl.Trainer(
                         accelerator=cfg.accelerator,
                         devices=cfg.devices,
-                        num_nodes=1,
+                        num_nodes=args.num_nodes,
+                        strategy=args.strategy,
                         max_epochs=cfg.epochs, 
                         auto_scale_batch_size=True,
                         default_root_dir=f'{cfg.save_path}/mdp_train',
@@ -68,7 +94,9 @@ def main():
     parser.add_argument('--debug', action='store_const', const=logging.DEBUG, dest='loglevel', default=logging.WARNING)
     parser.add_argument('--verbose', action='store_const', const=logging.INFO, dest='loglevel')
     parser.add_argument('--from-ckpt', type=str, default=None)
-
+    parser.add_argument('--num-nodes', type=int, default=1)
+    parser.add_argument('--strategy', type=str, default='auto')
+    parser.add_argument('--tag', type=str, default='')
 
     parser.add_argument('--train-mdp', action='store_true', default=False)
 
@@ -81,9 +109,9 @@ def main():
     cfg = oc.merge(cfg, cli_config)
 
     if not args.train_mdp:
-        run(cfg, args.from_ckpt)
+        run(cfg, args.from_ckpt, args)
     else:
-        train_mdp(cfg, args.from_ckpt)
+        train_mdp(cfg, args.from_ckpt, args)
 
 if __name__ == "__main__":
     main()

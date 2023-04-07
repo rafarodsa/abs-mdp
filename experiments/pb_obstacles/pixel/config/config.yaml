@@ -1,8 +1,17 @@
 # Config file for Pinball environment
-# Full State observation
 # Gridworld abstraction
 experiment_cwd: 'experiments/pb_obstacles/pixel'
-lr: 2e-4
+optimizer:
+  type: 'adam'
+  params:
+    lr: 2e-4
+scheduler:
+  type: 'linear_scheduler'
+  params:
+    start_factor: 1.
+    end_factor: 0.1
+    total_iters: 750
+seed: 0
 batch_size: 128
 epochs: 100
 accelerator: gpu

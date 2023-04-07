@@ -7,7 +7,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader, random_split
 
-import pytorch_lightning as pl
+import lightning as pl
 from functools import partial, reduce
 from typing import NamedTuple, List, Dict, Optional
 
