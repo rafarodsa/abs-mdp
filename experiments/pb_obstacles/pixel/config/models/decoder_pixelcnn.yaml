@@ -1,6 +1,6 @@
 features:
   type: deconv
-  input_dim: ${model.latent_dim}
+  input_dim: ${eval:${model.latent_dim} + ${model.n_options}}
   mlp_hidden: 128
   in_channels: 32
   out_width: 25

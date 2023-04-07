@@ -1,6 +1,6 @@
 import pytorch_lightning as pl
 
-from src.absmdp.infomax import InfomaxAbstraction, AbstractMDPTrainer
+from src.absmdp.infomax_attn import InfomaxAbstraction, AbstractMDPTrainer
 from src.absmdp.mdp import AbstractMDP
 
 

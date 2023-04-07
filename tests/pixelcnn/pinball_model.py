@@ -166,7 +166,7 @@ class PixelCNNAutoencoder(pl.LightningModule):
     def _run_step(self, obs):
         z = self.encoder(obs)
         z_norm = z.pow(2).sum(-1)
-        z_norm = torch.minimum(z_norm-1e-2, torch.zeros_like(z_norm))
+        z_norm = torch.minimum(z_norm-0.5, torch.zeros_like(z_norm)) - 0.1 * (torch.maximum(z_norm-0.5, torch.zeros_like(z_norm)) + 0.5)
         z = z + torch.randn_like(z) * 1e-3
         return -self.decoder.decoder.log_prob(obs, z).mean(), -z_norm.mean()
 
@@ -192,7 +192,7 @@ class PixelCNNAutoencoder(pl.LightningModule):
 
     def configure_optimizers(self):
         print(self.lr)
-        return torch.optim.RMSprop(self.parameters(), lr=self.lr)
+        return torch.optim.Adam(self.parameters(), lr=self.lr)
      
 def load_cfg(unknown_args, path='experiments/pb_obstacles/pixel/config/config.yaml'):
     cfg = oc.load(path)

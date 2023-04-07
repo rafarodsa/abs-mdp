@@ -3,15 +3,15 @@
 # Gridworld abstraction
 experiment_cwd: 'experiments/pb_obstacles/pixel'
 lr: 2e-4
-batch_size: 64
+batch_size: 128
 epochs: 100
 accelerator: gpu
 devices: 1
 save_path: ${experiment_cwd}/mdps
 loss:
   grounding_const: 1.
-  kl_const: 1.
-  transition_const: 0.1
+  kl_const: 0.9
+  transition_const: 0.01
   reward_const: 1
   tau_const: 1.
   initset_const: 0.
@@ -33,11 +33,7 @@ data:
 model:
   n_options: 4
   obs_dims: 4
-<<<<<<< HEAD
   latent_dim: 10
-=======
-  latent_dim: 5
->>>>>>> pixel-models
   encoder: ${loadcfg:${experiment_cwd}/config/models/encoder_residual.yaml}
   decoder: ${loadcfg:${experiment_cwd}/config/models/decoder_pixelcnn.yaml}
   transition: ${loadcfg:${experiment_cwd}/config/models/transition_gaussian.yaml}

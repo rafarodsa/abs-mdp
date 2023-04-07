@@ -135,8 +135,8 @@ class GatedPixelCNNLayer(nn.Module):
         
         _skip = self.skip(_horizontal)
         if self.residual is not None:
-            _residual = self.residual(_horizontal)# out_channels
-            _horizontal = horizontal + _residual
+            _residual = self.residual(_horizontal) # out_channels
+            _horizontal = self.dropout(horizontal) + _residual
 
         return _vertical, _horizontal, _skip
 
