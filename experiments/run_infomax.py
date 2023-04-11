@@ -31,21 +31,21 @@ def parse_oc_args(oc_args):
 def run(cfg, ckpt=None, args=None):
     
     set_seeds(cfg.seed)
-
+    save_path = f'{cfg.save_path}/{cfg.tag}'
     checkpoint_callback = ModelCheckpoint(
         monitor='nll_loss',
-        dirpath=f'{cfg.save_path}/phi_train/ckpts/',
+        dirpath=f'{save_path}/phi_train/ckpts/',
         filename='infomax-pb-{epoch:02d}-{nll_loss:.2f}',
         save_top_k=3
     )
 
     logger = TensorBoardLogger(
-        save_dir=f'{cfg.save_path}/phi_train/logs/',
+        save_dir=f'{save_path}/phi_train/logs/',
         name='infomax-pb',
     )
 
     csv_logger = CSVLogger(
-        save_dir=f'{cfg.save_path}/phi_train/csv_logs/',
+        save_dir=f'{save_path}/phi_train/csv_logs/',
         name='infomax-pb',
     )    
 
@@ -59,7 +59,7 @@ def run(cfg, ckpt=None, args=None):
                         num_nodes=args.num_nodes,
                         strategy=args.strategy,
                         max_epochs=cfg.epochs, 
-                        default_root_dir=f'{cfg.save_path}/phi_train',
+                        default_root_dir=f'{save_path}/phi_train',
                         log_every_n_steps=15,
                         callbacks=[checkpoint_callback, ModelSummary(max_depth=1)], 
                         logger=[logger, csv_logger],
