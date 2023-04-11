@@ -87,9 +87,10 @@ class InfomaxAbstraction(pl.LightningModule):
 		info_loss_z = -self.info_bottleneck(s, q_s) + info_loss_z
 		
 		# initsets
-		initset_pred = torch.sigmoid(self.initsets(z))
-		initset_loss = F.binary_cross_entropy(initset_pred, initset_s)
-
+		
+		initset_pred = self.initsets(z)
+		initset_loss = F.binary_cross_entropy_with_logits(initset_pred, initset_s, reduction='none').mean(-1)
+		# printarr(info_loss_z, infomax_loss, transition_loss, z_norm, initset_loss)
 		return infomax_loss, transition_loss, info_loss_z, initset_loss, z_norm
 
 
