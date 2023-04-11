@@ -15,9 +15,9 @@ def set_seeds(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    torch.backends.cudnn.enabled = False
+    # torch.backends.cudnn.deterministic = True
+    # torch.backends.cudnn.benchmark = False
+    # torch.backends.cudnn.enabled = False
     np.random.seed(seed)
     random.seed(seed)
 
@@ -30,7 +30,7 @@ def parse_oc_args(oc_args):
 # load the config
 def run(cfg, ckpt=None, args=None):
     
-    set_seeds(cfg.seed)
+    # set_seeds(cfg.seed)
     save_path = f'{cfg.save_path}/{args.tag}'
     checkpoint_callback = ModelCheckpoint(
         monitor='nll_loss',
@@ -61,7 +61,7 @@ def run(cfg, ckpt=None, args=None):
                         max_epochs=cfg.epochs, 
                         default_root_dir=f'{save_path}/phi_train',
                         log_every_n_steps=15,
-                        callbacks=[checkpoint_callback, ModelSummary(max_depth=1)], 
+                        callbacks=[checkpoint_callback], 
                         logger=[logger, csv_logger],
                     )
     trainer.fit(model, data, ckpt_path=ckpt)

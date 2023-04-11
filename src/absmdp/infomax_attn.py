@@ -24,7 +24,7 @@ import logging
 from src.utils.printarr import printarr
 
 logger = logging.getLogger(__name__)
-torch.set_float32_matmul_precision('medium')
+# torch.set_float32_matmul_precision('medium')
 
 class InfomaxAbstraction(pl.LightningModule):
 	def __init__(self, cfg: TrainerConfig):

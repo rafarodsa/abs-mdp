@@ -69,7 +69,7 @@ def load_cifar10_distractors():
     return dataiter
 
 if __name__== "__main__":
-
+    torch.multiprocessing.set_sharing_strategy('file_system')
     ######## Parameters
     np.set_printoptions(precision=3)
     configuration_file = "/Users/rrs/Desktop/abs-mdp/envs/pinball/configs/pinball_simple_single.cfg"
