@@ -414,6 +414,14 @@ class PinballView:
             pygame.draw.circle(self.screen, self.BALL_COLOR, pos, rad)
         else:
             # draw pixel
+            wall_width = int(0.01 * self.screen.get_width())
+            if wall_width < 1:
+                wall_width = 1
+            if abs(pos[0]-wall_width) < 1:
+                pos[0] += 1
+            if abs(pos[1]-wall_width) < 1:
+                pos[1] += 1
+            
             self.screen.fill(self.BALL_COLOR, (pos, (1, 1)))
                                
 

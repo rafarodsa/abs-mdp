@@ -200,13 +200,8 @@ class PinballEnvContinuous(PinballEnv):
             state = self.sample_initial_positions(1)[0]
        
         if not self.is_valid_state(state):
-<<<<<<< HEAD
             print(f"Invalid state [{state[0]}, {state[1]}]")
        
-=======
-            raise ValueError(f"Invalid state [{state[0]}, {state[1]}]")
-            
->>>>>>> pixel-models
         self.pinball.set_initial_state(state)
         return state
 
@@ -338,7 +333,7 @@ if __name__=="__main__":
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=1, shuffle=True, num_workers=2)
     dataiter = [d.expand(3,-1,-1,-1).squeeze().permute(2,1,0).numpy() for d, l in iter(trainloader)]
 
-
+    dataiter =None
     size = 50
 
     pinball = PinballDistractors(
@@ -352,7 +347,7 @@ if __name__=="__main__":
     pinball.reset()
     imgs = []
     for _  in range(10):
-        for i in range(1):
+        for i in range(20):
             a = [0.9, 0.9]
             next_s, _, _, _, _ = pinball.step(a)
             imgs.append(pinball.render())
