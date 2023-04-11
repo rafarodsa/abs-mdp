@@ -178,14 +178,14 @@ def create_position_controllers_v0(env, translation_distance=1/10):
     
     return position_options
 
-def create_position_options(env, translation_distance=1/15):
+def create_position_options(env, translation_distance=1/15, std_dev=0.01):
     '''
         Creates options for moving the agent in the four directions by a fixed distance.
         Velocity is zero.
     '''
     position_options = []
     controller_factory = position_controller_factory
-    std_dev_vel = 0.01
+    std_dev_vel = translation_distance/2/2  #0.01
     for y in [-1., 1.]:
         distance = np.array([0., y*translation_distance, 0., 0.])
         o = Option(initiation_set(env, distance[:2]),

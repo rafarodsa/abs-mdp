@@ -1,14 +1,13 @@
 import lightning as pl
 
 from src.absmdp.infomax_attn import InfomaxAbstraction, AbstractMDPTrainer
-from src.absmdp.mdp import AbstractMDP
 
 from src.absmdp.datasets import PinballDataset
 from omegaconf import OmegaConf as oc
 import argparse
 import torch, random, numpy as np
 import logging
-from lightning.pytorch.callbacks import ModelCheckpoint, ModelSummary, RichProgressBar
+from lightning.pytorch.callbacks import ModelCheckpoint, ModelSummary
 from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
 
 
@@ -21,6 +20,11 @@ def set_seeds(seed):
     torch.backends.cudnn.enabled = False
     np.random.seed(seed)
     random.seed(seed)
+
+def parse_oc_args(oc_args):
+    oc_args = ['='.join([oc_args[i].split('--')[-1], oc_args[i+1]]) for i in range(len(oc_args)) if i%2==0]
+    cli_config = oc.from_cli(oc_args)
+    return cli_config
 
 
 # load the config
@@ -104,9 +108,9 @@ def main():
 
     logging.basicConfig(level=args.loglevel)
 
-    cli_config = oc.from_cli(unknown)
+    cli_cfg = parse_oc_args(args, unknown)
     cfg = InfomaxAbstraction.load_config(args.config)
-    cfg = oc.merge(cfg, cli_config)
+    cfg = oc.merge(cfg, cli_cfg)
 
     if not args.train_mdp:
         run(cfg, args.from_ckpt, args)
