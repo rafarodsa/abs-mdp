@@ -8,11 +8,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 from functools import partial
 
-from typing import Any, Dict, List, Optional, Tuple
-from src.models.configs import DiagGaussianConfig, MLPConfig, DistributionConfig, ModuleConfig
+from typing import Any
+from src.models.configs import DistributionConfig, ModuleConfig
 from src.models import MLP, DiagonalGaussian, DynamicsMLP, RewardMLP, Deterministic
 from src.models import ResidualConvEncoder, DeconvBlock, PixelCNNDecoder
 from src.models.gaussian import SphericalGaussian
+from src.models.maf import CondMAFFactory as MAF
+
 
 class ModuleFactory:
     factories ={
@@ -24,7 +26,8 @@ class ModuleFactory:
         "deterministic": Deterministic,
         "conv_residual": ResidualConvEncoder,
         "pixelcnn": PixelCNNDecoder.PixelCNNDecoderDist,
-        "deconv": DeconvBlock
+        "deconv": DeconvBlock,
+        "maf": MAF
     }
     
     @staticmethod

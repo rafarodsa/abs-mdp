@@ -31,7 +31,7 @@ def parse_oc_args(oc_args):
 def run(cfg, ckpt=None, args=None):
     
     set_seeds(cfg.seed)
-    save_path = f'{cfg.save_path}/{cfg.tag}'
+    save_path = f'{cfg.save_path}/{args.tag}'
     checkpoint_callback = ModelCheckpoint(
         monitor='nll_loss',
         dirpath=f'{save_path}/phi_train/ckpts/',
@@ -65,6 +65,7 @@ def run(cfg, ckpt=None, args=None):
                         logger=[logger, csv_logger],
                     )
     trainer.fit(model, data, ckpt_path=ckpt)
+    trainer.test(model, data)
     return model
 
 def train_mdp(cfg, ckpt, args):
@@ -108,7 +109,7 @@ def main():
 
     logging.basicConfig(level=args.loglevel)
 
-    cli_cfg = parse_oc_args(args, unknown)
+    cli_cfg = parse_oc_args(unknown)
     cfg = InfomaxAbstraction.load_config(args.config)
     cfg = oc.merge(cfg, cli_cfg)
 

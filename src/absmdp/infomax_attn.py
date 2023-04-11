@@ -21,6 +21,8 @@ from omegaconf import OmegaConf as oc
 
 import logging
 
+from src.utils.printarr import printarr
+
 logger = logging.getLogger(__name__)
 torch.set_float32_matmul_precision('medium')
 
@@ -35,13 +37,12 @@ class InfomaxAbstraction(pl.LightningModule):
 		self.latent_dim = cfg.model.latent_dim
 		self.n_options = cfg.model.n_options
 
-
-		self.n_heads = 8
-		self.key_query_dim = 16
-		self.value_dim = 8
-		self.option_embedding = nn.Embedding(self.n_options, self.key_query_dim)
-		self.query_value = nn.Linear(self.latent_dim, (self.key_query_dim + self.value_dim) * self.n_heads)
-		self.projection = nn.Linear(self.value_dim, self.latent_dim)
+		# self.n_heads = 8
+		# self.key_query_dim = 16
+		# self.value_dim = 8
+		# self.option_embedding = nn.Embedding(self.n_options, self.key_query_dim)
+		# self.query_value = nn.Linear(self.latent_dim, (self.key_query_dim + self.value_dim) * self.n_heads)
+		# self.projection = nn.Linear(self.value_dim, self.latent_dim)
 
 		self.encoder = build_model(cfg.model.encoder.features)
 		self.transition = build_distribution(cfg.model.transition)
@@ -68,9 +69,10 @@ class InfomaxAbstraction(pl.LightningModule):
 		next_z  = self.encoder(next_s) + torch.rand_like(z) * 1e-2
 
 		actions = a # dims: (batch, n_actions)
-		t_in = z.squeeze()
+		t_in = z
+		# printarr(t_in, actions, z )
 		t_in = torch.cat([t_in, actions], dim=-1)
-		next_s_q_pred = self.grounding.distribution(t_in.squeeze())
+		next_s_q_pred = self.grounding.distribution(t_in)
 		infomax_loss = self.infomax_loss(next_s, next_s_q_pred, n_samples=1)
 		
 		z_in = torch.cat([z, torch.zeros_like(actions)], dim=-1)
@@ -115,16 +117,16 @@ class InfomaxAbstraction(pl.LightningModule):
 		return loss, logs
 	
 
-	def attn(self, z, o):
-		n_option = o.argmax(dim=-1)
-		option_embedding = self.option_embedding(n_option)
-		query, value = self.query_value(z).split([self.key_query_dim * self.n_heads, self.value_dim * self.n_heads], dim=-1)
-		value = value.reshape(value.shape[0], self.n_heads, self.value_dim)
-		query = query.reshape(query.shape[0], self.n_heads, self.key_query_dim)
-		attn_weights = torch.einsum('bk,bhq->bh', option_embedding, query) / self.key_query_dim ** 0.5
-		attn_weights = torch.softmax(attn_weights, dim=-1)
-		attn_value = torch.einsum('bh,bhv->bv', attn_weights, value)
-		return attn_value
+	# def attn(self, z, o):
+	# 	n_option = o.argmax(dim=-1)
+	# 	option_embedding = self.option_embedding(n_option)
+	# 	query, value = self.query_value(z).split([self.key_query_dim * self.n_heads, self.value_dim * self.n_heads], dim=-1)
+	# 	value = value.reshape(value.shape[0], self.n_heads, self.value_dim)
+	# 	query = query.reshape(query.shape[0], self.n_heads, self.key_query_dim)
+	# 	attn_weights = torch.einsum('bk,bhq->bh', option_embedding, query) / self.key_query_dim ** 0.5
+	# 	attn_weights = torch.softmax(attn_weights, dim=-1)
+	# 	attn_value = torch.einsum('bh,bhv->bv', attn_weights, value)
+	# 	return attn_value
 
 	def infomax_loss(self, next_s, q_next_s, n_samples=1):
 		if n_samples == 1:
@@ -151,6 +153,17 @@ class InfomaxAbstraction(pl.LightningModule):
 		s, a, next_s = batch.obs, batch.action, batch.next_obs
 		qs, q_s_prime = self.forward(s, a)
 		
+		nll_loss = -q_s_prime.log_prob(next_s).mean()
+		self.log_dict({'nll_loss': nll_loss},on_step=False, on_epoch=True, prog_bar=True, logger=True)
+		return nll_loss
+	
+	def test_step(self, batch, batch_idx):
+		state, action, next_s = batch.obs, batch.action, batch.next_obs
+		z = self.encoder(state)
+		t_in = torch.cat([z, action], dim=-1)
+		next_z = self.transition.distribution(t_in).mean + z
+		q_s_prime = self.grounding.distribution(torch.cat([next_z, torch.zeros_like(action)], dim=-1))
+
 		nll_loss = -q_s_prime.log_prob(next_s).mean()
 		self.log_dict({'nll_loss': nll_loss},on_step=False, on_epoch=True, prog_bar=True, logger=True)
 		return nll_loss

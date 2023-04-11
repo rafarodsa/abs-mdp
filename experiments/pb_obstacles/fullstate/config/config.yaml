@@ -2,7 +2,16 @@
 # Full State observation
 # Gridworld abstraction
 experiment_cwd: 'experiments/pb_obstacles/fullstate'
-lr: 0.005351915416531251
+optimizer:
+  type: 'adam'
+  params:
+    lr: 2e-4
+scheduler:
+  type: 'linear_scheduler'
+  params:
+    start_factor: 1.
+    end_factor: 1.
+    total_iters: 1.
 batch_size: 128
 epochs: 30
 accelerator: gpu

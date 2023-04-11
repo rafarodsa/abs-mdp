@@ -68,9 +68,15 @@ def linear_projection(datum, linear_projection):
     w = linear_projection
     r_obs = torch.tensordot(datum.rewards[0], w, dims=1) # N x state_dim | state_dim x n_features
     r_next_obs = torch.tensordot(datum.rewards[1], w, dims=1)
+    r_obs = r_obs + torch.randn_like(r_obs) * 0.01
+    r_next_obs = r_next_obs + torch.randn_like(r_next_obs) * 0.01
+
     obs, next_obs = datum.obs, datum.next_obs
     obs = torch.tensordot(obs, w, dims=1) 
     next_obs = torch.tensordot(next_obs, w, dims=1)
+    obs = obs + torch.randn_like(obs) * 0.01
+    next_obs = next_obs + torch.randn_like(next_obs) * 0.01
+
     return datum.modify(obs=obs, next_obs=next_obs, rewards=[r_obs, r_next_obs, datum.rewards[2]])
 
 
