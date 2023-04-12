@@ -14,7 +14,7 @@ scheduler:
     end_factor: 1.
     total_iters: 1.
 batch_size: 128
-epochs: 50
+epochs: 500
 accelerator: gpu
 devices: 1
 save_path: ${experiment_cwd}/mdps
@@ -24,7 +24,7 @@ loss:
   transition_const: 1
   reward_const: 1
   tau_const: 1.
-  initset_const: 0.1
+  initset_const: 1
   n_samples: 1
 data:
   data_path: ${experiment_cwd}/data/simple_v1.zip
