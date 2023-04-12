@@ -2,5 +2,6 @@ type: reward_mlp
 latent_dim: ${model.latent_dim}
 n_options: ${model.n_options}
 hidden_dims:
-- 128
+- 512
+- 512
 activation: relu

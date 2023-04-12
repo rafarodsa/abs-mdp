@@ -83,7 +83,6 @@ def train_mdp(cfg, ckpt, args):
                         num_nodes=args.num_nodes,
                         strategy=args.strategy,
                         max_epochs=cfg.epochs, 
-                        auto_scale_batch_size=True,
                         default_root_dir=f'{cfg.save_path}/mdp_train',
                         log_every_n_steps=15,
                     )

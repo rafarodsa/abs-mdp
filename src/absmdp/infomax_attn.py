@@ -185,84 +185,97 @@ class InfomaxAbstraction(pl.LightningModule):
 		except FileNotFoundError:
 			raise ValueError(f"Could not find config file at {path}")
 		
-
 class AbstractMDPTrainer(pl.LightningModule):
-    def __init__(self, cfg, phi: InfomaxAbstraction):
-        super().__init__()
-        self.phi = phi
-        self.cfg = cfg
-        self.n_options = cfg.model.n_options
-        self.latent_dim = cfg.model.latent_dim
-        self.obs_dim = cfg.model.obs_dims
-        self.lr = cfg.lr
-        self.hyperparams = cfg.loss
-    
-        # build models
-        self.reward = build_model(cfg.model.reward)
-        self.tau = build_model(cfg.model.tau)
-        self.initial_state = []
+	def __init__(self, cfg, phi: InfomaxAbstraction):
+		super().__init__()
+		self.phi = phi
+		self.phi.requires_grad_(False)
+		self.cfg = cfg
+		self.n_options = cfg.model.n_options
+		self.latent_dim = cfg.model.latent_dim
+		self.obs_dim = cfg.model.obs_dims
+		self.lr = cfg.optimizer.params.lr
+		self.hyperparams = cfg.loss
 
-    def _step(self, s, a, next_s):
-        # encode states
-        with torch.no_grad():
-            z, next_z = self.phi.encoder(s), self.phi.encoder(next_s)
-            q_s, q_next_s = self.phi.grounding.distribution(z), self.phi.grounding.distribution(next_z)
-        reward_prediction = self.reward(torch.cat([z, a, next_z], dim=-1))
-        tau_prediction = self.tau(torch.cat([z, a], dim=-1))
-        return z, next_z, reward_prediction, tau_prediction, q_s, q_next_s
-    
-    def _reward_loss(self, reward_pred, q_s, q_s_prime, reward_target):
-        logger.debug('Reward loss')
-        obs, next_obs, rewards = reward_target  # batch x n_samples x obs_dim
-        
-        obs, next_obs = obs.transpose(0, 1).unsqueeze(1), next_obs.transpose(0, 1).unsqueeze(1)  # n_samples x batch x obs_dim
-        logger.debug(f'obs: {obs.shape}, next_obs: {next_obs.shape}')
+		# build models
+		self.tau = build_model(cfg.model.tau)
+		self.reward = build_model(cfg.model.reward)
+		self.initsets = build_model(cfg.model.init_class)
+		self.initial_state = []
 
-        _reward_target = symlog(rewards).transpose(0, 1).unsqueeze(1) # n_samples x 1 x batch
-        logger.debug(f'reward_target: {_reward_target.shape}')
+	def _step(self, s, a, next_s):
+		# encode states
+		with torch.no_grad():
+			z, next_z = self.phi.encoder(s), self.phi.encoder(next_s)
+			q_s, q_next_s = self.phi.grounding.distribution(torch.cat([z, torch.zeros_like(a)], dim=-1)), self.phi.grounding.distribution(torch.cat([next_z, torch.zeros_like(a)], dim=-1))
+		
+		
+		reward_prediction = self.reward(torch.cat([z, a, next_z], dim=-1))
+		tau_prediction = self.tau(torch.cat([z, a], dim=-1))
+		initset_prediction = self.initsets(z)
+		return z, next_z, reward_prediction, tau_prediction, q_s, q_next_s, initset_prediction
 
-        weights = torch.exp((q_s.log_prob(obs) + q_s_prime.log_prob(next_obs)))
-        Z = weights.sum(0, keepdims=True) # sum over samples
-        logger.debug(f'Reward weights: {Z}')
-        logger.debug(f'weights: {weights.shape}, Z: {Z.shape}')
-        reward_target_ = (weights*_reward_target/Z).sum(0).squeeze()
+	def _reward_loss(self, reward_pred, q_s, q_s_prime, reward_target):
+		obs, next_obs, rewards = reward_target  # batch x n_samples x obs_dim
+		
 
-        logger.debug(f'reward_target_: {reward_target_.shape}, reward_pred: {reward_pred.shape}')
-        logger.debug('Reward loss done')
-        return torch.nn.functional.mse_loss(reward_pred.squeeze(), reward_target_.squeeze(), reduction="mean")
-    
-    def _tau_loss(self, tau_pred, tau_target):
-        return torch.nn.functional.mse_loss(tau_pred.squeeze(), tau_target.squeeze(), reduction="mean")
 
-    def training_step(self, batch, batch_idx):
-        s, a, next_s, rews, duration, p_0 = batch.obs, batch.action, batch.next_obs, batch.rewards, batch.duration.float(), batch.p0
+		obs, next_obs = obs.transpose(0, 1), next_obs.transpose(0, 1)  # n_samples x batch x obs_dim
+		N, B, _ = obs.shape
 
-        z, next_z, reward_prediction, tau_prediction, q_s, q_next_s = self._step(s, a, next_s)
+	
+		obs, next_obs = obs.reshape(-1, self.obs_dim), next_obs.reshape(-1, self.obs_dim)  # n_samples*batch x obs_dim
+		_reward_target = symlog(rewards.transpose(0, 1)) # n_samples x batch
+		q_s.cond = q_s.cond.repeat_interleave(N, dim=0)
+		q_s_prime.cond = q_s_prime.cond.repeat_interleave(N, dim=0)
+		log_prob_s = q_s.log_prob(obs)
+		log_prob_s_prime = q_s_prime.log_prob(next_obs)
+		log_w = (log_prob_s + log_prob_s_prime).reshape(N, B)
+		log_Z = torch.logsumexp(log_w, dim=0, keepdim=True)
+		reward_target_ = (log_w-log_Z).exp() * _reward_target
+		reward_target_ = reward_target_.sum(dim=0)
 
-        # compute loss
-        reward_loss = self._reward_loss(reward_prediction, q_s, q_next_s, rews)
-        tau_loss = self._tau_loss(tau_prediction, duration)
-        loss = self.hyperparams['reward_const'] * reward_loss + self.hyperparams['tau_const'] * tau_loss
+		return torch.nn.functional.mse_loss(reward_pred.squeeze(1), reward_target_, reduction="mean")
 
-        # log
-        self.log('train_loss', loss)
-        self.log('train_reward_loss', reward_loss)
-        self.log('train_tau_loss', tau_loss)
-        return loss
+	def _tau_loss(self, tau_pred, tau_target):
+		return torch.nn.functional.mse_loss(tau_pred.squeeze(), symlog(tau_target.squeeze()), reduction="mean")
 
-    def validation_step(self, batch, batch_idx):
-        s, a, next_s, rews, duration = batch.obs, batch.action, batch.next_obs, batch.rewards, batch.duration
-        z, next_z, reward_prediction, tau_prediction, q_s, q_next_s = self._step(s, a, next_s)
-        # compute loss
-        reward_loss = self._reward_loss(reward_prediction, q_s, q_next_s, rews)
-        tau_loss = self._tau_loss(tau_prediction, duration)
-        loss = reward_loss + tau_loss
+	def training_step(self, batch, batch_idx):
+		s, a, next_s, rews, duration, p_0, initset_s = batch.obs, batch.action, batch.next_obs, batch.rewards, batch.duration.float(), batch.p0, batch.initsets
 
-        # log
-        self.log('val_loss', loss)
-        self.log('val_reward_loss', reward_loss)
-        self.log('val_tau_loss', tau_loss)
-        return loss
+		z, next_z, reward_prediction, tau_prediction, q_s, q_next_s, initset_pred = self._step(s, a, next_s)
 
-    def configure_optimizers(self):
-        return torch.optim.RAdam(self.parameters(), lr=self.lr, weight_decay=1e-5)
+		# compute loss
+		reward_loss = self._reward_loss(reward_prediction, q_s, q_next_s, rews)
+		tau_loss = self._tau_loss(tau_prediction, duration)
+		# initset_pred = self.initsets(s)
+		initset_loss = F.binary_cross_entropy_with_logits(initset_pred, initset_s, reduction='none').mean(dim=-1).mean()
+		loss = self.hyperparams['reward_const'] * reward_loss + self.hyperparams['tau_const'] * tau_loss + self.hyperparams['initset_const'] * initset_loss
+		# loss =  self.hyperparams['tau_const'] * tau_loss + self.hyperparams['initset_const'] * initset_loss
+
+		# log
+		self.log('train_loss', loss, prog_bar=True)
+		self.log('train_reward_loss', reward_loss)
+		self.log('train_initset', initset_loss)
+		self.log('train_tau_loss', tau_loss)
+		return loss
+
+	def validation_step(self, batch, batch_idx):
+		s, a, next_s, rews, duration, initset_s = batch.obs, batch.action, batch.next_obs, batch.rewards, batch.duration, batch.initsets
+		z, next_z, reward_prediction, tau_prediction, q_s, q_next_s, initset_pred = self._step(s, a, next_s)
+		# compute loss
+		reward_loss = self._reward_loss(reward_prediction, q_s, q_next_s, rews)
+		tau_loss = self._tau_loss(tau_prediction, duration)
+		# initset_pred = self.initsets(s)
+		initset_loss = F.binary_cross_entropy_with_logits(initset_pred, initset_s, reduction='none').mean(dim=-1).mean()
+		loss = reward_loss + tau_loss + initset_loss
+
+		# log
+		self.log('val_loss', loss, prog_bar=True)
+		self.log('val_reward_loss', reward_loss)
+		self.log('val_initset', initset_loss)
+		self.log('val_tau_loss', tau_loss)
+		return loss
+
+	def configure_optimizers(self):
+		return torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=1e-1)
