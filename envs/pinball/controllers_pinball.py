@@ -117,7 +117,7 @@ def position_controller_discrete(goal, kp_vel, ki_vel, kp_pos, kd_pos):
     """
         Factory for controller to achive goal position
     """
-    controller_pos = PID(kp=kp_pos, ki= 1, kd=kd_pos)
+    controller_pos = PID(kp=kp_pos, ki=1, kd=kd_pos)
     controller_vel = PID(kp=kp_vel, ki=ki_vel)
     actions = [[DEC_X, ACC_X], [DEC_Y, ACC_Y]]
     def __controller(state): 
@@ -132,6 +132,7 @@ def position_controller_discrete(goal, kp_vel, ki_vel, kp_pos, kd_pos):
             return actions[sample][int(u[sample]>=0)]
             
     return __controller
+
 
 def position_controller_continuous(goal, kp_vel, ki_vel, kp_pos, kd_pos):
     """
