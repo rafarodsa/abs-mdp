@@ -146,6 +146,15 @@ class MAFDist:
         for p in self.maf.parameters():
             p.requires_grad_ = False
         return self
+    def sample(self, n=1):
+        printarr(self.cond)
+        h = self.maf.features(self.cond)
+        cond = h.repeat_interleave(n, dim=0)
+        u = torch.randn(cond.shape[0], self.maf.input_dim)
+        printarr(u, cond)
+        samples = self.maf.inverse(u, cond)[0].reshape(self.cond.shape[0], n, self.maf.input_dim).permute(0, 2, 1)
+        printarr(samples)
+        return samples
 
 class MAFDistribution(ConditionalMAF):
 
@@ -165,6 +174,7 @@ class MAFDistribution(ConditionalMAF):
     
     def distribution(self, cond):
         return MAFDist(self, cond)
+    
     def freeze(self):
         for p in self.parameters():
             p.requires_grad_ = False

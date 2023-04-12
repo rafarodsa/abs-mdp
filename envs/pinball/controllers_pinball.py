@@ -24,8 +24,6 @@ def ball_collides(pinball_env, initial_position, final_position):
     """ 
         Detects collision at position
     """
-
-
     for obstacle in pinball_env.get_obstacles():
         if _intersect_obstable(obstacle, initial_position, final_position):
             # print(f'Obstacle intersected: {initial_position}->{final_position}')

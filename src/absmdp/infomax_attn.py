@@ -268,12 +268,14 @@ class AbstractMDPTrainer(pl.LightningModule):
 		tau_loss = self._tau_loss(tau_prediction, duration)
 		# initset_pred = self.initsets(s)
 		initset_loss = F.binary_cross_entropy_with_logits(initset_pred, initset_s, reduction='none').mean(dim=-1).mean()
+		iniset_accuracy = (initset_pred > 0).eq(initset_s).float().mean()
 		loss = reward_loss + tau_loss + initset_loss
 
 		# log
 		self.log('val_loss', loss, prog_bar=True)
 		self.log('val_reward_loss', reward_loss)
 		self.log('val_initset', initset_loss)
+		self.log('val_initset_acc', iniset_accuracy)
 		self.log('val_tau_loss', tau_loss)
 		return loss
 
