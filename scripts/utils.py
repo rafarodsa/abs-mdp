@@ -108,8 +108,9 @@ def collect_trajectory(env, options, obs_type='simple', max_exec_time=200, horiz
         option = options[option_n]
         try:
             o, next_o, rewards, executed, duration, info = execute_option(env, np.array(s), option, obs_type=obs_type, max_exec_time=max_exec_time)
-        except:
+        except Exception as e:
             print('Error executing option')
+            print(e.with_traceback())
             trajectory = []
             break
         next_s = next_o if obs_type == 'simple' else info['next_state']

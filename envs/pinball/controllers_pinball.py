@@ -31,28 +31,45 @@ def ball_collides(pinball_env, initial_position, final_position):
     return False
         
 
-def _intersect_obstable(obstacle, initial_position, final_position):
+def _intersect_obstable(obstacle, initial_position, final_position, ball_radius=0.02):
     points = obstacle.points
     
     a, b = tee(np.vstack([np.array(points), points[0]]))
     next(b, None)
+
+    import matplotlib.pyplot as plt
+    def plot_polygon(points):
+        points = np.vstack([np.array(points), points[0]])
+        plt.plot(points[:, 0], points[:, 1], 'k-')
+        
     
     for edge in zip(a, b):
         alpha, beta = _intersect(edge, initial_position, final_position)
         if alpha <= 1 and alpha >= 0 and beta >= 0 and beta <= 1:
+           
+            # plot points 
+            # print(f'Edge intersected: {edge}, alpha: {alpha}, beta: {beta}')
+            # plot_polygon(points)
+            # plt.scatter(initial_position[0], initial_position[1], c='r')
+            # plt.scatter(final_position[0], final_position[1], c='b')
+            # plt.show()
             return True
     return False
 
-def _intersect(edge, initial_position, final_position):
+def _intersect(edge, initial_position, final_position, ball_rad=0.02):
 
     displacement = np.array(final_position) - np.array(initial_position)
+    d = np.linalg.norm(displacement) + 1e-12
+    displacement = ball_rad * displacement/d + displacement
     edge_segment = np.array(edge[1])-np.array(edge[0])
     b = edge[0] - initial_position
-
-    A = np.stack([displacement, edge_segment], axis=1)
+    # print(displacement, edge_segment, b)
+    A = np.vstack([displacement, -edge_segment]).T
     try:
         coeff = np.linalg.solve(A, b)
         alpha, beta = coeff[0], coeff[1]
+        # print(f'alpha = {alpha}, beta = {beta}')
+        # print(f'intersection point = {initial_position + alpha*displacement}, {edge[0] + beta*edge_segment}')
     except np.linalg.LinAlgError:
         alpha, beta = np.float('inf'), np.float('inf')
     return alpha, beta
@@ -132,11 +149,11 @@ def position_controller_discrete(goal, kp_vel, ki_vel, kp_pos, kd_pos):
     return __controller
 
 
-def position_controller_continuous(goal, kp_vel, ki_vel, kp_pos, kd_pos):
+def position_controller_continuous(goal, kp_vel, ki_vel, kp_pos, kd_pos, ki_pos=1):
     """
         Factory for controller to achive goal position
     """
-    controller_pos = PID(kp=kp_pos, ki= 1, kd=kd_pos)
+    controller_pos = PID(kp=kp_pos, ki=ki_pos, kd=kd_pos)
     controller_vel = PID(kp=kp_vel, ki=ki_vel)
     MAX_SPEED = 0.99
     def __controller(state): 
@@ -204,5 +221,85 @@ def create_position_options(env, translation_distance=1/15, std_dev=0.01):
     
     
     return position_options
-    
+
+def compute_grid_goal(position, direction, n_pos, tol, min_pos=0.05, max_pos=0.95):
+        step = (max_pos - min_pos) / n_pos
+        pos_ = (position - min_pos) / (max_pos-min_pos) * np.abs(direction) * n_pos
+        min_i, max_i = np.floor(pos_), np.ceil(pos_) # closest grid position to move
+        goal = min_i * (direction < 0) + max_i * (direction > 0)
+        distances = np.abs(goal * step + min_pos - position) * np.abs(direction)
+        goal = (goal * step + min_pos) * (distances > tol) +  ((goal+direction) * step + min_pos) * (distances <= tol)
+        goal = goal * (direction != 0) + position * (direction == 0)
+        
+        # print(f'Direction {direction}, Position {position} -> Goal {goal}')
+        other_dir = 1-np.abs(direction)
+        # print(other_dir)
+        goal_correction = (position-min_pos)/ (max_pos-min_pos) * other_dir * n_pos
+        # print(goal_correction, np.floor(goal_correction), np.ceil(goal_correction))
+        min_p, max_p = step * np.floor(goal_correction) + min_pos, step * np.ceil(goal_correction) + min_pos # closest grid position to move
+        # print(min_p, max_p)
+        distance_min, distance_max = (np.abs(min_p - position) * other_dir).sum(), (np.abs(max_p - position) * other_dir).sum()
+        goal_correction = min_p if distance_min < distance_max else max_p
+        if np.abs(goal_correction - position).sum() > tol:
+            goal = goal * (direction != 0) + goal_correction * (direction == 0)
+
+        goal = goal.clip(min_pos, max_pos)
+        # print(f'Direction {direction}, Position {position} -> Goal {goal}')
+        return goal
+
+def PinballGridOptions(env, n_pos, tol=1e-3):
+    '''
+        Options to move agent in the four coordinate dimensions to fixed positions in 
+        the space.
+        params:
+            n_pos: number of positions per dimension
+            tol: tolerance to be considered at the position 
+    '''
+    position_options = []    
+
+
+    def initiation_set(env, direction):
+        def __initiation(state):
+            goal = compute_grid_goal(state[:2], direction, n_pos, tol)
+            executable = not ball_collides(env, state[:2], goal)
+            # print(f'State {state} -> Goal {goal} is executable: {executable}')
+            return executable
+        return __initiation
+
+    def termination(init_state, direction, std_dev=tol/2):
+        goal = compute_grid_goal(init_state[:2], direction, n_pos, tol)
+        def __termination(state):
+            
+            distance = (state[:2]-goal)
+            if isinstance(std_dev, float):
+                z = np.linalg.norm(distance/std_dev)
+            else:
+                z = np.linalg.norm(distance/std_dev)
+            tail_prob = 1-erf(z/np.sqrt(2))
+            return tail_prob
+        return __termination
+
+    def grid_pos_controller(state, direction, n_pos, tol, continuous=True):
+        position = state[:2]
+        goal_pos = compute_grid_goal(position, direction, n_pos, tol)
+        goal = np.concatenate([goal_pos, state[2:]])
+        return position_controller_continuous(goal, 5, 0.01, 150, 0., 10) if continuous else position_controller_discrete(goal, 10, 0.1, 100, 1.)
+
+    for y in [-1., 1.]:
+        direction = np.array([0, y])
+        o = Option(initiation_set(env, direction),
+               partial(grid_pos_controller, direction=direction, n_pos=n_pos, tol=tol, continuous=isinstance(env.action_space, spaces.Box)),
+               partial(termination, direction=direction, std_dev=tol/3),
+               name=f"{'+' if y > 0 else '-'}Y"
+        )
+        position_options.append(o)
+    for x in [-1., 1.]:
+        direction = np.array([x, 0])
+        o = Option(initiation_set(env, direction),
+               partial(grid_pos_controller, direction=direction, n_pos=n_pos, tol=tol, continuous=isinstance(env.action_space, spaces.Box)),
+               partial(termination, direction=direction, std_dev=tol/3),
+               name=f"{'+' if x > 0 else '-'}X"
+        )
+        position_options.append(o)
+    return position_options
 
