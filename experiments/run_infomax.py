@@ -9,7 +9,7 @@ import torch, random, numpy as np
 import logging
 from lightning.pytorch.callbacks import ModelCheckpoint, ModelSummary
 from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
-
+import yaml
 
 def set_seeds(seed):
     torch.manual_seed(seed)
@@ -62,11 +62,12 @@ def run(cfg, ckpt=None, args=None):
                         max_epochs=cfg.epochs, 
                         default_root_dir=f'{save_path}/phi_train',
                         log_every_n_steps=15,
-                        callbacks=[checkpoint_callback, ModelSummary(max_depth=1)], 
+                        callbacks=[checkpoint_callback], 
                         logger=[logger, csv_logger],
                     )
     trainer.fit(model, data, ckpt_path=ckpt)
-    trainer.test(model, data)
+    test_results = trainer.test(model, data)
+    yaml.dump(test_results, open(f'{save_path}/phi_train/test_results.yaml', 'w'))
     return model
 
 def train_mdp(cfg, ckpt, args):

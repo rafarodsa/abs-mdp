@@ -41,6 +41,8 @@ class DataConfig:
     gamma: float = 0.99
     transforms: Tuple[str] = field(default_factory=tuple)
     n_options: int = MISSING
+    linear_transform: bool = False
+    noise_level: float = 0.0
 
 @dataclass
 class AbstractMDPConfig:
