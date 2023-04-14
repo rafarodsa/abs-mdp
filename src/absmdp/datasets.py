@@ -64,18 +64,18 @@ def one_hot_actions(n_actions=4, datum=None):
     action = F.one_hot(torch.Tensor([action]).long(), n_actions).squeeze()
     return datum.modify(action=action)
 
-def linear_projection(datum, linear_projection):
+def linear_projection(datum, linear_projection, noise_level=0.01):
     w = linear_projection
     r_obs = torch.tensordot(datum.rewards[0], w, dims=1) # N x state_dim | state_dim x n_features
     r_next_obs = torch.tensordot(datum.rewards[1], w, dims=1)
-    r_obs = r_obs + torch.randn_like(r_obs) * 0.01
-    r_next_obs = r_next_obs + torch.randn_like(r_next_obs) * 0.01
+    r_obs = r_obs + torch.randn_like(r_obs) * noise_level
+    r_next_obs = r_next_obs + torch.randn_like(r_next_obs) * noise_level
 
     obs, next_obs = datum.obs, datum.next_obs
     obs = torch.tensordot(obs, w, dims=1) 
     next_obs = torch.tensordot(next_obs, w, dims=1)
-    obs = obs + torch.randn_like(obs) * 0.01
-    next_obs = next_obs + torch.randn_like(next_obs) * 0.01
+    obs = obs + torch.randn_like(obs) * noise_level
+    next_obs = next_obs + torch.randn_like(next_obs) * noise_level
 
     return datum.modify(obs=obs, next_obs=next_obs, rewards=[r_obs, r_next_obs, datum.rewards[2]])
 
@@ -187,7 +187,7 @@ class PinballDataset_(torch.utils.data.Dataset):
         return data
 
 class PinballDataset(pl.LightningDataModule):
-    def __init__(self, cfg, linear_transform=True):
+    def __init__(self, cfg):
         super().__init__()
         self.path_to_file = cfg.data_path
         self.n_reward_samples = cfg.n_reward_samples
@@ -204,8 +204,8 @@ class PinballDataset(pl.LightningDataModule):
                             partial(compute_return, gamma=cfg.gamma), 
                             partial(one_hot_actions, cfg.n_options),
                         ]
-        if linear_projection and self.obs_type != 'pixels':
-            self.transforms.append(partial(linear_projection, linear_projection=self.linear_transform))
+        if (cfg.linear_projection or cfg.state_dim != cfg.n_out_feats) and self.obs_type != 'pixels':
+            self.transforms.append(partial(linear_projection, linear_projection=self.linear_transform, noise_level=cfg.noise_level))
 
     def setup(self, stage=None):
         self.dataset = PinballDataset_(self.path_to_file, self.n_reward_samples, self.transforms, obs_type=self.obs_type)
