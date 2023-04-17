@@ -41,6 +41,8 @@ data:
   obs_type: simple
   gamma: 0.99
   noise_level: 0.01
+  noise_dim: 2
+  ar_coeff: 0.9
   linear_transform: True
 model:
   n_options: 4

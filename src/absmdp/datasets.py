@@ -1,7 +1,7 @@
 '''
     Pinball Environment Datasets.
 '''
-import os
+import os, io
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -83,13 +83,16 @@ def linear_projection(datum, linear_projection, noise_level=0.01):
 class PinballDataset_(torch.utils.data.Dataset):
     IMG_FORMAT = 'tj_{}_obs_{}.png'
 
-    def __init__(self, path_to_file, n_reward_samples=5, transforms=None, obs_type='full', dtype=torch.float32):
+    def __init__(self, path_to_file, n_reward_samples=5, transforms=None, obs_type='full', dtype=torch.float32, noise_level=0.01, noise_dim=0, ar_coeff=0.9):
         self.zfile_name = path_to_file
         self.zfile = zipfile.ZipFile(self.zfile_name) if obs_type == 'pixels' else None
         self.n_reward_samples = n_reward_samples
         self.transforms = transforms
         self.dtype = dtype
         self.obs_type = obs_type
+        self.noise_level = noise_level
+        self.noise_dim = noise_dim
+        self.ar_coeff = ar_coeff
         self.load()
         self.data = self.process_trajectories(self.trajectories)
 
@@ -147,30 +150,38 @@ class PinballDataset_(torch.utils.data.Dataset):
     def _get_rewards(self, datum, n_samples):
         current_obs, action, current_next_obs, current_rewards = datum.obs, datum.action, datum.next_obs, datum.rewards
         obs, next_obs, rews = self.rewards[action] # tuple of arrays (obs, next_obs, rewards).
+        if n_samples > 0:
+            N = rews.shape[0]
+            sample = np.random.choice(N, n_samples, replace=False)
+            
+            # transpose if images
+            if self.obs_type == 'pixels':
+                obs_imgs = []
+                next_obs_imgs = []
+                for i in range(n_samples):
+                    obs_imgs.append(self.get_image_obs(ObservationImgFile(*list(obs[sample[i]]))))
+                    next_obs_imgs.append(self.get_image_obs(ObservationImgFile(*list(next_obs[sample[i]]))))
 
-        N = rews.shape[0]
-        sample = np.random.choice(N, n_samples, replace=False)
-        
-        # transpose if images
-        if self.obs_type == 'pixels':
-            obs_imgs = []
-            next_obs_imgs = []
-            for i in range(n_samples):
-                obs_imgs.append(self.get_image_obs(ObservationImgFile(*list(obs[sample[i]]))))
-                next_obs_imgs.append(self.get_image_obs(ObservationImgFile(*list(next_obs[sample[i]]))))
-
-            obs_imgs.append(self.get_image_obs(current_obs))
-            next_obs_imgs.append(self.get_image_obs(current_next_obs))
-            obs, next_obs = np.array(obs_imgs), np.array(next_obs_imgs)
-            # obs = obs.transpose(0, 3, 1, 2)
-            # next_obs = next_obs.transpose(0, 3, 1, 2)
+                obs_imgs.append(self.get_image_obs(current_obs))
+                next_obs_imgs.append(self.get_image_obs(current_next_obs))
+                obs, next_obs = np.array(obs_imgs), np.array(next_obs_imgs)
+                # obs = obs.transpose(0, 3, 1, 2)
+                # next_obs = next_obs.transpose(0, 3, 1, 2)
+            else:
+                # add noise process
+                if self.noise_dim > 0:
+                    noise, noise_next = self._noise_process(n_samples, self.noise_level, self.noise_dim, self.ar_coeff)
+                    obs = np.concatenate([obs[sample], noise], axis=1)
+                    next_obs = np.concatenate([next_obs[sample], noise_next], axis=1)
+                # append current datum
+                obs = np.concatenate([current_obs[np.newaxis, :], obs], axis=0)
+                next_obs = np.concatenate([current_next_obs[None, :], next_obs], axis=0)
+                current_rewards = np.array(current_rewards)[None, :]
+                rewards = np.concatenate([current_rewards, rews[sample]], axis=0)
         else:
-            # append current datum
-            obs = np.concatenate([current_obs[np.newaxis, :], obs[sample]], axis=0)
-            next_obs = np.concatenate([current_next_obs[None, :], next_obs[sample]], axis=0)
-
-        current_rewards = np.array(current_rewards)[None, :]
-        rewards = np.concatenate([current_rewards, rews[sample]], axis=0)
+            obs, next_obs = current_obs.numpy(), current_next_obs.numpy()
+            rewards = np.array(current_rewards)
+        
         return [torch.from_numpy(obs).to(self.dtype), torch.from_numpy(next_obs).to(self.dtype), torch.from_numpy(rewards).to(self.dtype)]
 
     def _process_pixel_obs(self, obs):
@@ -182,9 +193,34 @@ class PinballDataset_(torch.utils.data.Dataset):
         return [datum for datum in data if datum.executed == 1]
     
     def process_trajectories(self, trajectories):
+        if self.noise_dim > 0 and self.noise_level > 0:
+            trajectories = [self.add_ar_noise(trajectory, noise_level=self.noise_level, noise_dim=self.noise_dim, ar_coeff=self.ar_coeff) for trajectory in trajectories]
         data = reduce(lambda x, acc: x + acc, trajectories, [])
         data = self._filter_failed_executions(data)
         return data
+    
+    def add_ar_noise(self, trajectory, noise_level=0.01, noise_dim=2, ar_coeff=0.9):
+        '''
+            Add extra noise dimensions that evolve according to random AR(1)
+        '''
+        for i, transition in enumerate(trajectory):
+            transition = self._add_ar_noise_transition(transition, noise_level=noise_level, noise_dim=noise_dim, ar_coeff=ar_coeff)
+            trajectory[i] = transition
+        return trajectory
+
+    def _add_ar_noise_transition(self, transition, noise_level=0.01, noise_dim=2, ar_coeff=0.9):
+        noise, next_noise = self._noise_process(1, noise_level, noise_dim, ar_coeff)
+        _obs = np.concatenate([transition.obs, noise])
+        _next_obs = np.concatenate([transition.next_obs, next_noise])
+        return transition.modify(obs=_obs, next_obs=_next_obs)
+    
+    def _noise_process(self, n_samples, noise_level, noise_dim, ar_coeff):
+        noise = np.random.normal(0, noise_level, (n_samples, noise_dim))
+        noise_bar = ar_coeff * noise
+        next_noise = noise_bar + (1-ar_coeff) * np.random.normal(0, noise_level, (n_samples, noise_dim))
+        if n_samples == 1:
+            noise, next_noise = noise[0], next_noise[0]
+        return noise, next_noise
 
 class PinballDataset(pl.LightningDataModule):
     def __init__(self, cfg):
@@ -199,16 +235,17 @@ class PinballDataset(pl.LightningDataModule):
 
         self.cfg = cfg
         
-        self._load_linear_transform()
+        
         self.transforms = [
                             partial(compute_return, gamma=cfg.gamma), 
                             partial(one_hot_actions, cfg.n_options),
                         ]
         if (cfg.linear_transform or cfg.state_dim != cfg.n_out_feats) and self.obs_type != 'pixels':
+            self._load_linear_transform()
             self.transforms.append(partial(linear_projection, linear_projection=self.linear_transform, noise_level=cfg.noise_level))
 
     def setup(self, stage=None):
-        self.dataset = PinballDataset_(self.path_to_file, self.n_reward_samples, self.transforms, obs_type=self.obs_type)
+        self.dataset = PinballDataset_(self.path_to_file, self.n_reward_samples, self.transforms, obs_type=self.obs_type, noise_dim=self.cfg.noise_dim, noise_level=self.cfg.noise_level, ar_coeff=self.cfg.ar_coeff)
         self.train, self.val, self.test = torch.utils.data.random_split(self.dataset, [self.train_split, self.val_split, self.test_split])
 
     def train_dataloader(self):
@@ -221,15 +258,20 @@ class PinballDataset(pl.LightningDataModule):
         return torch.utils.data.DataLoader(self.test, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
     
     def _load_linear_transform(self):
-        path, file = os.path.split(self.path_to_file)
-        if os.path.isfile(f'{path}/lintransform.pt'):
-            print(f'Linear transform loaded from {path}/lintransform.pt')
-            self.linear_transform = torch.load(f'{path}/lintransform.pt')
-            assert self.linear_transform.shape == torch.Size([self.cfg.state_dim, self.cfg.n_out_feats])
-        else:
-            self.linear_transform = torch.rand(self.cfg.state_dim, self.cfg.n_out_feats)
-            torch.save(self.linear_transform, f'{path}/lintransform.pt')
-            print(f'Linear transform matrix saved at {path}/lintransform.pt')
+        # path, file = os.path.split(self.path_to_file)
+        with zipfile.ZipFile(self.path_to_file, 'a') as zfile:
+            # check file in zip
+            if 'lintransform.pt' in zfile.namelist():
+                self.linear_transform = torch.load(zfile.open('lintransform.pt'))
+                print(f'Linear transform loaded from {self.path_to_file}/lintransform.pt')
+                assert self.linear_transform.shape == torch.Size([self.cfg.state_dim + self.cfg.noise_dim, self.cfg.n_out_feats])
+            else:
+                self.linear_transform = torch.rand(self.cfg.state_dim + self.cfg.noise_dim, self.cfg.n_out_feats)
+                # save on byteIO stream
+                with io.BytesIO() as f:
+                    torch.save(self.linear_transform, f)
+                    zfile.writestr('lintransform.pt', f.getvalue())
+                print(f'Linear transform matrix saved at {self.path_to_file}/lintransform.pt')
 
     def state_dict(self):
         state = {'weights': self.linear_transform}

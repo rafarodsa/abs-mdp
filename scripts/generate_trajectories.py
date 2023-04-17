@@ -53,6 +53,7 @@ def save_and_compress_trajectory(trajectory, trajectory_id, zfile):
     return trajectory
 
 
+
 if __name__== "__main__":
 
     ######## Parameters
@@ -105,7 +106,6 @@ if __name__== "__main__":
 
     trajectories = Parallel(n_jobs=args.n_jobs)(delayed(collect_trajectory)(env, options, obs_type=args.observation, max_exec_time=max_exec_time, horizon=args.max_horizon) for i in tqdm(range(args.num_traj)))        
     
-   
     if args.observation == 'pixel':
         trajectories = save_and_compress(trajectories, zfile)
 
