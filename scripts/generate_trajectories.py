@@ -17,6 +17,7 @@ from scripts.utils import collect_trajectory
 from envs.pinball.pinball_gym import PinballEnvContinuous as Pinball
 from envs.pinball.controllers_pinball import create_position_controllers_v0 as OptionFactory
 from envs.pinball.controllers_pinball import create_position_options as OptionFactory2
+from envs.pinball.controllers_pinball import PinballGridOptions as GridOptionsFactory
 
 from PIL import Image
 
@@ -52,6 +53,7 @@ def save_and_compress_trajectory(trajectory, trajectory_id, zfile):
     return trajectory
 
 
+
 if __name__== "__main__":
 
     ######## Parameters
@@ -74,6 +76,8 @@ if __name__== "__main__":
     parser.add_argument('--n-jobs', type=int, default=1)
     parser.add_argument('--max-exec-time', type=int, default=1000)
     parser.add_argument('--image-size', type=int, default=100)
+    parser.add_argument('--option_type', type=str, default='continuous-v1')
+    parser.add_argument('--grid_size', type=int, default=10)
     args = parser.parse_args()
 
     dir, name = os.path.split(args.save_path)
@@ -87,15 +91,21 @@ if __name__== "__main__":
 
     env = Pinball(config=args.env_config, width=grid_size, height=grid_size, render_mode='rgb_array') 
 
+    if args.option_type == 'continuous-v1':
+        options = OptionFactory2(env)
+    elif args.option_type == 'continuous-v0':
+        options = OptionFactory(env)
+    elif args.option_type == 'grid':
+        options = GridOptionsFactory(env, args.grid_size, 1/args.grid_size/5)
+    else:
+        raise ValueError('Unknown option type')
 
-    options = OptionFactory2(env)
     max_exec_time = args.max_exec_time
     
     options_desc = {i: str(o) for i, o in enumerate(options)}
 
     trajectories = Parallel(n_jobs=args.n_jobs)(delayed(collect_trajectory)(env, options, obs_type=args.observation, max_exec_time=max_exec_time, horizon=args.max_horizon) for i in tqdm(range(args.num_traj)))        
     
-   
     if args.observation == 'pixel':
         trajectories = save_and_compress(trajectories, zfile)
 

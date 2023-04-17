@@ -103,8 +103,6 @@ def test_termination_continuous():
 
     plot_trajectory_with_termination(result[0], result[-1], terminated)
 
-
-
 if __name__ == "__main__":
     test_ball_collision()
     test_termination_continuous()

@@ -9,7 +9,7 @@ import torch, random, numpy as np
 import logging
 from lightning.pytorch.callbacks import ModelCheckpoint, ModelSummary
 from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
-
+import yaml, os
 
 def set_seeds(seed):
     torch.manual_seed(seed)
@@ -33,8 +33,10 @@ def run(cfg, ckpt=None, args=None):
     
     # set_seeds(cfg.seed)
     save_path = f'{cfg.save_path}/{args.tag}'
+    os.makedirs(save_path, exist_ok=True)
+    cfg.save_path = save_path
     checkpoint_callback = ModelCheckpoint(
-        monitor='nll_loss',
+        monitor='val_nll',
         dirpath=f'{save_path}/phi_train/ckpts/',
         filename='infomax-pb-{epoch:02d}-{nll_loss:.2f}',
         save_top_k=3
@@ -49,6 +51,9 @@ def run(cfg, ckpt=None, args=None):
         save_dir=f'{save_path}/phi_train/csv_logs/',
         name='infomax-pb',
     )    
+
+    
+    cfg.data.save_path = save_path
 
     model = InfomaxAbstraction(cfg) 
     data = PinballDataset(cfg.data)
@@ -66,7 +71,8 @@ def run(cfg, ckpt=None, args=None):
                         logger=[logger, csv_logger],
                     )
     trainer.fit(model, data, ckpt_path=ckpt)
-    trainer.test(model, data)
+    test_results = trainer.test(model, data)
+    yaml.dump(test_results, open(f'{save_path}/phi_train/test_results.yaml', 'w'))
     return model
 
 def train_mdp(cfg, ckpt, args):

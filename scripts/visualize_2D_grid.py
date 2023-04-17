@@ -2,8 +2,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch 
 
-from src.deprecated.abs_mdp import AbstractMDP
-
 
 def predict_next_states(mdp, states, actions, executed):
     next_s = []
