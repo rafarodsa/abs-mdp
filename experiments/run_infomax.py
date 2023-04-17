@@ -9,7 +9,7 @@ import torch, random, numpy as np
 import logging
 from lightning.pytorch.callbacks import ModelCheckpoint, ModelSummary
 from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
-import yaml
+import yaml, os
 
 def set_seeds(seed):
     torch.manual_seed(seed)
@@ -51,6 +51,8 @@ def run(cfg, ckpt=None, args=None):
     )    
 
     model = InfomaxAbstraction(cfg) 
+    os.makedirs(save_path, exist_ok=True)
+    cfg.data.save_path = save_path
     data = PinballDataset(cfg.data)
     
     # training

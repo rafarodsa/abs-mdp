@@ -258,20 +258,28 @@ class PinballDataset(pl.LightningDataModule):
         return torch.utils.data.DataLoader(self.test, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
     
     def _load_linear_transform(self):
-        # path, file = os.path.split(self.path_to_file)
-        with zipfile.ZipFile(self.path_to_file, 'a') as zfile:
-            # check file in zip
-            if 'lintransform.pt' in zfile.namelist():
-                self.linear_transform = torch.load(zfile.open('lintransform.pt'))
-                print(f'Linear transform loaded from {self.path_to_file}/lintransform.pt')
-                assert self.linear_transform.shape == torch.Size([self.cfg.state_dim + self.cfg.noise_dim, self.cfg.n_out_feats])
-            else:
-                self.linear_transform = torch.rand(self.cfg.state_dim + self.cfg.noise_dim, self.cfg.n_out_feats)
-                # save on byteIO stream
-                with io.BytesIO() as f:
-                    torch.save(self.linear_transform, f)
-                    zfile.writestr('lintransform.pt', f.getvalue())
-                print(f'Linear transform matrix saved at {self.path_to_file}/lintransform.pt')
+        # # path, file = os.path.split(self.path_to_file)
+        # with zipfile.ZipFile(self.path_to_file, 'a') as zfile:
+        #     # check file in zip
+        #     if 'lintransform.pt' in zfile.namelist():
+        #         self.linear_transform = torch.load(zfile.open('lintransform.pt'))
+        #         print(f'Linear transform loaded from {self.path_to_file}/lintransform.pt')
+        #         assert self.linear_transform.shape == torch.Size([self.cfg.state_dim + self.cfg.noise_dim, self.cfg.n_out_feats])
+        #     else:
+        #         self.linear_transform = torch.rand(self.cfg.state_dim + self.cfg.noise_dim, self.cfg.n_out_feats)
+        #         # save on byteIO stream
+        #         with io.BytesIO() as f:
+        #             torch.save(self.linear_transform, f)
+        #             zfile.writestr('lintransform.pt', f.getvalue())
+        #         print(f'Linear transform matrix saved at {self.path_to_file}/lintransform.pt')
+        if os.path.isfile(f'{self.cfg.save_path}/lintransform.pt'):
+            print(f'Linear transform loaded from {self.cfg.save_path}/lintransform.pt')
+            self.linear_transform = torch.load(f'{self.cfg.save_path}/lintransform.pt')
+            assert self.linear_transform.shape == torch.Size([self.cfg.state_dim + self.cfg.noise_dim, self.cfg.n_out_feats])
+        else:
+            self.linear_transform = torch.rand(self.cfg.state_dim + self.cfg.noise_dim, self.cfg.n_out_feats)
+            torch.save(self.linear_transform, f'{self.cfg.save_path}/lintransform.pt')
+            print(f'Linear transform matrix saved at {self.cfg.save_path}/lintransform.pt')
 
     def state_dict(self):
         state = {'weights': self.linear_transform}

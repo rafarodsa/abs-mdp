@@ -28,6 +28,7 @@ loss:
   n_samples: 1
 data:
   data_path: ${experiment_cwd}/data/simple_v1.zip
+  save_path: ${save_path}
   batch_size: ${batch_size}
   num_workers: 1
   train_split: 0.8
