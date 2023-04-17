@@ -33,8 +33,10 @@ def run(cfg, ckpt=None, args=None):
     
     set_seeds(cfg.seed)
     save_path = f'{cfg.save_path}/{args.tag}'
+    os.makedirs(save_path, exist_ok=True)
+    cfg.save_path = save_path
     checkpoint_callback = ModelCheckpoint(
-        monitor='nll_loss',
+        monitor='val_nll',
         dirpath=f'{save_path}/phi_train/ckpts/',
         filename='infomax-pb-{epoch:02d}-{nll_loss:.2f}',
         save_top_k=3
@@ -50,9 +52,10 @@ def run(cfg, ckpt=None, args=None):
         name='infomax-pb',
     )    
 
-    model = InfomaxAbstraction(cfg) 
-    os.makedirs(save_path, exist_ok=True)
+    
     cfg.data.save_path = save_path
+
+    model = InfomaxAbstraction(cfg) 
     data = PinballDataset(cfg.data)
     
     # training

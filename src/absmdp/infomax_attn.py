@@ -57,7 +57,7 @@ class InfomaxAbstraction(pl.LightningModule):
 		z = self.encoder(state)
 		t_in = torch.cat([z, action], dim=-1)
 		next_z = self.transition.distribution(t_in).mean + z
-		q_s_prime = self.grounding.distribution(t_in)
+		q_s_prime = self.grounding.distribution(torch.cat([next_z, torch.zeros_like(action)], dim=-1))
 		q_s = self.decoder.distribution(torch.cat([next_z, torch.zeros_like(action)], dim=-1))
 		return q_s, q_s_prime
 
@@ -151,11 +151,20 @@ class InfomaxAbstraction(pl.LightningModule):
 		return loss
 
 	def validation_step(self, batch, batch_idx):
-		s, a, next_s = batch.obs, batch.action, batch.next_obs
-		qs, q_s_prime = self.forward(s, a)
+		s, a, next_s, executed, initset_s = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets
+		assert torch.all(executed) # check all samples are successful executions.
 		
-		nll_loss = -q_s_prime.log_prob(next_s).mean()
-		self.log_dict({'nll_loss': nll_loss},on_step=False, on_epoch=True, prog_bar=True, logger=True)
+		infomax, transition_loss, info_loss_z, initset_loss, _ = self._run_step(s, a, next_s, initset_s)
+		_, q_next_s = self.forward(s, a)
+		nll_loss = -q_next_s.log_prob(next_s).mean()
+		logs = {
+				'val_infomax': infomax.mean(),
+				'val_transition_loss': transition_loss.mean(),
+				'val_info_loss_z': info_loss_z.mean(),
+				'val_initset_loss': initset_loss.mean(),
+				'val_nll': nll_loss,
+	  		}
+		self.log_dict(logs, on_step=False, on_epoch=True, prog_bar=True, logger=True)
 		return nll_loss
 	
 	def test_step(self, batch, batch_idx):

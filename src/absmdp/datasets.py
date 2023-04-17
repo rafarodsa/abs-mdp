@@ -240,7 +240,7 @@ class PinballDataset(pl.LightningDataModule):
                             partial(compute_return, gamma=cfg.gamma), 
                             partial(one_hot_actions, cfg.n_options),
                         ]
-        if (cfg.linear_transform or cfg.state_dim != cfg.n_out_feats) and self.obs_type != 'pixels':
+        if (cfg.linear_transform or cfg.state_dim + cfg.noise_dim != cfg.n_out_feats) and self.obs_type != 'pixels':
             self._load_linear_transform()
             self.transforms.append(partial(linear_projection, linear_projection=self.linear_transform, noise_level=cfg.noise_level))
 
