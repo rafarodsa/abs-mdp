@@ -21,7 +21,7 @@ save_path: ${experiment_cwd}/mdps
 loss:
   grounding_const: 1.
   kl_const: 1
-  transition_const: 0.1
+  transition_const: 1
   reward_const: 1
   tau_const: 1.
   initset_const: 1
@@ -30,14 +30,14 @@ data:
   data_path: ${experiment_cwd}/data/simple-v1.zip
   save_path: ${save_path}
   batch_size: ${batch_size}
-  num_workers: 1
+  num_workers: 0
   train_split: 0.8
   val_split: 0.1
   test_split: 0.1
   shuffle: True  
   n_reward_samples: 5
   n_options: ${model.n_options}
-  n_out_feats: 25
+  n_out_feats: 4
   state_dim : 4
   obs_type: simple
   gamma: 0.99
