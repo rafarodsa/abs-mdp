@@ -30,16 +30,18 @@ def parse_oc_args(oc_args):
 
 # load the config
 def run(cfg, ckpt=None, args=None):
+    torch.set_float32_matmul_precision('medium')
     
     # set_seeds(cfg.seed)
     save_path = f'{cfg.save_path}/{args.tag}'
     os.makedirs(save_path, exist_ok=True)
     cfg.save_path = save_path
     checkpoint_callback = ModelCheckpoint(
-        monitor='val_nll',
+        monitor='val_infomax',
         dirpath=f'{save_path}/phi_train/ckpts/',
-        filename='infomax-pb-{epoch:02d}-{nll_loss:.2f}',
-        save_top_k=3
+        filename='infomax-pb-{epoch:02d}-{val_infomax:.2f}',
+        save_top_k=3,
+        save_last=True
     )
 
     logger = TensorBoardLogger(

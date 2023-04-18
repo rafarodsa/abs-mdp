@@ -8,5 +8,5 @@ dist:
   type: diag_gaussian
   output_dim: ${model.latent_dim}
   input_dim: ${model.latent_dim}
-  min_std: 0.0001
+  min_std: 0.001
   max_std: 100

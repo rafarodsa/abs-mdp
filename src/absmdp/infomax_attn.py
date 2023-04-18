@@ -58,7 +58,7 @@ class InfomaxAbstraction(pl.LightningModule):
 		t_in = torch.cat([z, action], dim=-1)
 		next_z = self.transition.distribution(t_in).mean + z
 		q_s_prime = self.grounding.distribution(torch.cat([next_z, torch.zeros_like(action)], dim=-1))
-		q_s = self.decoder.distribution(torch.cat([next_z, torch.zeros_like(action)], dim=-1))
+		q_s = self.grounding.distribution(torch.cat([z, torch.zeros_like(action)], dim=-1))
 		return q_s, q_s_prime
 
 	def _run_step(self, s, a, next_s, initset_s):
@@ -77,38 +77,39 @@ class InfomaxAbstraction(pl.LightningModule):
 		
 		z_in = torch.cat([z, torch.zeros_like(actions)], dim=-1)
 		s_q_pred = self.grounding.distribution(z_in.detach())
-		info_loss_z = self.infomax_loss(s, s_q_pred, n_samples=1)
+		nll_s = self.infomax_loss(s, s_q_pred, n_samples=1)
 		
 		transition_loss = self.transition_loss(z.detach(), next_z.detach(), a)
 
 		# decode next latent state
 		self.decoder.load_state_dict(self.grounding.state_dict())
 		q_s = self.decoder.freeze().distribution(z_in)
-		info_loss_z = -self.info_bottleneck(s, q_s) + info_loss_z
+		info_loss_z = -self.info_bottleneck(s, q_s)
 		
 		# initsets
 		
 		initset_pred = self.initsets(z)
 		initset_loss = F.binary_cross_entropy_with_logits(initset_pred, initset_s, reduction='none').mean(-1)
 		# printarr(info_loss_z, infomax_loss, transition_loss, z_norm, initset_loss)
-		return infomax_loss, transition_loss, info_loss_z, initset_loss, z_norm
+		return infomax_loss, transition_loss, info_loss_z, initset_loss, z_norm, nll_s
 
 
 	def step(self, batch, batch_idx):
 		s, a, next_s, executed, initset_s = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets
 		assert torch.all(executed) # check all samples are successful executions.
 		
-		infomax, transition_loss, info_loss_z, initset_loss, z_norm = self._run_step(s, a, next_s, initset_s)
+		infomax, transition_loss, info_loss_z, initset_loss, z_norm, nll_s = self._run_step(s, a, next_s, initset_s)
 
 		# compute total loss
 		free_bits = torch.minimum(z_norm-1e-2, torch.zeros_like(z_norm))
-		loss = infomax + self.hyperparams.kl_const * info_loss_z + initset_loss * self.hyperparams.initset_const + transition_loss * self.hyperparams.transition_const + 0.01 * z_norm - free_bits
+		loss = infomax + nll_s + self.hyperparams.kl_const * info_loss_z + initset_loss * self.hyperparams.initset_const + transition_loss * self.hyperparams.transition_const + 0.01 * z_norm - free_bits
 		loss = loss.mean()
 
 		# log std deviations for encoder.
 		logs = {
 			'infomax': infomax.mean(),
 			'info_loss_z': info_loss_z.mean(),
+			'nll_s': nll_s.mean(),
 			'transition_loss': transition_loss.mean(),
 			'initset_loss': initset_loss.mean(),
 			'train_loss': loss, 
@@ -117,7 +118,6 @@ class InfomaxAbstraction(pl.LightningModule):
 		logger.debug(f'Losses: {logs}')
 		return loss, logs
 	
-
 	# def attn(self, z, o):
 	# 	n_option = o.argmax(dim=-1)
 	# 	option_embedding = self.option_embedding(n_option)
@@ -154,7 +154,7 @@ class InfomaxAbstraction(pl.LightningModule):
 		s, a, next_s, executed, initset_s = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets
 		assert torch.all(executed) # check all samples are successful executions.
 		
-		infomax, transition_loss, info_loss_z, initset_loss, _ = self._run_step(s, a, next_s, initset_s)
+		infomax, transition_loss, info_loss_z, initset_loss, _, _ = self._run_step(s, a, next_s, initset_s)
 		_, q_next_s = self.forward(s, a)
 		nll_loss = -q_next_s.log_prob(next_s).mean()
 		logs = {

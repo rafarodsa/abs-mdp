@@ -173,6 +173,9 @@ class PinballDataset_(torch.utils.data.Dataset):
                     noise, noise_next = self._noise_process(n_samples, self.noise_level, self.noise_dim, self.ar_coeff)
                     obs = np.concatenate([obs[sample], noise], axis=1)
                     next_obs = np.concatenate([next_obs[sample], noise_next], axis=1)
+                else:
+                    obs = obs[sample]
+                    next_obs = next_obs[sample]
                 # append current datum
                 obs = np.concatenate([current_obs[np.newaxis, :], obs], axis=0)
                 next_obs = np.concatenate([current_next_obs[None, :], next_obs], axis=0)
@@ -282,11 +285,14 @@ class PinballDataset(pl.LightningDataModule):
             print(f'Linear transform matrix saved at {self.cfg.save_path}/lintransform.pt')
 
     def state_dict(self):
-        state = {'weights': self.linear_transform}
-        return state
+        if self.cfg.linear_transform:
+            state = {'weights': self.linear_transform}
+            return state
+        return None
     
     def load_state_dict(self, state_dict):
-        self.linear_transform = state_dict['weights']
+        if self.cfg.linear_transform:
+            self.linear_transform = state_dict['weights']
     
 class InitiationDS(Dataset):
     def __init__(self, dataset_path, n_actions, dtype=torch.float32):
