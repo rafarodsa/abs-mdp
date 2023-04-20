@@ -56,6 +56,7 @@ class InfomaxAbstraction(pl.LightningModule):
 	def forward(self, state, action):
 		z = self.encoder(state)
 		t_in = torch.cat([z, action], dim=-1)
+		# printarr(z)
 		next_z = self.transition.distribution(t_in).mean + z
 		q_s_prime = self.grounding.distribution(torch.cat([next_z, torch.zeros_like(action)], dim=-1))
 		q_s = self.grounding.distribution(torch.cat([z, torch.zeros_like(action)], dim=-1))
@@ -65,7 +66,7 @@ class InfomaxAbstraction(pl.LightningModule):
 		# sample encoding of (s, s')
 		z = self.encoder(s)
 		z_norm = z.pow(2).sum(-1)
-		noise_std = 1e-3
+		noise_std = 1e-2
 		z = z + torch.rand_like(z) * noise_std
 		next_z  = self.encoder(next_s) + torch.rand_like(z) * noise_std
 
@@ -103,8 +104,8 @@ class InfomaxAbstraction(pl.LightningModule):
 
 		# compute total loss
 		free_bits = torch.minimum(z_norm-1e-2, torch.zeros_like(z_norm))
-		_lambda = 1e-4
-		loss = infomax + nll_s + self.hyperparams.kl_const * info_loss_z + initset_loss * self.hyperparams.initset_const + transition_loss * self.hyperparams.transition_const + _lambda * z_norm - free_bits
+		_lambda = 1e-1
+		loss = infomax + nll_s + self.hyperparams.kl_const * info_loss_z + initset_loss * self.hyperparams.initset_const  + _lambda * z_norm - free_bits + transition_loss * self.hyperparams.transition_const
 		loss = loss.mean()
 
 		# log std deviations for encoder.

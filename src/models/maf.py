@@ -36,7 +36,6 @@ class MAFBlock(nn.Module):
             u: sample from initial distribution
         '''
         x = torch.zeros_like(u)
-        printarr(x, u)
         for j in range(self.input_dim):
             i = self.order[j]
             # log_s = torch.clamp(self.scale(x), min=-7)
@@ -89,8 +88,13 @@ class ConditionalMAFBlock(MAFBlock):
             cond: conditioning variable
         '''
         m, log_s = self.mean(x, cond), self.scale(x, cond)
-        s = torch.exp(log_s)
-        u = (x - m) / s
+        # printarr(log_s, m)
+        log_s = torch.clamp(log_s, min=-10, max=10)
+        inv_s = torch.exp(-log_s)
+        # print(torch.isfinite(s))
+        u = (x - m) * inv_s
+        # if torch.any(torch.isnan(u)) or not torch.all(torch.isfinite(u)):
+        #     printarr(u, inv_s, m, x)
         return u, m, log_s
     
     def inverse(self, u, cond):
@@ -147,13 +151,13 @@ class MAFDist:
             p.requires_grad_ = False
         return self
     def sample(self, n=1):
-        printarr(self.cond)
+        # printarr(self.cond)
         h = self.maf.features(self.cond)
         cond = h.repeat_interleave(n, dim=0)
         u = torch.randn(cond.shape[0], self.maf.input_dim)
-        printarr(u, cond)
+        # printarr(u, cond)
         samples = self.maf.inverse(u, cond)[0].reshape(self.cond.shape[0], n, self.maf.input_dim).permute(0, 2, 1)
-        printarr(samples)
+        # printarr(samples)
         return samples
 
 class MAFDistribution(ConditionalMAF):

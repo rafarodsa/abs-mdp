@@ -12,6 +12,7 @@ from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
 import yaml, os
 
 def set_seeds(seed):
+    print(f'Seed set to {seed}')
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
@@ -30,9 +31,8 @@ def parse_oc_args(oc_args):
 
 # load the config
 def run(cfg, ckpt=None, args=None):
-    torch.set_float32_matmul_precision('medium')
-    
-    # set_seeds(cfg.seed)
+    # torch.set_float32_matmul_precision('medium')
+    set_seeds(cfg.seed)
     save_path = f'{cfg.save_path}/{args.tag}'
     os.makedirs(save_path, exist_ok=True)
     cfg.save_path = save_path
@@ -71,6 +71,7 @@ def run(cfg, ckpt=None, args=None):
                         log_every_n_steps=15,
                         callbacks=[checkpoint_callback], 
                         logger=[logger, csv_logger],
+                        detect_anomaly=False
                     )
     trainer.fit(model, data, ckpt_path=ckpt)
     test_results = trainer.test(model, data)

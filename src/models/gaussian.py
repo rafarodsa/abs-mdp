@@ -78,7 +78,8 @@ class DiagonalGaussianModule(nn.Module):
 
     def forward(self, input):
         feats = self.feats(input)
-        mean, log_var = self.mean(F.leaky_relu(feats)), self.log_var(F.leaky_relu(feats))
+        # mean, log_var = self.mean(F.leaky_relu(feats)), self.log_var(F.leaky_relu(feats))
+        mean, log_var = self.mean(F.elu(feats)), self.log_var(F.elu(feats))
         
         #softly constrain the variance
         log_var = self.max_var - F.softplus(self.max_var - log_var)
