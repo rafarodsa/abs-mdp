@@ -86,7 +86,7 @@ class InfomaxAbstraction(pl.LightningModule):
 		# decode next latent state
 		self.decoder.load_state_dict(self.grounding.state_dict())
 		q_s = self.decoder.freeze().distribution(z_in)
-		info_loss_z = -self.info_bottleneck(s, q_s)
+		info_loss_z = self.info_bottleneck(s, q_s)
 		
 		# initsets
 		
