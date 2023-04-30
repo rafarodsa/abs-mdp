@@ -29,7 +29,6 @@ def ball_collides(pinball_env, initial_position, final_position):
             # print(f'Obstacle intersected: {initial_position}->{final_position}')
             return True
     return False
-        
 
 def _intersect_obstable(obstacle, initial_position, final_position, ball_radius=0.02):
     points = obstacle.points
@@ -73,6 +72,65 @@ def _intersect(edge, initial_position, final_position, ball_rad=0.02):
     except np.linalg.LinAlgError:
         alpha, beta = np.float('inf'), np.float('inf')
     return alpha, beta
+
+def _intersect_batch(edges, initial_positions, final_positions, ball_rad=0.02):
+    '''
+        edges: batch of edges (M, 2, 2)
+        initial_positions: batch of initial positions (N, 2)
+        final_positions: batch of final positions (N, 2)
+    '''
+    N, M = initial_positions.shape[0], edges.shape[0]
+    displacement = final_positions - initial_positions # [N, 2]
+    d = np.linalg.norm(displacement, axis=1) + 1e-12
+    displacement = ball_rad * displacement/d[:, None] + displacement # [N, 2]
+    edge_segment = edges[:, 1] - edges[:, 0] # [M, 2]
+    b = edges[:, np.newaxis, 0] - initial_positions[np.newaxis] # [M, N, 2]
+    
+    # repeat displacement and edge_segment to match batch size
+    displacement = np.tile(displacement[np.newaxis], reps=(M, 1, 1)) # [M, N, 2]
+    edge_segment = np.repeat(edge_segment[:, np.newaxis], N, axis=1) # [M, N, 2]
+
+    A = np.concatenate([displacement[:, :, np.newaxis], -edge_segment[:, :, np.newaxis]], axis=2) + 1e-12 # [M, N, 2, 2]
+    A = np.transpose(A, axes=(0, 1, 3, 2)) # [M, N, 2, 2]
+    # invert batch of matrices
+    A_inv = np.linalg.inv(A) # [M, N, 2, 2]
+    # compute coefficients
+    coeff = np.einsum('mnij, mnj -> mni', A_inv, b) # [M, N, 2]
+    alpha, beta = coeff[:, :, 0], coeff[:, :, 1] # [M, N]
+    return alpha, beta
+
+
+def initiation_set_batch(pinball_env, distance):
+    _edges = []
+    for obstacle in pinball_env.get_obstacles():
+        points = obstacle.points
+        a, b = tee(np.vstack([np.array(points), points[0]]))
+        next(b, None)
+        e = list(zip(a, b))
+        edges = np.array(e)
+        _edges.append(edges)
+    edges = np.concatenate(_edges, axis=0)
+
+    def __initiation(state):
+        if len(state.shape) == 1: # not batched
+            state = state[np.newaxis]
+        return np.logical_not(ball_collides_batch(edges, state[:, :2], state[:, :2] + distance))
+    return __initiation
+
+def ball_collides_batch(edges, initial_positions, final_positions, ball_radius=0.02):
+    '''
+        initial_positions: batch of initial positions (N, 2)
+        final_positions: batch of final positions (N, 2)
+    '''
+    alpha, beta = _intersect_batch(edges, initial_positions, final_positions, ball_radius)
+    
+    # intersections = (alpha <= 1) * (alpha >= 0) * (beta >= 0) * (beta <= 1)  # [M, N]
+    _intersections = np.logical_and(np.logical_and(alpha <= 1, alpha >= 0), np.logical_and(beta >= 0, beta <= 1)) # [M, N]
+    theres_collision = np.any(_intersections, axis=0) # N
+    return theres_collision
+
+
+
 
 def termination_position(init_state, distance, std_dev=0.001):
     """
@@ -223,6 +281,7 @@ def create_position_options(env, translation_distance=1/15, std_dev=0.01):
     return position_options
 
 def compute_grid_goal(position, direction, n_pos, tol, min_pos=0.05, max_pos=0.95):
+        batch = position.shape[0] if len(position.shape) > 1 else 1
         step = (max_pos - min_pos) / n_pos
         pos_ = (position - min_pos) / (max_pos-min_pos) * np.abs(direction) * n_pos
         min_i, max_i = np.floor(pos_), np.ceil(pos_) # closest grid position to move
@@ -238,10 +297,14 @@ def compute_grid_goal(position, direction, n_pos, tol, min_pos=0.05, max_pos=0.9
         # print(goal_correction, np.floor(goal_correction), np.ceil(goal_correction))
         min_p, max_p = step * np.floor(goal_correction) + min_pos, step * np.ceil(goal_correction) + min_pos # closest grid position to move
         # print(min_p, max_p)
-        distance_min, distance_max = (np.abs(min_p - position) * other_dir).sum(), (np.abs(max_p - position) * other_dir).sum()
-        goal_correction = min_p if distance_min < distance_max else max_p
-        if np.abs(goal_correction - position).sum() > tol:
-            goal = goal * (direction != 0) + goal_correction * (direction == 0)
+        distance_min, distance_max = (np.abs(min_p - position) * other_dir).sum(-1), (np.abs(max_p - position) * other_dir).sum(-1)
+        if batch == 1:
+            goal_correction = min_p if distance_min < distance_max else max_p
+            if np.abs(goal_correction - position).sum(-1) > tol:
+                goal = goal * (direction != 0) + goal_correction * (direction == 0)
+        else:
+            goal_correction = np.where((distance_min < distance_max)[:, np.newaxis], min_p, max_p)
+            goal = np.where(np.abs(goal_correction - position).sum(-1, keepdims=True) > tol, goal * (direction != 0) + goal_correction * (direction == 0), goal)
 
         goal = goal.clip(min_pos, max_pos)
         # print(f'Direction {direction}, Position {position} -> Goal {goal}')
@@ -259,9 +322,31 @@ def PinballGridOptions(env, n_pos=20, tol=1/20/5):
 
 
     def initiation_set(env, direction):
+        _edges = []
+        for obstacle in env.get_obstacles():
+            points = obstacle.points
+            a, b = tee(np.vstack([np.array(points), points[0]]))
+            next(b, None)
+            e = list(zip(a, b))
+            edges = np.array(e)
+            _edges.append(edges)
+        edges = np.concatenate(_edges, axis=0)
+
         def __initiation(state):
-            goal = compute_grid_goal(state[:2], direction, n_pos, tol)
-            executable = not ball_collides(env, state[:2], goal)
+            batch = 1 if len(state.shape) == 1 else state.shape[0]
+            if batch == 1:
+                state = state.reshape(1, -1)
+            goal = compute_grid_goal(state[:, :2], direction, n_pos, tol)
+            
+            # if batch > 1:
+            #     goals = [compute_grid_goal(state[i, :2], direction, n_pos, tol) for i in range(batch)]
+            #     goal_test = np.vstack(goals)
+            #     # print(goal_test, goal)
+            #     assert np.allclose(goal, goal_test)
+
+            executable = 1-ball_collides_batch(edges, state[:, :2], goal)
+            if batch == 1:
+                executable = executable[0]
             # print(f'State {state} -> Goal {goal} is executable: {executable}')
             return executable
         return __initiation

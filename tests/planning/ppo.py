@@ -1,4 +1,4 @@
-from envs.pinball.pinball_gym import PinballEnvContinuous
+from envs.pinball.pinball_gym import PinballEnvContinuous, PinballEnv
 from envs.pinball.controllers_pinball import PinballGridOptions
 from envs.env_options import EnvOptionWrapper
 from envs.env_goal import EnvGoalWrapper
@@ -18,7 +18,7 @@ import torch.nn as nn
 
 
 # goal
-def goal_fn(state, goal=[0.55, 0.5], goal_tol=0.06):
+def goal_fn(state, goal=[0.5, 0.06], goal_tol=1/20):
     return np.linalg.norm(state[:2] - goal) <= goal_tol
 
 def make_env(idx, test, process_seeds, args):
@@ -202,7 +202,6 @@ def main():
     n_actions = sample_env.action_space.n
     obs_n_channels = sample_env.observation_space.low.shape[0]
     del sample_env, env
-
   
 
     model_features = nn.Sequential(
@@ -234,7 +233,7 @@ def main():
         clip_eps=0.1,
         clip_eps_vf=None,
         standardize_advantages=True,
-        entropy_coef=1e-2,
+        entropy_coef=1e-1,
         recurrent=False,
         max_grad_norm=0.5,
         gamma=0.99,
@@ -249,7 +248,7 @@ def main():
             agent=agent,
             n_steps=None,
             n_episodes=args.eval_n_runs,
-            max_episode_len=100
+            max_episode_len=1000
         )
         print(
             "n_runs: {} mean: {} median: {} stdev: {}".format(
@@ -284,7 +283,7 @@ def main():
             save_best_so_far_agent=True,
             step_hooks=step_hooks,
             use_tensorboard=True,
-            max_episode_len=500
+            max_episode_len=100
         )
 
 

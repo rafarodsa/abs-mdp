@@ -103,7 +103,6 @@ def collect_trajectory(env, options, obs_type='simple', max_exec_time=200, horiz
 
         if np.sum(initiation_mask_s) == 0:
             break # no options available
-
         option_n = np.random.choice(len(options), p=initiation_mask_s/np.sum(initiation_mask_s)) # sample option uniformly
         option = options[option_n]
         try:
