@@ -46,7 +46,7 @@ class PinballEnv(gym.Env):
         self.clock = None
 
         self.pinball = GoalPinballModel(self.configuration)
-        self.state = self.pinball.get_state()
+        # self.state = self.pinball.get_state()
         self._obstacles = [Path(obstacle.points) for obstacle in self.pinball.obstacles]
         if start_pos:
             self.pinball.set_initial_pos(start_pos)
@@ -162,6 +162,10 @@ class PinballEnv(gym.Env):
             return np.transpose(
                 np.array(pygame.surfarray.pixels3d(self.screen))/255, axes=(1, 0, 2)
             )
+    @property
+    def state(self):
+        return np.array(self.pinball.get_state())
+    
 
 class DummyDict(UserDict):
     def __init__(self, default_value_f):

@@ -247,7 +247,7 @@ def compute_grid_goal(position, direction, n_pos, tol, min_pos=0.05, max_pos=0.9
         # print(f'Direction {direction}, Position {position} -> Goal {goal}')
         return goal
 
-def PinballGridOptions(env, n_pos, tol=1e-3):
+def PinballGridOptions(env, n_pos=20, tol=1/20/5):
     '''
         Options to move agent in the four coordinate dimensions to fixed positions in 
         the space.
