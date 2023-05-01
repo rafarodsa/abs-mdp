@@ -11,7 +11,7 @@ import lightning as pl
 from functools import partial, reduce
 from typing import NamedTuple, List, Dict, Optional
 
-import zipfile
+import zipfile, random
 from PIL import Image
 from collections import namedtuple
 from typing import NamedTuple
@@ -95,11 +95,17 @@ class PinballDataset_(torch.utils.data.Dataset):
         self.ar_coeff = ar_coeff
         self.load()
         self.data = self.process_trajectories(self.trajectories)
+        
 
     def load(self):
         with zipfile.ZipFile(self.zfile_name, 'r') as zfile:
             self.trajectories = torch.load(zfile.open('transitions.pt'))
             self.rewards = torch.load(zfile.open('rewards.pt'))
+            self.data_path = f'.data/tmp_{random.randint(100000,1000233203)}/{self.zfile_name.split("/")[-1]}'
+            if not os.path.exists(self.data_path):
+                for imgs in zfile.namelist():
+                    if '.png' in imgs:
+                        zfile.extract(imgs, path=self.data_path)
         self.images_loaded = {}
 
     def __getitem__(self, index):
@@ -127,11 +133,11 @@ class PinballDataset_(torch.utils.data.Dataset):
             return self.images_loaded[img_path]
         else: # load
             try:
-                img = self.zfile.open(img_path)
-                img_ = Image.open(img)
-                img_ = np.array(img_)
-                img_ = self._process_pixel_obs(img_)
-                self.images_loaded[img_path] = img_
+                with Image.open(f'{self.data_path}/{img_path}') as img:
+                    # img_ = Image.open(img)
+                    img_ = np.array(img)
+                    img_ = self._process_pixel_obs(img_)
+                    self.images_loaded[img_path] = img_
             except:
                 raise ValueError(f'Image {img_path} could not be opened')
             return img_
@@ -165,6 +171,8 @@ class PinballDataset_(torch.utils.data.Dataset):
                 obs_imgs.append(self.get_image_obs(current_obs))
                 next_obs_imgs.append(self.get_image_obs(current_next_obs))
                 obs, next_obs = np.array(obs_imgs), np.array(next_obs_imgs)
+                current_rewards = np.array(current_rewards)[None, :]
+                rewards = np.concatenate([current_rewards, rews[sample]], axis=0)
                 # obs = obs.transpose(0, 3, 1, 2)
                 # next_obs = next_obs.transpose(0, 3, 1, 2)
             else:
@@ -293,6 +301,10 @@ class PinballDataset(pl.LightningDataModule):
     def load_state_dict(self, state_dict):
         if self.cfg.linear_transform:
             self.linear_transform = state_dict['weights']
+            
+    def teardown(self, stage: str):
+        # os.rmdir(self.dataset.data_path)
+        pass
     
 class InitiationDS(Dataset):
     def __init__(self, dataset_path, n_actions, dtype=torch.float32):

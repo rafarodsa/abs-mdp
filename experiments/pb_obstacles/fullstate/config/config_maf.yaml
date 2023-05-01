@@ -6,7 +6,7 @@ seed: 0
 optimizer:
   type: 'adam'
   params:
-    lr: 5e-5
+    lr: 1e-4
 scheduler:
   type: 'linear_scheduler'
   params:
@@ -14,7 +14,8 @@ scheduler:
     end_factor: 1.
     total_iters: 1.
 batch_size: 256
-epochs: 1000
+epochs: 500
+warmup: 1.
 accelerator: gpu
 devices: 1
 save_path: ${experiment_cwd}/mdps
@@ -30,7 +31,7 @@ data:
   data_path: ${experiment_cwd}/data/simple-v1.zip
   save_path: ${save_path}
   batch_size: ${batch_size}
-  num_workers: 3
+  num_workers: 2
   train_split: 0.8
   val_split: 0.1
   test_split: 0.1

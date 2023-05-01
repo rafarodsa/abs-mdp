@@ -9,6 +9,6 @@ dist:
   type: maf
   input_dim: ${model.decoder.features.output_dim}
   hidden_dims:
-  - 64
+  - 128
   output_dim: ${model.obs_dims}
   num_blocks: 10

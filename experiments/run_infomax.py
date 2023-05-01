@@ -9,6 +9,7 @@ import torch, random, numpy as np
 import logging
 from lightning.pytorch.callbacks import ModelCheckpoint, ModelSummary
 from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
+from src.absmdp.utils import IBScheduler
 import yaml, os
 
 def set_seeds(seed):
@@ -31,8 +32,8 @@ def parse_oc_args(oc_args):
 
 # load the config
 def run(cfg, ckpt=None, args=None):
-    # torch.set_float32_matmul_precision('medium')
-    set_seeds(cfg.seed)
+    torch.set_float32_matmul_precision('medium')
+    
     save_path = f'{cfg.save_path}/{args.tag}'
     os.makedirs(save_path, exist_ok=True)
     cfg.save_path = save_path
@@ -54,11 +55,12 @@ def run(cfg, ckpt=None, args=None):
         name='infomax-pb',
     )    
 
+    # ib_scheduler = IBScheduler(cfg.warmup * cfg.epochs)
     
     cfg.data.save_path = save_path
-
-    model = InfomaxAbstraction(cfg) 
+    set_seeds(cfg.seed)
     data = PinballDataset(cfg.data)
+    model = InfomaxAbstraction(cfg) 
     
     # training
     trainer = pl.Trainer(
@@ -71,17 +73,23 @@ def run(cfg, ckpt=None, args=None):
                         log_every_n_steps=15,
                         callbacks=[checkpoint_callback], 
                         logger=[logger, csv_logger],
-                        detect_anomaly=False
+                        detect_anomaly=False,
+                        # overfit_batches=0.20
+                        # profiler='advanced'
                     )
     trainer.fit(model, data, ckpt_path=ckpt)
     test_results = trainer.test(model, data)
     yaml.dump(test_results, open(f'{save_path}/phi_train/test_results.yaml', 'w'))
     return model
 
-def train_mdp(cfg, ckpt, args):
+def train_mdp(cfg, ckpt, args): 
+    torch.set_float32_matmul_precision('medium')
+    save_path = f'{cfg.save_path}/{args.tag}'
     if ckpt is None:
-        raise ValueError("Must provide an abstraction checkpoint to train MDP. Run abstraction first.")
-
+        # raise ValueError("Must provide an abstraction checkpoint to train MDP. Run abstraction first.")
+        ckpt = f'{save_path}/phi_train/ckpts/last.ckpt'
+    print(f'Loading {ckpt}')
+         
     phi = InfomaxAbstraction.load_from_checkpoint(ckpt)
     model = AbstractMDPTrainer(cfg, phi)
     data = PinballDataset(cfg.data)
@@ -92,7 +100,7 @@ def train_mdp(cfg, ckpt, args):
                         num_nodes=args.num_nodes,
                         strategy=args.strategy,
                         max_epochs=cfg.epochs, 
-                        default_root_dir=f'{cfg.save_path}/mdp_train',
+                        default_root_dir=f'{save_path}/mdp_train',
                         log_every_n_steps=15,
                     )
 
@@ -125,7 +133,7 @@ def main():
     if not args.train_mdp:
         run(cfg, args.from_ckpt, args)
     else:
-        train_mdp(cfg, args.from_ckpt, args)
+        train_mdp(cfg.cfg, args.from_ckpt, args)
 
 if __name__ == "__main__":
     main()

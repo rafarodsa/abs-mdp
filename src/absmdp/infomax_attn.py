@@ -48,6 +48,7 @@ class InfomaxAbstraction(pl.LightningModule):
 		self.transition = build_distribution(cfg.model.transition)
 		self.grounding = build_distribution(cfg.model.decoder)
 		self.decoder = build_distribution(cfg.model.decoder)
+		self.decoder.requires_grad_ = False
 		self.initsets = build_model(cfg.model.init_class)
 		self.lr = cfg.optimizer.params.lr
 		self.hyperparams = cfg.loss
@@ -64,6 +65,7 @@ class InfomaxAbstraction(pl.LightningModule):
 
 	def _run_step(self, s, a, next_s, initset_s):
 		# sample encoding of (s, s')
+		self.decoder.load_state_dict(self.grounding.state_dict())
 		z = self.encoder(s)
 		z_norm = z.pow(2).sum(-1)
 		noise_std = 1e-2
@@ -77,22 +79,27 @@ class InfomaxAbstraction(pl.LightningModule):
 		next_s_q_pred = self.grounding.distribution(t_in)
 		infomax_loss = self.infomax_loss(next_s, next_s_q_pred, n_samples=1)
 		
-		z_in = torch.cat([next_z, torch.zeros_like(actions)], dim=-1)
+		# z_in = torch.cat([next_z, torch.zeros_like(actions)], dim=-1)
+		# s_q_pred = self.grounding.distribution(z_in.detach())
+		# nll_s = self.infomax_loss(next_s, s_q_pred, n_samples=1)
+
+		z_in = torch.cat([z, torch.zeros_like(actions)], dim=-1)
 		s_q_pred = self.grounding.distribution(z_in.detach())
-		nll_s = self.infomax_loss(next_s, s_q_pred, n_samples=1)
+		nll_s = self.infomax_loss(s, s_q_pred, n_samples=1)
 		
 		transition_loss = self.transition_loss(z.detach(), next_z.detach(), a)
 
 		# decode next latent state
-		self.decoder.load_state_dict(self.grounding.state_dict())
+		
 		q_s = self.decoder.freeze().distribution(z_in)
-		info_loss_z = -self.info_bottleneck(s, q_s)
+		
+		info_loss_z = self.info_bottleneck(s, q_s)
 		
 		# initsets
 		
 		initset_pred = self.initsets(z)
 		initset_loss = F.binary_cross_entropy_with_logits(initset_pred, initset_s, reduction='none').mean(-1)
-		# printarr(info_loss_z, infomax_loss, transition_loss, z_norm, initset_loss)
+
 		return infomax_loss, transition_loss, info_loss_z, initset_loss, z_norm, nll_s
 
 
@@ -103,9 +110,14 @@ class InfomaxAbstraction(pl.LightningModule):
 		infomax, transition_loss, info_loss_z, initset_loss, z_norm, nll_s = self._run_step(s, a, next_s, initset_s)
 
 		# compute total loss
-		free_bits = torch.minimum(z_norm-1e-2, torch.zeros_like(z_norm))
+		_free_bits = 1e-1
+		free_bits = torch.minimum(z_norm-_free_bits, torch.zeros_like(z_norm))
 		_lambda = 1e-1
-		loss = infomax + nll_s + self.hyperparams.kl_const * info_loss_z + initset_loss * self.hyperparams.initset_const  + _lambda * z_norm - free_bits + transition_loss * self.hyperparams.transition_const
+		_max_norm = 2
+		max_norm = -torch.minimum(_max_norm-z_norm, torch.zeros_like(z_norm))
+
+		kl_const = self.hyperparams.kl_const * self.kl_const
+		loss = infomax + nll_s + kl_const * info_loss_z + initset_loss * self.hyperparams.initset_const  + _lambda * max_norm - free_bits + transition_loss * self.hyperparams.transition_const
 		loss = loss.mean()
 
 		# log std deviations for encoder.
@@ -116,7 +128,8 @@ class InfomaxAbstraction(pl.LightningModule):
 			'transition_loss': transition_loss.mean(),
 			'initset_loss': initset_loss.mean(),
 			'train_loss': loss, 
-			'z_norm': z_norm.mean()
+			'z_norm': z_norm.mean(),
+			'kl_const': kl_const
 		}
 		logger.debug(f'Losses: {logs}')
 		return loss, logs

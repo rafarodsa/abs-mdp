@@ -148,7 +148,7 @@ class MAFDist:
         return self.maf.log_prob(x, self.cond)
     def freeze(self):
         for p in self.maf.parameters():
-            p.requires_grad_ = False
+            p.requires_grad = False
         return self
     def sample(self, n=1):
         # printarr(self.cond)
@@ -181,7 +181,7 @@ class MAFDistribution(ConditionalMAF):
     
     def freeze(self):
         for p in self.parameters():
-            p.requires_grad_ = False
+            p.requires_grad = False
         return self
     
 def CondMAFFactory(cfg):
