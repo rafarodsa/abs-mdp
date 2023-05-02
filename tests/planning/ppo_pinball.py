@@ -9,6 +9,7 @@ import numpy as np
 import pfrl
 from pfrl import experiments, utils
 from pfrl.agents import PPO
+from pfrl.policies import SoftmaxCategoricalHead
 
 
 import argparse, functools
@@ -18,18 +19,19 @@ import torch.nn as nn
 
 
 # goal
-def goal_fn(state, goal=[0.5, 0.06], goal_tol=1/20):
+def goal_fn(state, goal=[0.55, 0.5], goal_tol=0.06):
     return np.linalg.norm(state[:2] - goal) <= goal_tol
 
 def make_env(idx, test, process_seeds, args):
         # Use different random seeds for train and test envs
         process_seed = int(process_seeds[idx])
         env_seed = 2**32 - 1 - process_seed if test else process_seed
-        env = PinballEnvContinuous(config='envs/pinball/configs/pinball_simple_single.cfg')
+        # env = PinballEnvContinuous(config='envs/pinball/configs/pinball_simple_single.cfg')
+        env = PinballEnv(config='envs/pinball/configs/pinball_simple_single.cfg')
         if args.render:
             env.render_mode = 'human'
-        options = PinballGridOptions(env)
-        env = EnvOptionWrapper(options, env)
+        # options = PinballGridOptions(env)
+        # env = EnvOptionWrapper(options, env)
         env = EnvGoalWrapper(env, goal_fn=goal_fn)
         env.seed(env_seed)
         
@@ -202,6 +204,7 @@ def main():
     n_actions = sample_env.action_space.n
     obs_n_channels = sample_env.observation_space.low.shape[0]
     del sample_env, env
+
   
 
     model_features = nn.Sequential(
@@ -211,13 +214,22 @@ def main():
         nn.ReLU()
     )
 
-    model = OptionPolicy(
-                        model_features,
-                        lecun_init(nn.Linear(128, n_actions)),
-                        lecun_init(nn.Linear(128, 1)),
-                        options
-                )
-    
+    # model = OptionPolicy(
+    #                     model_features,
+    #                     lecun_init(nn.Linear(128, n_actions)),
+    #                     lecun_init(nn.Linear(128, 1)),
+    #                     options
+    #             )
+    model = nn.Sequential(
+        model_features,
+        pfrl.nn.Branched(
+            nn.Sequential(
+                lecun_init(nn.Linear(128, n_actions)),
+                SoftmaxCategoricalHead()
+            ),
+            lecun_init(nn.Linear(128, 1)),
+        )
+    )
 
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, eps=1e-5)
 
@@ -248,7 +260,7 @@ def main():
             agent=agent,
             n_steps=None,
             n_episodes=args.eval_n_runs,
-            max_episode_len=1000
+            max_episode_len=100
         )
         print(
             "n_runs: {} mean: {} median: {} stdev: {}".format(
@@ -283,7 +295,7 @@ def main():
             save_best_so_far_agent=True,
             step_hooks=step_hooks,
             use_tensorboard=True,
-            max_episode_len=100
+            max_episode_len=1000
         )
 
 

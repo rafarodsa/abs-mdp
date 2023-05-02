@@ -10,7 +10,12 @@ class EnvGoalWrapper(gym.Env):
         self.observation_space = env.observation_space
     
     def step(self, action):
-        next_s, r, done, truncated, info = self.env.step(action)
+        ret = self.env.step(action)
+        if len(ret) == 4:
+            next_s, r, done, info = ret
+        else:
+            next_s, r, done, truncated, info = ret
+            
         if self.goal_fn(next_s):
             r = self.goal_reward
             done = True
