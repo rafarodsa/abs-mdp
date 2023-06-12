@@ -45,19 +45,19 @@ def make_env(idx, test, process_seeds, args):
         env_seed = 2**32 - 1 - process_seed if test else process_seed
         
     
-        goal_reward = 1000
+        goal_reward = 10000
         if not test:
             env = torch.load(args.absmdp)
-            env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=0.3), goal_reward=goal_reward)
+            env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=0.1), goal_reward=goal_reward)
             env.seed(env_seed)
         else:
             # evaluation in real env
             env = PinballEnvContinuous(config='envs/pinball/configs/pinball_simple_single.cfg')
             if args.render:
                 env.render_mode = 'human'
-            options = create_position_options(env)
+            options = PinballGridOptions(env) #create_position_options(env)
             env = EnvOptionWrapper(options, env)
-            def _goal_fn(state, goal=[0.55, 0.06], goal_tol=0.25):
+            def _goal_fn(state, goal=[0.55, 0.06], goal_tol=1/18):
                 return np.sqrt(np.linalg.norm(state[:2] - goal)) <= goal_tol
             env = EnvGoalWrapper(env, goal_fn=_goal_fn, goal_reward=goal_reward)
         
@@ -244,7 +244,7 @@ def main():
                         model_features,
                         lecun_init(nn.Linear(128, n_actions)),
                         lecun_init(nn.Linear(128, 1)),
-                        lambda s: torch.sigmoid(env.initiation_set(torch.from_numpy(s))) > 0.7
+                        lambda s: (torch.sigmoid(env.initiation_set(torch.from_numpy(s))) > 0.8).float()
                 )
     
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, eps=1e-5)
@@ -261,7 +261,7 @@ def main():
         clip_eps=0.1,
         clip_eps_vf=None,
         standardize_advantages=True,
-        entropy_coef=1e-1,
+        entropy_coef=1e-2,
         recurrent=False,
         max_grad_norm=0.5,
         gamma=0.99 ** 6,
@@ -277,7 +277,7 @@ def main():
             agent=agent,
             n_steps=None,
             n_episodes=args.eval_n_runs,
-            max_episode_len=100
+            max_episode_len=200
         )
         print(
             "n_runs: {} mean: {} median: {} stdev: {}".format(
@@ -312,7 +312,7 @@ def main():
             save_best_so_far_agent=True,
             step_hooks=step_hooks,
             use_tensorboard=True,
-            max_episode_len=100
+            max_episode_len=300
         )
 
 

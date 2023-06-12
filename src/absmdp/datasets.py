@@ -16,6 +16,8 @@ from PIL import Image
 from collections import namedtuple
 from typing import NamedTuple
 
+from src.utils.printarr import printarr
+
 
 class ObservationImgFile(NamedTuple):
     traj: int
@@ -165,6 +167,7 @@ class PinballDataset_(torch.utils.data.Dataset):
                 obs_imgs.append(self.get_image_obs(current_obs))
                 next_obs_imgs.append(self.get_image_obs(current_next_obs))
                 obs, next_obs = np.array(obs_imgs), np.array(next_obs_imgs)
+                current_obs, current_next_obs = self.get_image_obs(current_obs), self.get_image_obs(current_next_obs)
                 # obs = obs.transpose(0, 3, 1, 2)
                 # next_obs = next_obs.transpose(0, 3, 1, 2)
             else:
@@ -177,10 +180,10 @@ class PinballDataset_(torch.utils.data.Dataset):
                     obs = obs[sample]
                     next_obs = next_obs[sample]
                 # append current datum
-                obs = np.concatenate([current_obs[np.newaxis, :], obs], axis=0)
-                next_obs = np.concatenate([current_next_obs[None, :], next_obs], axis=0)
-                current_rewards = np.array(current_rewards)[None, :]
-                rewards = np.concatenate([current_rewards, rews[sample]], axis=0)
+            obs = np.concatenate([current_obs[np.newaxis, :], obs], axis=0)
+            next_obs = np.concatenate([current_next_obs[None, :], next_obs], axis=0)
+            current_rewards = np.array(current_rewards)[None, :]
+            rewards = np.concatenate([current_rewards, rews[sample]], axis=0)
         else:
             obs, next_obs = current_obs.numpy(), current_next_obs.numpy()
             rewards = np.array(current_rewards)

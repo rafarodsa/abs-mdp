@@ -83,8 +83,8 @@ class AbstractMDP(gym.Env):
              self._prepare_initial_states()
         # sample
         sample = np.random.choice(len(self.initial_states), n_samples, replace=True)
-        sample = self.initial_states[sample].squeeze()
-        return self.encode(sample)
+        sample = self.initial_states[sample]
+        return self.encode(sample).squeeze(0)
     
     def _action_to_one_hot(self, action):
         if isinstance(action, (int, np.int64)):
@@ -102,13 +102,13 @@ class AbstractMDP(gym.Env):
             input = torch.cat([state, self._action_to_one_hot(action)], dim=0)
         t = self.transition_fn.distribution(input)
         # print('sampling')
-        # return t.sample()[0] + state
-        return t.mean + state
+        return t.sample()[0] + state
+        # return t.mean + state
     
     def reward(self, state, action, next_state):
         a_ = self._action_to_one_hot(action)
         r_in = torch.cat([state, a_, next_state], dim=-1)
-        return symexp(self.reward_fn(r_in))
+        return torch.clamp(symexp(self.reward_fn(r_in)), max=1e10, min=-1e10)
     
     def tau(self, state, action):
         in_ = torch.cat([state, self._action_to_one_hot(action)], dim=-1)

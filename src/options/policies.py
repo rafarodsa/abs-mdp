@@ -23,8 +23,13 @@ class SoftmaxCategoricalHeadInitiation(policies.SoftmaxCategoricalHead):
 
     def forward(self, s, logits):
         initiation = self._compute_initiation(s.numpy())
-        logits = torch.where(initiation, logits, torch.full_like(logits, -1e20))
-        return super().forward(logits)
+        log_succ = torch.clamp(torch.log(initiation), min=-1e20)
+        log_succ = log_succ - torch.logsumexp(log_succ, dim=1, keepdim=True)
+
+        # logits = torch.where(initiation, logits, torch.full_like(logits, -1e20))
+        log_prob = torch.log_softmax(logits, dim=1) + log_succ
+        dist = torch.distributions.Categorical(logits=log_prob)
+        return dist 
     
 
 class SoftmaxCategoricalHeadOptions(SoftmaxCategoricalHeadInitiation):

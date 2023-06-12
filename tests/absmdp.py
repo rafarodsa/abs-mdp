@@ -5,21 +5,39 @@ import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
 
-path = 'pinball_continuous_09__loss.klconst_0__model.latentdim_2__loss.transitionconst_1/mdp.pt'
+import argparse
 
-mdp = torch.load(path)
+from envs.pinball.pinball_gym import PinballEnvContinuous
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--path', type=str, default='pinball_discrete_1__loss.klconst_0__model.latentdim_2/mdp.pt')
+parser.add_argument('--obs', type=str, default='full')
+args = parser.parse_args()
+
+mdp = torch.load(args.path)
 s = mdp.reset()
 next_s = s
 trajs = []
-goal = np.array([0.5, 0.06, 0., 0.])
+
+if args.obs == 'pixel':
+    env = PinballEnvContinuous(config='envs/pinball/configs/pinball_simple_single.cfg', render_mode='rgb_array', width=25, height=25)
+    s = env.reset()
+    obs = env.render()
+    goal = obs.transpose(2, 0, 1).mean(0, keepdims=True)[np.newaxis]
+else:
+    goal = np.array([0.5, 0.06, 0., 0.])
+
 goal = mdp.encode(torch.from_numpy(goal).float()).numpy()
+
+
 for traj in range(100):
     t = []
     s = mdp.reset()
     next_s = s
-    for i in range(1000):
+    for i in range(100):
         s = next_s
-        initset = torch.sigmoid(mdp.initiation_set(torch.from_numpy(s))).numpy() > 0.5
+        initset = torch.sigmoid(mdp.initiation_set(torch.from_numpy(s))).numpy() > 0.8
+        
         actions_avail = np.nonzero(initset)[0]
         
         sample = np.random.choice(len(actions_avail))
