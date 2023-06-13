@@ -1,0 +1,58 @@
+# Config file for Pinball environment
+# Full State observation
+# Gridworld abstraction
+experiment_cwd: 'experiments/pb_obstacles/fullstate'
+seed: 0
+optimizer:
+  type: 'adam'
+  params:
+    lr: 5e-5
+scheduler:
+  type: 'linear_scheduler'
+  params:
+    start_factor: 1.
+    end_factor: 1.
+    total_iters: 1.
+batch_size: 256
+epochs: 1000
+accelerator: gpu
+devices: 1
+save_path: ${experiment_cwd}/mdps
+loss:
+  grounding_const: 1.
+  tpc_const: 1
+  kl_const: 1
+  transition_const: 0.1
+  reward_const: 1
+  tau_const: 1.
+  initset_const: 1
+  n_samples: 1
+data:
+  data_path: ${experiment_cwd}/data/simple-v1.zip
+  save_path: ${save_path}
+  batch_size: ${batch_size}
+  num_workers: 3
+  train_split: 0.8
+  val_split: 0.1
+  test_split: 0.1
+  shuffle: True  
+  n_reward_samples: 5
+  n_options: ${model.n_options}
+  n_out_feats: 4
+  state_dim : 4
+  obs_type: simple
+  gamma: 0.99
+  noise_level: 0.0
+  noise_dim: 0
+  ar_coeff: 0.9
+  linear_transform: False
+model:
+  n_options: 4
+  obs_dims: ${data.n_out_feats}
+  latent_dim: 2
+  encoder: ${loadcfg:${experiment_cwd}/config/models/encoder_mlp.yaml}
+  decoder: ${loadcfg:${experiment_cwd}/config/models/decoder_maf_tpc.yaml}
+  transition: ${loadcfg:${experiment_cwd}/config/models/transition_gaussian.yaml}
+  init_class: ${loadcfg:${experiment_cwd}/config/models/init_class_mlp.yaml}
+  reward: ${loadcfg:${experiment_cwd}/config/models/reward_mlp.yaml}
+  tau: ${loadcfg:${experiment_cwd}/config/models/tau_mlp.yaml}
