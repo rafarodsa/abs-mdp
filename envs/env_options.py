@@ -28,8 +28,8 @@ class EnvOptionWrapper(gym.Env):
                 action = option.act(next_s)
                 if action is None:
                     break
-                next_s, r, done, truncated, info = self.env.step(action)
-                r += r #* self.env.gamma ** t # accumulate discounted reward
+                next_s, _r, done, truncated, info = self.env.step(action)
+                r += self.env.gamma ** t * _r# accumulate discounted reward
                 t += 1
             if t >= option.max_executing_time and not done:
                 truncated = True
@@ -42,8 +42,8 @@ class EnvOptionWrapper(gym.Env):
         info['execution_length'] = t  # add execution length to info dict
         return next_s, r, done, truncated, info
 
-    def reset(self):
-        return self.env.reset()
+    def reset(self, state=None):
+        return self.env.reset(state)
     
     def render(self, *args, **kwargs):
         return self.env.render(*args, **kwargs)

@@ -55,7 +55,7 @@ def make_env(idx, test, process_seeds, args):
             env = PinballEnvContinuous(config='envs/pinball/configs/pinball_simple_single.cfg')
             if args.render:
                 env.render_mode = 'human'
-            options = PinballGridOptions(env) #create_position_options(env)
+            options = create_position_options(env)
             env = EnvOptionWrapper(options, env)
             def _goal_fn(state, goal=[0.55, 0.06], goal_tol=1/18):
                 return np.sqrt(np.linalg.norm(state[:2] - goal)) <= goal_tol
@@ -312,7 +312,7 @@ def main():
             save_best_so_far_agent=True,
             step_hooks=step_hooks,
             use_tensorboard=True,
-            max_episode_len=300
+            max_episode_len=100
         )
 
 

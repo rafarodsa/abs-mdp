@@ -54,10 +54,10 @@ class AbstractMDP(gym.Env):
 
         self.reset()
     
-    def reset(self):
+    def reset(self, state=None):
         # sample initial state
-        self._state = self.get_initial_states()
-        return self.state.numpy()
+        self._state = self.get_initial_states() if state is None else self.encode(torch.from_numpy(state)).squeeze(0)
+        return self._state.numpy()
 
     def render(self):
         pass
@@ -122,7 +122,10 @@ class AbstractMDP(gym.Env):
         return self.encoder(ground_state)
     
     def ground(self, state):
-        return self.grounding.distribution(state)
+        if len(state.size()) == 1:
+            state = state.unsqueeze(0)
+        _in = torch.cat([state, torch.zeros(state.shape[0], self._n_options)], dim=-1)
+        return self.grounding.distribution(_in)
         
     def gamma(self, state, action):
         return self._gamma ** self.tau(state, action)

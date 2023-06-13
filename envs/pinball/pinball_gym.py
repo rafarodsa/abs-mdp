@@ -37,7 +37,7 @@ class PinballEnv(gym.Env):
     def __init__(self, config, start_pos=None, target_pos=None, width=500, height=500, render_mode=None):
         self.action_space = spaces.Discrete(5)
         self.observation_space = spaces.Box(low=np.zeros(4), high=np.ones(4))
-        self.gamma = 1
+        self.gamma = 0.99
         self.configuration = config
         self.width = width
         self.height = height
@@ -99,7 +99,7 @@ class PinballEnv(gym.Env):
         total_points = 0
         vels = np.random.uniform(size=(N, 2))
         while total_points < N:
-            
+            _p = np.random.uniform(low=0.02, high=0.98, size=(N, 2))
             points = self._get_points_outside_obstacles(_p)
             all_points.append(points)
             total_points += points.shape[0]
