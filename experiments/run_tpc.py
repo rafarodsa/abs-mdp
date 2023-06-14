@@ -72,7 +72,8 @@ def run(cfg, ckpt=None, args=None):
                         log_every_n_steps=15,
                         callbacks=[checkpoint_callback], 
                         logger=[logger, csv_logger],
-                        detect_anomaly=False
+                        detect_anomaly=False, 
+                        overfit_batches=0.2
                     )
     trainer.fit(model, data, ckpt_path=ckpt)
     test_results = trainer.test(model, data)

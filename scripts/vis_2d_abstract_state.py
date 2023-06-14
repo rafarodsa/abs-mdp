@@ -10,6 +10,7 @@ import torch
 import argparse
 
 from src.absmdp.infomax_attn import InfomaxAbstraction
+from src.absmdp.tpc import InfoNCEAbstraction as TPCAbstraction
 from src.absmdp.datasets import PinballDataset
 
 from omegaconf import OmegaConf as oc
@@ -53,7 +54,6 @@ if __name__ == '__main__':
     
     # Load
     model = InfomaxAbstraction.load_from_checkpoint(args.from_ckpt, cfg=cfg)
-    
 
     data = PinballDataset(cfg.data)
     data.setup()

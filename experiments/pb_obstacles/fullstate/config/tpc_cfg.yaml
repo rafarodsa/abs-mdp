@@ -6,15 +6,15 @@ seed: 0
 optimizer:
   type: 'adam'
   params:
-    lr: 5e-5
+    lr: 1e-4
 scheduler:
   type: 'linear_scheduler'
   params:
     start_factor: 1.
     end_factor: 1.
     total_iters: 1.
-batch_size: 256
-epochs: 1000
+batch_size: 128 
+epochs: 200
 accelerator: gpu
 devices: 1
 save_path: ${experiment_cwd}/mdps
@@ -22,7 +22,7 @@ loss:
   grounding_const: 1.
   tpc_const: 1
   kl_const: 1
-  transition_const: 0.1
+  transition_const: 1
   reward_const: 1
   tau_const: 1.
   initset_const: 1

@@ -57,8 +57,8 @@ class InfoNCEAbstraction(pl.LightningModule):
         z = self.encoder(s)
         z_norm = z.pow(2).sum(-1)
         noise_std = 0.2
-        z = z + torch.rand_like(z) * noise_std
-        next_z  = self.encoder(next_s) + torch.rand_like(z) * noise_std 
+        z = z + torch.randn_like(z) * noise_std
+        next_z  = self.encoder(next_s) + torch.randn_like(z) * noise_std 
 
         # printarr(t_in, actions, z )
         grounding_loss = self.grounding_loss(next_z, next_s)
@@ -108,7 +108,7 @@ class InfoNCEAbstraction(pl.LightningModule):
         '''
         return -self.grounding.distribution(next_z).log_prob(next_s)
 
-    def tpc_loss(self, next_z, z, a):
+    def tpc_loss(self, z, next_z, a):
         '''
             -MI(z'; z, a)
         '''
