@@ -246,10 +246,11 @@ class AbstractMDPTrainer(pl.LightningModule):
 
 
 		obs, next_obs = obs.transpose(0, 1), next_obs.transpose(0, 1)  # n_samples x batch x obs_dim
-		N, B, _ = obs.shape
-
+		N, B = obs.shape[:2]
+		obs_dim = obs.shape[2:]
+		self.obs_dim = obs_dim
 	
-		obs, next_obs = obs.reshape(-1, self.obs_dim), next_obs.reshape(-1, self.obs_dim)  # n_samples*batch x obs_dim
+		obs, next_obs = obs.reshape(-1, *self.obs_dim), next_obs.reshape(-1, *self.obs_dim)  # n_samples*batch x obs_dim
 		_reward_target = symlog(rewards.transpose(0, 1)) # n_samples x batch
 		q_s.cond = q_s.cond.repeat_interleave(N, dim=0)
 		q_s_prime.cond = q_s_prime.cond.repeat_interleave(N, dim=0)

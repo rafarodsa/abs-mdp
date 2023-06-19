@@ -181,32 +181,32 @@ class PixelCNNDistribution(nn.Module):
         def __init__(self, decoder, h):
             super().__init__()
             self.decoder = decoder
-            self.h = h
+            self.cond = h
         
         def forward(self, x):
-            return self.decoder._pixelcnn_stack(x, self.h)
+            return self.decoder._pixelcnn_stack(x, self.cond)
             
         def log_prob(self, x):
           
-            logger.debug(f'x.shape: {x.shape}, h.shape: {self.h.shape}')
-            if len(x.shape) == len(self.h.shape):
-                assert x.shape[0] == self.h.shape[0]
-                assert x.shape[-2:] == self.h.shape[-2:]
+            logger.debug(f'x.shape: {x.shape}, h.shape: {self.cond.shape}')
+            if len(x.shape) == len(self.cond.shape):
+                assert x.shape[0] == self.cond.shape[0]
+                assert x.shape[-2:] == self.cond.shape[-2:]
                 log_prob = F.log_softmax(self.forward(x), dim=1)
                 logger.debug(f'log_prob.shape: {log_prob.shape}, x.shape: {x.shape}')
                 log_prob = torch.gather(log_prob, dim=1, index=((self.decoder.color_levels-1) * x.unsqueeze(1)).long())
                 logger.debug(f'log_prob.shape: {log_prob.shape}')
                 log_prob = log_prob.reshape(x.shape[0], -1).sum(-1)
-            elif len(x.shape) > len(self.h.shape):
-                assert x.shape[-len(self.h.shape)] == self.h.shape[0]
-                assert x.shape[-2:] == self.h.shape[-2:] 
+            elif len(x.shape) > len(self.cond.shape):
+                assert x.shape[-len(self.cond.shape)] == self.cond.shape[0]
+                assert x.shape[-2:] == self.cond.shape[-2:] 
                 
-                batch_dims = x.shape[:-len(self.h.shape)]
-                B = self.h.shape[0]
+                batch_dims = x.shape[:-len(self.cond.shape)]
+                B = self.cond.shape[0]
                 N = np.prod(batch_dims)
-                repeats = (len(self.h.shape)-1) * [1] 
-                _h = self.h.repeat(N, *repeats)
-                _x = x.reshape(-1, *x.shape[-len(self.h.shape)+1:])
+                repeats = (len(self.cond.shape)-1) * [1] 
+                _h = self.cond.repeat(N, *repeats)
+                _x = x.reshape(-1, *x.shape[-len(self.cond.shape)+1:])
                 logger.debug(f'Flattened batch -> x.shape: {_x.shape}, h.shape: {_h.shape}')
                 
                 log_prob = F.log_softmax(self(x), dim=1) # N x 256 x 3 x w x h
@@ -227,12 +227,12 @@ class PixelCNNDistribution(nn.Module):
             return log_prob
         
         def sample(self, n_samples=1):
-            cond = self.h
+            cond = self.cond
             if n_samples > 1:
                 cond = cond.repeat_interleave(n_samples, dim=0) # batch*n, channels, width, height
 
             width, height = cond.shape[-2:]
-            _device = self.h.get_device()
+            _device = self.cond.get_device()
             sample = torch.zeros(cond.shape[0], self.decoder.data_channels, width, height).to(_device)
             with tqdm(total=width*height) as pbar:
                 for i in range(width):
