@@ -27,7 +27,7 @@ class ModuleFactory:
         "conv_residual": ResidualConvEncoder,
         "pixelcnn": PixelCNNDecoder.PixelCNNDecoderDist,
         "deconv": DeconvBlock,
-        "maf": MAF
+        "maf": MAF,
     }
     
     @staticmethod

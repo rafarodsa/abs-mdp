@@ -11,6 +11,7 @@ class OptimizerFactory:
         "sgd": torch.optim.SGD,
         "rmsprop": torch.optim.RMSprop,
         "radam": torch.optim.RAdam,
+        "adamw": torch.optim.AdamW,
         "linear_scheduler": torch.optim.lr_scheduler.LinearLR,
         "cosine_scheduler": torch.optim.lr_scheduler.CosineAnnealingLR,
         "exponential_scheduler": torch.optim.lr_scheduler.ExponentialLR,
