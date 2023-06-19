@@ -74,7 +74,7 @@ class DiscreteInfoNCEAbstraction(pl.LightningModule):
         grounding_loss = self.grounding_loss(next_z_q.reshape(b,-1), next_s)
         transition_loss = self.consistency_loss(z_q.reshape(b, -1), next_z_q_idx, a)
         # printarr(z_q, next_z_q, z_q_idx,  next_z_q_idx, a)
-        tpc_loss = self.tpc_loss(z_q.reshape(b, -1), next_z_q_idx, a)
+        # tpc_loss = self.tpc_loss(z_q.reshape(b, -1), next_z_q_idx, a)
 
         # discrete representation loss
         representation_loss = self.discrete_representation_loss(z, z_q.reshape(b, -1), next_z, next_z_q.reshape(b, -1), _lamb=self.hyperparams.commitment_const)
@@ -84,18 +84,17 @@ class DiscreteInfoNCEAbstraction(pl.LightningModule):
         initset_pred = self.initsets(z_q.reshape(b, -1))
         initset_loss = F.binary_cross_entropy_with_logits(initset_pred, initset_s, reduction='none').mean(-1)
         # printarr(info_loss_z, infomax_loss, transition_loss, z_norm, initset_loss)
-        return grounding_loss.mean(), transition_loss.mean(), tpc_loss.mean(), initset_loss.mean(), representation_loss.mean()
+        return grounding_loss.mean(), transition_loss.mean(), initset_loss.mean(), representation_loss.mean()
 
 
     def step(self, batch, batch_idx):
         s, a, next_s, executed, initset_s = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets
         assert torch.all(executed) # check all samples are successful executions.
 
-        grounding_loss, transition_loss, tpc_loss, initset_loss, representation_loss = self._run_step(s, a, next_s, initset_s)
+        grounding_loss, transition_loss, initset_loss, representation_loss = self._run_step(s, a, next_s, initset_s)
 
         loss = self.hyperparams.grounding_const * grounding_loss + \
                 self.hyperparams.transition_const * transition_loss + \
-                self.hyperparams.tpc_const * tpc_loss + \
                 self.hyperparams.initset_const * initset_loss + \
                 self.hyperparams.representation_const * representation_loss
 
@@ -103,7 +102,6 @@ class DiscreteInfoNCEAbstraction(pl.LightningModule):
         logs = {
             'grounding_loss': grounding_loss,
             'transition_loss': transition_loss,
-            'tpc_loss': tpc_loss,
             'initset_loss': initset_loss,
             'representation_loss': representation_loss,
             'loss': loss
@@ -160,7 +158,7 @@ class DiscreteInfoNCEAbstraction(pl.LightningModule):
         s, a, next_s, executed, initset_s = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets
         assert torch.all(executed) # check all samples are successful executions.
         
-        grounding_loss, transition_loss, tpc_loss, initset_loss, representation_loss = self._run_step(s, a, next_s, initset_s)
+        grounding_loss, transition_loss, initset_loss, representation_loss = self._run_step(s, a, next_s, initset_s)
 
         # log std deviations for encoder.
         _, q_next_s = self.forward(s, a)
@@ -168,7 +166,6 @@ class DiscreteInfoNCEAbstraction(pl.LightningModule):
         logs = {
                 'val_infomax': grounding_loss.mean(),
                 'val_transition': transition_loss.mean(),
-                'val_tpc_loss': tpc_loss.mean(),
                 'val_initset_loss': initset_loss.mean(),
                 'val_nll': nll_loss,
                 'val_representation_loss': representation_loss.mean()

@@ -55,6 +55,7 @@ class GridQuantizerST(torch.autograd.Function):
             grad_output_flatten = (grad_codes.contiguous()
                                               .view(-1, embedding_size))
             grad_codebook = torch.zeros_like(codebook).reshape(-1, C) # M x N x C
+            printarr(indices, codebook)
             grad_codebook.index_add_(0, indices.flatten(), grad_output_flatten)
             grad_codebook = grad_codebook.reshape(M, N, C)
             # printarr(grad_codebook)
@@ -223,7 +224,7 @@ if __name__=='__main__':
 
     def test_vq_st_gradient2():
         B = 2
-        M = 1 # number of latent factors
+        M = 10 # number of latent factors
         N = 10 # number of codes per latent factor
         C = 5 # embedding size
         inputs = torch.rand((B, M, C), dtype=torch.float32, requires_grad=True)
@@ -231,9 +232,11 @@ if __name__=='__main__':
         codes, indices = vq_st(inputs, codebook)
         # codes = codes.permute(0,2,3,1).contiguous()
         _, indices = vq(inputs, codebook)
+
+        idx_offset = (torch.arange(M) * N).unsqueeze(0)
         
         
-        codes_torch = torch.embedding(codebook.squeeze(), indices.reshape(-1, 1), padding_idx=-1,
+        codes_torch = torch.embedding(codebook.reshape(-1, C), (indices+idx_offset).reshape(-1, 1), padding_idx=-1,
             scale_grad_by_freq=False, sparse=False).reshape((B, M, C))
         
         printarr(codes, indices, codes_torch)
@@ -242,6 +245,7 @@ if __name__=='__main__':
             grad_outputs=[grad_output])
         grad_codebook_torch, = torch.autograd.grad(codes_torch, codebook,
             grad_outputs=[grad_output])
+        printarr(grad_codebook, grad_codebook_torch)
 
         # Gradient is the same as torch.embedding function
         assert grad_codebook.size() == (M, N, C)
