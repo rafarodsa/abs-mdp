@@ -1,0 +1,21 @@
+
+type: conv_residual_critic
+cnn:
+  in_width: 25
+  in_height: 25
+  color_channels: 1
+  feat_maps: 64
+  kernel_size: 4
+  out_dim: 10
+  residual:
+    n_layers: 3
+    in_channels: ${model.encoder.features.feat_maps}
+    out_channels: 64
+    kernel_size: 5
+mlp:
+  input_dim: ${eval:${model.decoder.cnn.out_dim}+${model.latent_dim}}
+  output_dim: 1
+  hidden_dims:
+    - 64
+    - 64
+  activation: relu

@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from src.models.mlp import MLP
 
 ##  Pixel Encoder Models
 class ConvResidualLayer(nn.Module):
@@ -63,3 +64,19 @@ class ResidualConvEncoder(nn.Module):
         for _ in range(n):
             x = (x - kernel_size) // 2 + 1
         return x
+    
+
+class ConvCritic(nn.Module):
+    def __init__(self, cnn_feats, mlp):
+        super().__init__()
+        self.conv_feats = cnn_feats
+        self.mlp = mlp
+    def forward(self, x, z):
+        x = self.conv_feats(x)
+        x = torch.cat([x, z], dim=1)
+        return self.mlp(x)
+    
+def build_conv_critic(cfg):
+    cnn_feats = ResidualConvEncoder(cfg.cnn)
+    mlp = MLP(cfg.mlp)
+    return ConvCritic(cnn_feats, mlp)

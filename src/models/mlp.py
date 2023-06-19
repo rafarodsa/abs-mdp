@@ -5,8 +5,10 @@
 """
 
 from typing import Any, Dict, List, Optional, Tuple
+import torch
 from torch import nn
 from .configs import MLPConfig
+from src.utils.printarr import printarr
 
 def _MLP(input_dim: int, hidden_dim: List[int], output_dim: int = None, activation: str = 'relu'):
     layers = []
@@ -56,3 +58,15 @@ def DynamicsMLP(cfg):
     # return ResidualMLP(cfg)
 def RewardMLP(cfg):
     return _MLP(2*cfg.latent_dim + cfg.n_options, cfg.hidden_dims, 1, cfg.activation)
+
+
+class _MLPCritic(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.mlp = _MLP(cfg.input_dim + cfg.latent_dim, cfg.hidden_dims, cfg.output_dim, cfg.activation)
+    def forward(self, x, z):
+        return self.mlp(torch.cat([x, z], dim=-1))
+
+
+def MLPCritic(cfg):
+    return _MLPCritic(cfg)

@@ -35,7 +35,7 @@ class InfoNCEAbstraction(pl.LightningModule):
 
         self.encoder = build_model(cfg.model.encoder.features)
         self.transition = build_distribution(cfg.model.transition)
-        self.grounding = build_model(cfg.model.decoder.features)
+        self.grounding = build_model(cfg.model.decoder)
         self.initsets = build_model(cfg.model.init_class)
         self.lr = cfg.optimizer.params.lr
         self.hyperparams = cfg.loss
@@ -105,10 +105,9 @@ class InfoNCEAbstraction(pl.LightningModule):
             -MI(s'; \phi(s')) 
         '''
         b = next_z.shape[0]
-        _next_s = next_s.repeat(b, 1)
+        _next_s = next_s.repeat(b, *[1 for _ in range(len(next_s.shape)-1)])
         _next_z = torch.repeat_interleave(next_z, b, dim=0)
-        _in = torch.cat([_next_s, _next_z], dim=-1)
-        _log_t = self.grounding(_in).reshape(b, b)
+        _log_t = self.grounding(_next_s, _next_z).reshape(b, b)
         _loss = torch.diag(_log_t) - (torch.logsumexp(_log_t, dim=-1) - np.log(b))
 
         return -_loss
