@@ -55,7 +55,7 @@ class GridQuantizerST(torch.autograd.Function):
             grad_output_flatten = (grad_codes.contiguous()
                                               .view(-1, embedding_size))
             grad_codebook = torch.zeros_like(codebook).reshape(-1, C) # M x N x C
-            printarr(indices, codebook)
+            # printarr(indices, codebook)
             grad_codebook.index_add_(0, indices.flatten(), grad_output_flatten)
             grad_codebook = grad_codebook.reshape(M, N, C)
             # printarr(grad_codebook)

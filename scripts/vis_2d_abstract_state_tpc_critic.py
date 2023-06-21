@@ -10,7 +10,7 @@ import torch
 import argparse
 
 from src.absmdp.infomax_attn import InfomaxAbstraction
-from src.absmdp.tpc import InfoNCEAbstraction as TPCAbstraction
+from src.absmdp.tpc_critic import InfoNCEAbstraction as TPCAbstraction
 from src.absmdp.datasets import PinballDataset
 
 from omegaconf import OmegaConf as oc
@@ -94,9 +94,9 @@ if __name__ == '__main__':
         transition_in = torch.cat((z, batch.action), dim=-1)
         predicted_z, q_z, _ = model.transition.sample_n_dist(transition_in, 1)
         predicted_z = q_z.mean + z
-        predicted_next_s_q = model.grounding.distribution(predicted_z)
-        predicted_next_s = predicted_next_s_q.sample()
-        decoded_next_s_q = model.grounding.distribution(next_z)
+        # predicted_next_s_q = model.grounding.distribution(predicted_z)
+        # predicted_next_s = predicted_next_s_q.sample()
+        # decoded_next_s_q = model.grounding.distribution(next_z)
 
 
     os.makedirs(args.save_path, exist_ok=True)

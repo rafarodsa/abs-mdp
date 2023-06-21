@@ -42,7 +42,7 @@ def run(cfg, ckpt=None, args=None):
         dirpath=f'{save_path}/phi_train/ckpts/',
         filename='infomax-pb-{epoch:02d}-{val_infomax:.2f}',
         save_top_k=3,
-        save_last=True
+        save_last=True,
     )
 
     logger = TensorBoardLogger(
@@ -72,7 +72,8 @@ def run(cfg, ckpt=None, args=None):
                         log_every_n_steps=15,
                         callbacks=[checkpoint_callback], 
                         logger=[logger, csv_logger],
-                        detect_anomaly=False
+                        detect_anomaly=False,        
+                        # overfit_batches=0.1
                     )
     trainer.fit(model, data, ckpt_path=ckpt)
     test_results = trainer.test(model, data)

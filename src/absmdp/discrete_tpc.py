@@ -46,8 +46,10 @@ class DiscreteInfoNCEAbstraction(pl.LightningModule):
 
 
     def forward(self, state, action):
-        z = self.encoder(state)
-        t_in = torch.cat([z, action], dim=-1)
+        b = state.shape[0]
+        z = self.encoder(state).reshape(b, 1, -1)
+        z_q, _ = self.quantizer(z)
+        t_in = torch.cat([z_q.squeeze(), action], dim=-1)
         # printarr(z)
         
         next_z = self.transition.distribution(t_in).mode.reshape(state.shape[0], -1)
@@ -59,9 +61,9 @@ class DiscreteInfoNCEAbstraction(pl.LightningModule):
         b = s.shape[0]
         # sample encoding of (s, s') and add noise
         z = self.encoder(s)
-        noise_std = 0.
-        z = z + torch.randn_like(z) * noise_std
-        next_z  = self.encoder(next_s) + torch.randn_like(z) * noise_std 
+        noise_std = 0.1
+        z = z #+ torch.randn_like(z) * noise_std
+        next_z  = self.encoder(next_s) #+ torch.randn_like(z) * noise_std 
 
         # quantize
         # z_q, z_q_idx = self.quantizer(z.reshape(b, self.latent_dim, -1))
@@ -70,6 +72,8 @@ class DiscreteInfoNCEAbstraction(pl.LightningModule):
         z_q, z_q_idx = self.quantizer(z.reshape(b, 1, -1))
         next_z_q, next_z_q_idx = self.quantizer(next_z.reshape(b, 1, -1))
 
+        # add noise 
+        z_q, next_z_q  = z_q + torch.randn_like(z_q) * noise_std, next_z_q + torch.randn_like(z_q) * noise_std
 
         grounding_loss = self.grounding_loss(next_z_q.reshape(b,-1), next_s)
         transition_loss = self.consistency_loss(z_q.reshape(b, -1), next_z_q_idx, a)
@@ -113,7 +117,6 @@ class DiscreteInfoNCEAbstraction(pl.LightningModule):
         '''
             -log T(z'|z, a) 
         '''
-        printarr(z, next_z, action)
         return -self.transition.distribution(torch.cat([z, action], dim=-1)).log_prob(next_z)
 	
     def grounding_loss(self, next_z, next_s):
@@ -140,14 +143,14 @@ class DiscreteInfoNCEAbstraction(pl.LightningModule):
             Commitment loss: ||z - SG(z_q)||^2 + ||next_z - SG(next_z_q)||^2
             Quantization loss: ||z_q - SG(z)||^2 + ||next_z_q - SG(next_z)||^2
         '''
-        printarr(z, z_q, next_z, next_z_q, self.quantizer.codebook)
+        # printarr(z, z_q, next_z, next_z_q, self.quantizer.codebook)
         l_q = F.mse_loss(z_q, z.detach(), reduction='none').sum(-1)
         l_q_next = F.mse_loss(next_z_q, next_z.detach(), reduction='none').sum(-1)
         l_c = F.mse_loss(z, z_q.detach(), reduction='none').sum(-1)
         l_c_next = F.mse_loss(next_z, next_z_q.detach(), reduction='none').sum(-1)
 
         # printarr(l_q, l_q_next, l_c, l_c_next)
-        return 0.5 * ((l_q + l_q_next) + _lamb * (l_c + l_c_next))
+        return l_q + _lamb * l_c #0.5 * ((l_q + l_q_next) + _lamb * (l_c + l_c_next))
 
     def training_step(self, batch, batch_idx):
         loss, logs = self.step(batch, batch_idx)

@@ -6,7 +6,7 @@ cnn:
   color_channels: 1
   feat_maps: 64
   kernel_size: 4
-  out_dim: 10
+  out_dim: 20
   residual:
     n_layers: 3
     in_channels: ${model.encoder.features.feat_maps}
@@ -16,6 +16,5 @@ mlp:
   input_dim: ${eval:${model.decoder.cnn.out_dim}+${model.latent_dim}}
   output_dim: 1
   hidden_dims:
-    - 64
-    - 64
+    - 128
   activation: relu

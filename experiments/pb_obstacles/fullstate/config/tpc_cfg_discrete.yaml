@@ -6,7 +6,7 @@ seed: 0
 optimizer:
   type: 'adamw'
   params:
-    lr: 1e-4
+    lr: 1e-5
     weight_decay: 1e-2
 scheduler:
   type: 'linear_scheduler'
@@ -21,9 +21,8 @@ devices: 1
 save_path: ${experiment_cwd}/mdps
 loss:
   grounding_const: 1.
-  representation_const: 1
+  representation_const: 1000.
   commitment_const: 0.25
-  tpc_const: 10
   kl_const: 1
   transition_const: 1
   reward_const: 1
@@ -54,7 +53,7 @@ model:
   obs_dims: ${data.n_out_feats}
   latent_dim: 2
   encoder: ${loadcfg:${experiment_cwd}/config/models/encoder_mlp_discrete.yaml}
-  decoder: ${loadcfg:${experiment_cwd}/config/models/decoder_maf_tpc.yaml}
+  decoder: ${loadcfg:${experiment_cwd}/config/models/decoder_gaussian.yaml}
   transition: ${loadcfg:${experiment_cwd}/config/models/transition_mlp_categorical.yaml}
   init_class: ${loadcfg:${experiment_cwd}/config/models/init_class_mlp.yaml}
   reward: ${loadcfg:${experiment_cwd}/config/models/reward_mlp.yaml}

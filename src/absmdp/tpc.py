@@ -131,8 +131,6 @@ class InfoNCEAbstraction(pl.LightningModule):
         assert torch.all(executed) # check all samples are successful executions.
         
         grounding_loss, transition_loss, tpc_loss, initset_loss = self._run_step(s, a, next_s, initset_s)
-
-        # log std deviations for encoder.
         _, q_next_s = self.forward(s, a)
         nll_loss = -q_next_s.log_prob(next_s).mean()
         logs = {
@@ -151,7 +149,6 @@ class InfoNCEAbstraction(pl.LightningModule):
         t_in = torch.cat([z, action], dim=-1)
         next_z = self.transition.distribution(t_in).mean + z
         q_s_prime = self.grounding.distribution(next_z)
-
         nll_loss = -q_s_prime.log_prob(next_s).mean()
         self.log_dict({'nll_loss': nll_loss},on_step=False, on_epoch=True, prog_bar=True, logger=True)
         return nll_loss
