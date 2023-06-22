@@ -28,7 +28,7 @@ loss:
   initset_const: 1
   n_samples: 1
 data:
-  data_path: ${experiment_cwd}/data/simple-v1.zip
+  data_path: ${experiment_cwd}/data/simple-grid-20.zip
   save_path: ${save_path}
   batch_size: ${batch_size}
   num_workers: 3

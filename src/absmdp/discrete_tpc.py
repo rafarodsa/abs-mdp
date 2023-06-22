@@ -43,34 +43,35 @@ class DiscreteInfoNCEAbstraction(pl.LightningModule):
         self.lr = cfg.optimizer.params.lr
         self.hyperparams = cfg.loss
         self.kl_const =  self.hyperparams.kl_const
+        self.factors, self.embedding_size, self.codes = cfg.model.encoder.codebook.factors, cfg.model.encoder.codebook.embedding_dim, cfg.model.encoder.codebook.codes
 
 
     def forward(self, state, action):
         b = state.shape[0]
-        z = self.encoder(state).reshape(b, 1, -1)
+        z = self.encoder(state).reshape(b, self.factors, self.embedding_size)
         z_q, _ = self.quantizer(z)
-        t_in = torch.cat([z_q.squeeze(), action], dim=-1)
+        t_in = torch.cat([z_q.reshape(b,-1), action], dim=-1)
         # printarr(z)
         
-        next_z = self.transition.distribution(t_in).mode.reshape(state.shape[0], -1)
+        next_z = self.transition.distribution(t_in).mode.reshape(b, -1)
         q_s_prime = self.grounding.distribution(next_z)
-        q_s = self.grounding.distribution(z)
+        q_s = self.grounding.distribution(z.reshape(b, -1))
         return q_s, q_s_prime
 
     def _run_step(self, s, a, next_s, initset_s):
         b = s.shape[0]
         # sample encoding of (s, s') and add noise
         z = self.encoder(s)
-        noise_std = 0.1
+        noise_std = 0
         z = z #+ torch.randn_like(z) * noise_std
         next_z  = self.encoder(next_s) #+ torch.randn_like(z) * noise_std 
 
         # quantize
-        # z_q, z_q_idx = self.quantizer(z.reshape(b, self.latent_dim, -1))
-        # next_z_q, next_z_q_idx = self.quantizer(next_z.reshape(b, self.latent_dim, -1))
+        z_q, z_q_idx = self.quantizer(z.reshape(b, self.factors, self.embedding_size))
+        next_z_q, next_z_q_idx = self.quantizer(next_z.reshape(b, self.factors, self.embedding_size))
 
-        z_q, z_q_idx = self.quantizer(z.reshape(b, 1, -1))
-        next_z_q, next_z_q_idx = self.quantizer(next_z.reshape(b, 1, -1))
+        # z_q, z_q_idx = self.quantizer(z.reshape(b, 1, -1))
+        # next_z_q, next_z_q_idx = self.quantizer(next_z.reshape(b, 1, -1))
 
         # add noise 
         z_q, next_z_q  = z_q + torch.randn_like(z_q) * noise_std, next_z_q + torch.randn_like(z_q) * noise_std

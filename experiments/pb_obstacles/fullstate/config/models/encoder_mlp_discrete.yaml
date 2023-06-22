@@ -1,13 +1,13 @@
 features:
   type: mlp
   input_dim: ${model.obs_dims}
-  output_dim: ${eval:${model.latent_dim}*${model.encoder.codebook.embedding_dim}}
+  output_dim: ${eval:${model.encoder.codebook.factors}*${model.encoder.codebook.embedding_dim}}
   hidden_dims:
   - 64
   - 64
   activation: relu
 codebook:
   type: quantizer_st
-  factors: ${model.latent_dim}
-  codes: 30
+  factors: 1
+  codes: 400
   embedding_dim: 2

@@ -1,9 +1,9 @@
 features:
   type: mlp
-  input_dim: 6 #${eval:${model.latent_dim}*${model.encoder.codebook.embedding_dim} + ${model.n_options}}
+  input_dim: ${eval:${model.latent_dim}+${model.n_options}}
   hidden_dims:
   - 128
-  - 64
+  - 128
   output_dim: 128
   activation: relu
 dist:

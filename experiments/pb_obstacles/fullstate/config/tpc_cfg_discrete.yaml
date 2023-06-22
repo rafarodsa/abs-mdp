@@ -4,10 +4,9 @@
 experiment_cwd: 'experiments/pb_obstacles/fullstate'
 seed: 0
 optimizer:
-  type: 'adamw'
+  type: 'adam'
   params:
     lr: 1e-5
-    weight_decay: 1e-2
 scheduler:
   type: 'linear_scheduler'
   params:
@@ -22,7 +21,7 @@ save_path: ${experiment_cwd}/mdps
 loss:
   grounding_const: 1.
   representation_const: 1000.
-  commitment_const: 0.25
+  commitment_const: 1.
   kl_const: 1
   transition_const: 1
   reward_const: 1
@@ -51,9 +50,9 @@ data:
 model:
   n_options: 4
   obs_dims: ${data.n_out_feats}
-  latent_dim: 2
+  latent_dim: ${eval:${model.encoder.codebook.factors}*${model.encoder.codebook.embedding_dim}}
   encoder: ${loadcfg:${experiment_cwd}/config/models/encoder_mlp_discrete.yaml}
-  decoder: ${loadcfg:${experiment_cwd}/config/models/decoder_gaussian.yaml}
+  decoder: ${loadcfg:${experiment_cwd}/config/models/decoder_mlp_critic.yaml}
   transition: ${loadcfg:${experiment_cwd}/config/models/transition_mlp_categorical.yaml}
   init_class: ${loadcfg:${experiment_cwd}/config/models/init_class_mlp.yaml}
   reward: ${loadcfg:${experiment_cwd}/config/models/reward_mlp.yaml}

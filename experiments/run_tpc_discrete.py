@@ -1,7 +1,7 @@
 import lightning as pl
 
 from src.absmdp.infomax_attn import AbstractMDPTrainer
-from src.absmdp.discrete_tpc import DiscreteInfoNCEAbstraction as TPCAbstraction
+from src.absmdp.discrete_tpc_critic import DiscreteInfoNCEAbstraction as TPCAbstraction
 
 from src.absmdp.datasets import PinballDataset
 from omegaconf import OmegaConf as oc

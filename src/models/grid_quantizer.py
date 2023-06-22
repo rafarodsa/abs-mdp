@@ -104,7 +104,9 @@ class FactoredQuantizer(nn.Module):
         self.num_factors = num_factors
         self.num_codes = num_codes
         self.embedding_size = embedding_size
-        self.codebook = nn.Parameter(torch.rand((num_factors, num_codes, embedding_size)) - 0.5)
+        # self.codebook = nn.Parameter(torch.rand((num_factors, num_codes, embedding_size)))
+        codebook = torch.linspace(-0.5, 0.5, num_codes).unsqueeze(0).unsqueeze(-1).repeat(num_factors, 1, embedding_size)
+        self.codebook = nn.Parameter(codebook)
         _idx_offset = (torch.arange(num_factors) * num_codes).unsqueeze(0) # 1 x M
         self.register_buffer('idx_offset', _idx_offset)
     def forward(self, inputs):
@@ -144,7 +146,7 @@ class FactoredCategoricalModule(nn.Module):
         super().__init__()
         self.feats = feats
         self._codebook = None
-        self.logits = nn.ModuleList([nn.Linear(hidden_dim, num_codes) for _ in range(num_factors)])
+        self.logits = nn.ModuleList([nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, num_codes)) for _ in range(num_factors)])
 
     @property
     def codebook(self):
@@ -189,8 +191,9 @@ class FactoredCategoricalDistribution(torch.distributions.Distribution):
     
     def log_prob(self, value):
         # value B x M
-        _log_prob = sum([categorical.log_prob(value[:, i]) for i, categorical in enumerate(self.categoricals)])
-        return _log_prob
+        # printarr(value)
+        _log_prob = torch.stack([categorical.log_prob(value[:, i]).unsqueeze(-1) for i, categorical in enumerate(self.categoricals)], dim=-1)
+        return _log_prob.sum(-1)
     
     def entropy(self):
         return sum([categorical.entropy() for categorical in self.categoricals])
