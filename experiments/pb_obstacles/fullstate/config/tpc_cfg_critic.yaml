@@ -15,7 +15,7 @@ scheduler:
     total_iters: 1.
 batch_size: 128 
 epochs: 200
-accelerator: gpu
+accelerator: cpu
 devices: 1
 save_path: ${experiment_cwd}/mdps
 loss:

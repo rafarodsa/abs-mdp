@@ -19,6 +19,10 @@ class EnvGoalWrapper(gym.Env):
         if self.goal_fn(next_s):
             r = self.goal_reward
             done = True
+        # r_g = self.goal_fn(next_s).item()
+        # t = 0.9
+        # r = r +  r_g *(self.goal_reward if r_g > t else -1)
+        # done = r_g > t
         return next_s, r, done, info
 
     def reset(self):

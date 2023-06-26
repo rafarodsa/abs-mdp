@@ -64,8 +64,8 @@ if __name__ == '__main__':
 
     data.setup()
 
-    trainer = pl.Trainer()
-    trainer.test(model, data)
+    # trainer = pl.Trainer()
+    # trainer.test(model, data)
 
     batches = list(data.test_dataloader())
     batch = batches[0]

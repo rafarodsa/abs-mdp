@@ -30,19 +30,17 @@ else:
 goal = mdp.encode(torch.from_numpy(goal).float()).numpy()
 
 
-for traj in range(100):
+for traj in range(10):
     t = []
     s = mdp.reset()
     next_s = s
     for i in range(100):
         s = next_s
-        initset = torch.sigmoid(mdp.initiation_set(torch.from_numpy(s))).numpy() > 0.8
-        
+        initset = torch.sigmoid(mdp.initiation_set(torch.from_numpy(s))).numpy() > 0.5
         actions_avail = np.nonzero(initset)[0]
-        
         sample = np.random.choice(len(actions_avail))
         a = actions_avail[sample]
-        # a = 1
+        # a = 2
         next_s, r, d, info = mdp.step(a)
 
         t.append((s, a, r, next_s, d, info))
