@@ -34,9 +34,9 @@ for traj in range(10):
     t = []
     s = mdp.reset()
     next_s = s
-    for i in range(100):
+    for i in range(50):
         s = next_s
-        initset = torch.sigmoid(mdp.initiation_set(torch.from_numpy(s))).numpy() > 0.5
+        initset = torch.sigmoid(mdp.initiation_set(torch.from_numpy(s))).numpy() > 0.8
         actions_avail = np.nonzero(initset)[0]
         sample = np.random.choice(len(actions_avail))
         a = actions_avail[sample]
@@ -57,7 +57,8 @@ for t in trajs:
     plt.plot(s[:, 0], s[:, 1], c='k')
 
 plt.grid()
-plt.show()
+# plt.show()
+plt.savefig('traj.png')
 
 
 

@@ -48,28 +48,29 @@ class InfoNCEAbstraction(pl.LightningModule):
         z = self.encoder(state)
         t_in = torch.cat([z, action], dim=-1)
         # printarr(z)
-        next_z = self.transition.distribution(t_in).mean + z
+        next_z = self.transition.distribution(t_in).mean
         return next_z
 
     def _run_step(self, s, a, next_s, initset_s, reward, duration):
         
         # sample encoding of (s, s') and add noise
         z = self.encoder(s)
-        z_norm = z.pow(2).sum(-1)
+        z_c = z
+        next_z_c = self.encoder(next_s)
         noise_std = 0.2
         z = z + torch.randn_like(z) * noise_std
-        next_z  = self.encoder(next_s) + torch.randn_like(z) * noise_std 
+        next_z  =  next_z_c + torch.randn_like(z) * noise_std 
 
         # printarr(t_in, actions, z )
         grounding_loss = self.grounding_loss(next_z, next_s)
         transition_loss = self.consistency_loss(z, next_z, a)
         tpc_loss = self.tpc_loss(z, next_z, a)
         _, _, rews = reward
-        reward_loss = self.reward_loss(rews[:, 0], z, a, next_z)
-        tau_loss = self.duration_loss(duration, z, a)
+        reward_loss = self.reward_loss(rews[:, 0], z_c, a, next_z_c)
+        tau_loss = self.duration_loss(duration, z_c, a)
 
         # initsets
-        initset_pred = self.initsets(z)
+        initset_pred = self.initsets(z_c)
         initset_loss = F.binary_cross_entropy_with_logits(initset_pred, initset_s, reduction='none').mean(-1)
         # printarr(info_loss_z, infomax_loss, transition_loss, z_norm, initset_loss)
         return grounding_loss.mean(), transition_loss.mean(), tpc_loss.mean(), initset_loss.mean(), reward_loss.mean(), tau_loss.mean()
@@ -105,7 +106,7 @@ class InfoNCEAbstraction(pl.LightningModule):
         '''
             -log T(z'|z, a) 
         '''
-        return -self.transition.distribution(torch.cat([z, action], dim=-1)).log_prob(next_z-z)
+        return -self.transition.distribution(torch.cat([z, action], dim=-1)).log_prob(next_z)
 	
     def grounding_loss(self, next_z, next_s):
         '''
@@ -128,7 +129,7 @@ class InfoNCEAbstraction(pl.LightningModule):
         _z_a = torch.cat([z, a], dim=-1).repeat(b, 1)
         _next_z = torch.repeat_interleave(next_z, b, dim=0)
         # printarr(_z_a, _next_z)
-        _log_t = self.transition.distribution(_z_a).log_prob(_next_z-_z_a[..., :self.latent_dim]).reshape(b, b)
+        _log_t = self.transition.distribution(_z_a).log_prob(_next_z).reshape(b, b)
         _loss = torch.diag(_log_t) - (torch.logsumexp(_log_t, dim=-1) - np.log(b))
 
         return -_loss
@@ -160,13 +161,20 @@ class InfoNCEAbstraction(pl.LightningModule):
         assert torch.all(executed) # check all samples are successful executions.
 
         grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss = self._run_step(s, a, next_s, initset_s, reward, duration)    
+
+        z = self.encoder(s)
+        t_in = torch.cat([z, a], dim=-1)
+        next_z = self.transition.distribution(t_in).mean
+        nll_loss = self.grounding_loss(next_z, next_s).mean()
+
         logs = {
                 'val_infomax': grounding_loss.mean(),
                 'val_transition': transition_loss.mean(),
                 'val_tpc_loss': tpc_loss.mean(),
                 'val_initset_loss': initset_loss.mean(),
                 'val_reward_loss': reward_loss.mean(), 
-                'val_tau_loss': tau_loss.mean()
+                'val_tau_loss': tau_loss.mean(),
+                'val_nll_loss': nll_loss.mean()
             }
         self.log_dict(logs, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         return logs['val_infomax']
@@ -175,7 +183,7 @@ class InfoNCEAbstraction(pl.LightningModule):
         state, action, next_s = batch.obs, batch.action, batch.next_obs
         z = self.encoder(state)
         t_in = torch.cat([z, action], dim=-1)
-        next_z = self.transition.distribution(t_in).mean + z
+        next_z = self.transition.distribution(t_in).mean
         nll_loss = self.grounding_loss(next_z, next_s).mean()
         self.log_dict({'nll_loss': nll_loss},on_step=False, on_epoch=True, prog_bar=True, logger=True)
         return nll_loss

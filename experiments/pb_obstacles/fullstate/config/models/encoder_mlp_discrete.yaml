@@ -8,6 +8,6 @@ features:
   activation: relu
 codebook:
   type: quantizer_st
-  factors: 1
-  codes: 400
-  embedding_dim: 2
+  factors: 2
+  codes: 20
+  embedding_dim: 1

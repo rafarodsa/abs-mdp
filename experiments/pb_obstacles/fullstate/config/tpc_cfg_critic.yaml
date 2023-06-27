@@ -22,7 +22,7 @@ loss:
   grounding_const: 1.
   tpc_const: 1
   kl_const: 1
-  transition_const: 1
+  transition_const: 0.1
   reward_const: 1
   tau_const: 1.
   initset_const: 1
