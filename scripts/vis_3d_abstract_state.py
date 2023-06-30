@@ -10,6 +10,7 @@ import torch
 import argparse
 
 from src.absmdp.infomax_attn import InfomaxAbstraction
+from src.absmdp.tpc_critic import InfoNCEAbstraction as TPCAbstraction
 from src.absmdp.datasets import PinballDataset
 
 from omegaconf import OmegaConf as oc
@@ -49,10 +50,11 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Load config
-    cfg = oc.load(args.config)
+    cfg = oc.load(args.config).cfg
     
     # Load
-    model = InfomaxAbstraction.load_from_checkpoint(args.from_ckpt, cfg=cfg)
+    # model = InfomaxAbstraction.load_from_checkpoint(args.from_ckpt, cfg=cfg)
+    model = TPCAbstraction.load_from_checkpoint(args.from_ckpt, cfg=cfg)
     
 
     data = PinballDataset(cfg.data)
@@ -79,12 +81,12 @@ if __name__ == '__main__':
         next_z_q = model.encoder(batch.next_obs)
         next_z = next_z_q
 
-        transition_in = torch.cat((z, batch.action), dim=-1)
-        predicted_z, q_z, _ = model.transition.sample_n_dist(transition_in, 1)
-        predicted_z = q_z.mean + z
-        predicted_next_s_q = model.grounding.distribution(torch.cat([predicted_z, torch.zeros_like(batch.action)], dim=-1))
-        predicted_next_s = predicted_next_s_q.sample()
-        decoded_next_s_q = model.grounding.distribution(torch.cat([next_z, torch.zeros_like(batch.action)], dim=-1))
+        # transition_in = torch.cat((z, batch.action), dim=-1)
+        # predicted_z, q_z, _ = model.transition.sample_n_dist(transition_in, 1)
+        # predicted_z = q_z.mean + z
+        # predicted_next_s_q = model.grounding.distribution(torch.cat([predicted_z, torch.zeros_like(batch.action)], dim=-1))
+        # predicted_next_s = predicted_next_s_q.sample()
+        # decoded_next_s_q = model.grounding.distribution(torch.cat([next_z, torch.zeros_like(batch.action)], dim=-1))
 
 
     os.makedirs(args.save_path, exist_ok=True)

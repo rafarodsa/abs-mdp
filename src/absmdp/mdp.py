@@ -225,7 +225,7 @@ class AbstractMDPCritic(gym.Env):
         r = self.reward(self.state, action, next_s).item()
         done = False
         tau =  self.tau(self.state, action)
-        info = {'expected_length': tau.item()}
+        info = {'tau': tau.item()}
         self._state = next_s
         return next_s.numpy(), r, done, info
 
