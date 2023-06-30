@@ -52,11 +52,11 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Load config
-    cfg = oc.load(args.config)
+    cfg = oc.load(args.config).cfg
     
     # Load
     # model = InfomaxAbstraction.load_from_checkpoint(args.from_ckpt, cfg=cfg)
-    model = TPCAbstraction.load_from_checkpoint(args.from_ckpt, cfg=cfg)
+    model = TPCAbstraction.load_from_checkpoint(args.from_ckpt)
 
 
     data = PinballDataset(cfg.data)
@@ -112,6 +112,11 @@ if __name__ == '__main__':
     plt.savefig(f'{args.save_path}/z-space.png')
     # Plot initial states
     
+    plt.figure()
+    plt.scatter(z[:, 0], z[:, 1], s=5, marker='o', color='b', label='z')
+    plt.savefig(f'{args.save_path}/latent_s.png')
+
+
     acts = [1, 3]
     plt.figure()
     plt.subplot(1, 2, 1)

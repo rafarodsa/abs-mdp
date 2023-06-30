@@ -48,7 +48,7 @@ class InfoNCEAbstraction(pl.LightningModule):
         z = self.encoder(state)
         t_in = torch.cat([z, action], dim=-1)
         # printarr(z)
-        next_z = self.transition.distribution(t_in).mean
+        next_z = self.transition.distribution(t_in).mean + z
         return next_z
 
     def _run_step(self, s, a, next_s, initset_s, reward, duration):
@@ -70,7 +70,7 @@ class InfoNCEAbstraction(pl.LightningModule):
         tau_loss = self.duration_loss(duration, z_c, a)
 
         # initsets
-        initset_pred = self.initsets(z_c)
+        initset_pred = self.initsets(z)
         initset_loss = F.binary_cross_entropy_with_logits(initset_pred, initset_s, reduction='none').mean(-1)
         # printarr(info_loss_z, infomax_loss, transition_loss, z_norm, initset_loss)
         return grounding_loss.mean(), transition_loss.mean(), tpc_loss.mean(), initset_loss.mean(), reward_loss.mean(), tau_loss.mean()
@@ -106,7 +106,7 @@ class InfoNCEAbstraction(pl.LightningModule):
         '''
             -log T(z'|z, a) 
         '''
-        return -self.transition.distribution(torch.cat([z, action], dim=-1)).log_prob(next_z)
+        return -self.transition.distribution(torch.cat([z, action], dim=-1)).log_prob(next_z-z)
 	
     def grounding_loss(self, next_z, next_s):
         '''
@@ -116,6 +116,7 @@ class InfoNCEAbstraction(pl.LightningModule):
         _next_s = next_s.repeat(b, *[1 for _ in range(len(next_s.shape)-1)])
         _next_z = torch.repeat_interleave(next_z, b, dim=0)
         _log_t = torch.tanh(self.grounding(_next_s, _next_z).reshape(b, b)) * np.log(b) * 0.5
+        # _log_t = self.grounding(_next_s, _next_z).reshape(b, b)
         _loss = torch.diag(_log_t) - (torch.logsumexp(_log_t, dim=-1) - np.log(b))
 
         return -_loss
@@ -125,11 +126,12 @@ class InfoNCEAbstraction(pl.LightningModule):
         '''
             -MI(z'; z, a)
         '''
-        b = next_z.shape[0]
+        b, z_dim = next_z.shape
         _z_a = torch.cat([z, a], dim=-1).repeat(b, 1)
         _next_z = torch.repeat_interleave(next_z, b, dim=0)
         # printarr(_z_a, _next_z)
-        _log_t = self.transition.distribution(_z_a).log_prob(_next_z).reshape(b, b)
+        # _log_t = self.transition.distribution(_z_a).log_prob(_next_z).reshape(b, b)
+        _log_t = self.transition.distribution(_z_a).log_prob(_next_z-_z_a[..., :z_dim]).reshape(b, b)
         _loss = torch.diag(_log_t) - (torch.logsumexp(_log_t, dim=-1) - np.log(b))
 
         return -_loss
@@ -164,7 +166,7 @@ class InfoNCEAbstraction(pl.LightningModule):
 
         z = self.encoder(s)
         t_in = torch.cat([z, a], dim=-1)
-        next_z = self.transition.distribution(t_in).mean
+        next_z = self.transition.distribution(t_in).mean + z
         nll_loss = self.grounding_loss(next_z, next_s).mean()
 
         logs = {
@@ -183,7 +185,7 @@ class InfoNCEAbstraction(pl.LightningModule):
         state, action, next_s = batch.obs, batch.action, batch.next_obs
         z = self.encoder(state)
         t_in = torch.cat([z, action], dim=-1)
-        next_z = self.transition.distribution(t_in).mean
+        next_z = self.transition.distribution(t_in).mean + z
         nll_loss = self.grounding_loss(next_z, next_s).mean()
         self.log_dict({'nll_loss': nll_loss},on_step=False, on_epoch=True, prog_bar=True, logger=True)
         return nll_loss

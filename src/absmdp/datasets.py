@@ -78,8 +78,27 @@ def linear_projection(datum, linear_projection, noise_level=0.01):
     next_obs = torch.tensordot(next_obs, w, dims=1)
     obs = obs + torch.randn_like(obs) * noise_level
     next_obs = next_obs + torch.randn_like(next_obs) * noise_level
-
+    # print('linear_transforming', noise_level)
     return datum.modify(obs=obs, next_obs=next_obs, rewards=[r_obs, r_next_obs, datum.rewards[2]])
+
+def cubed(datum):
+    r_obs = datum.rewards[0] ** 3
+    r_next_obs = datum.rewards[1] ** 3
+
+    obs, next_obs = datum.obs ** 3, datum.next_obs ** 3
+    # printarr(obs, next_obs)
+    return datum.modify(obs=obs, next_obs=next_obs, rewards=[r_obs, r_next_obs, datum.rewards[2]])
+
+def cosine_transform(datum):
+
+    f = lambda o : torch.cat([o[..., :2] * 2 - 1, o[..., 2:]], dim=-1)
+
+    r_obs = torch.cat([torch.cos(f(datum.rewards[0])), torch.sin(f(datum.rewards[0]))], dim=-1)
+    r_next_obs = torch.cat([torch.cos(f(datum.rewards[1])), torch.sin(f(datum.rewards[1]))], dim=-1)
+
+    obs = torch.cat([torch.cos(f(datum.obs)), torch.sin(f(datum.obs))], dim=-1)
+    next_obs = torch.cat([torch.cos(f(datum.next_obs)), torch.sin(f(datum.next_obs))], dim=-1)
+    return datum.modify(obs=obs, next_obs=next_obs, rewards=[r_obs, r_next_obs, datum.rewards[2]])    
 
 
 class PinballDataset_(torch.utils.data.Dataset):
@@ -249,6 +268,13 @@ class PinballDataset(pl.LightningDataModule):
         if (cfg.linear_transform or cfg.state_dim + cfg.noise_dim != cfg.n_out_feats) and self.obs_type != 'pixels':
             self._load_linear_transform()
             self.transforms.append(partial(linear_projection, linear_projection=self.linear_transform, noise_level=cfg.noise_level))
+        
+        if cfg.non_linear_transform and self.obs_type != 'pixels':
+            self._load_linear_transform()
+            self.transforms.append(partial(linear_projection, linear_projection=self.linear_transform, noise_level=cfg.noise_level))
+            # self.transforms.append(cosine_transform)
+            
+
 
     def setup(self, stage=None):
         self.dataset = PinballDataset_(self.path_to_file, self.n_reward_samples, self.transforms, obs_type=self.obs_type, noise_dim=self.cfg.noise_dim, noise_level=self.cfg.noise_level, ar_coeff=self.cfg.ar_coeff)
@@ -264,20 +290,6 @@ class PinballDataset(pl.LightningDataModule):
         return torch.utils.data.DataLoader(self.test, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
     
     def _load_linear_transform(self):
-        # # path, file = os.path.split(self.path_to_file)
-        # with zipfile.ZipFile(self.path_to_file, 'a') as zfile:
-        #     # check file in zip
-        #     if 'lintransform.pt' in zfile.namelist():
-        #         self.linear_transform = torch.load(zfile.open('lintransform.pt'))
-        #         print(f'Linear transform loaded from {self.path_to_file}/lintransform.pt')
-        #         assert self.linear_transform.shape == torch.Size([self.cfg.state_dim + self.cfg.noise_dim, self.cfg.n_out_feats])
-        #     else:
-        #         self.linear_transform = torch.rand(self.cfg.state_dim + self.cfg.noise_dim, self.cfg.n_out_feats)
-        #         # save on byteIO stream
-        #         with io.BytesIO() as f:
-        #             torch.save(self.linear_transform, f)
-        #             zfile.writestr('lintransform.pt', f.getvalue())
-        #         print(f'Linear transform matrix saved at {self.path_to_file}/lintransform.pt')
         if os.path.isfile(f'{self.cfg.save_path}/lintransform.pt'):
             print(f'Linear transform loaded from {self.cfg.save_path}/lintransform.pt')
             self.linear_transform = torch.load(f'{self.cfg.save_path}/lintransform.pt')

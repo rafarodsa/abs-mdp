@@ -4,6 +4,8 @@ input_dim: ${model.obs_dims}
 latent_dim: ${model.latent_dim}
 output_dim: 1
 hidden_dims:
-- 64
-- 64
+  - 64
+  - 64
+  - 64
+  - 64
 activation: relu

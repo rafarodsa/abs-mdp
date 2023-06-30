@@ -4,7 +4,7 @@
 experiment_cwd: 'experiments/pb_obstacles/fullstate'
 seed: 0
 optimizer:
-  type: 'adam'
+  type: adam
   params:
     lr: 1e-4
 scheduler:
@@ -22,13 +22,13 @@ loss:
   grounding_const: 1.
   tpc_const: 1
   kl_const: 1
-  transition_const: 0.1
+  transition_const: 1.
   reward_const: 1
   tau_const: 1.
   initset_const: 1
   n_samples: 1
 data:
-  data_path: ${experiment_cwd}/data/simple-grid-20.zip
+  data_path: ${experiment_cwd}/data/simple-v1.zip
   save_path: ${save_path}
   batch_size: ${batch_size}
   num_workers: 3
@@ -46,11 +46,12 @@ data:
   noise_dim: 0
   ar_coeff: 0.9
   linear_transform: False
+  non_linear_transform: False
 model:
   n_options: 4
   obs_dims: ${data.n_out_feats}
   latent_dim: 2
-  encoder: ${loadcfg:${experiment_cwd}/config/models/encoder_mlp.yaml}
+  encoder: ${loadcfg:${experiment_cwd}/config/models/encoder_mlp_big.yaml}
   decoder: ${loadcfg:${experiment_cwd}/config/models/decoder_mlp_critic.yaml}
   transition: ${loadcfg:${experiment_cwd}/config/models/transition_gaussian.yaml}
   init_class: ${loadcfg:${experiment_cwd}/config/models/init_class_mlp.yaml}
