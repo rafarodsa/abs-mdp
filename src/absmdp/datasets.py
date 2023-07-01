@@ -66,14 +66,33 @@ def one_hot_actions(n_actions=4, datum=None):
     action = F.one_hot(torch.Tensor([action]).long(), n_actions).squeeze()
     return datum.modify(action=action)
 
-def linear_projection(datum, linear_projection, noise_level=0.01):
+# def linear_projection(datum, linear_projection, noise_level=0.01):
+#     w = linear_projection
+#     w = w/(w ** 2).sum(dim=0, keepdims=True).sqrt()
+#     f = lambda o : torch.cat([o[..., :2] * 2 - 1, o[..., 2:]], dim=-1)
+#     r_obs = torch.tensordot(datum.rewards[0], w, dims=1) # N x state_dim | state_dim x n_features
+#     r_next_obs = torch.tensordot(datum.rewards[1], w, dims=1)
+#     r_obs = r_obs + torch.randn_like(r_obs) * noise_level
+#     r_next_obs = r_next_obs + torch.randn_like(r_next_obs) * noise_level
+
+#     obs, next_obs = datum.obs, datum.next_obs
+#     obs = torch.tensordot(obs, w, dims=1) 
+#     next_obs = torch.tensordot(next_obs, w, dims=1)
+#     obs = obs + torch.randn_like(obs) * noise_level
+#     next_obs = next_obs + torch.randn_like(next_obs) * noise_level
+#     # print('linear_transforming', noise_level)
+#     return datum.modify(obs=obs, next_obs=next_obs, rewards=[r_obs, r_next_obs, datum.rewards[2]])
+
+def linear_projection(datum, linear_projection, noise_level=0.0):
     w = linear_projection
-    r_obs = torch.tensordot(datum.rewards[0], w, dims=1) # N x state_dim | state_dim x n_features
-    r_next_obs = torch.tensordot(datum.rewards[1], w, dims=1)
+    w = w/(w ** 2).sum(dim=0, keepdims=True).sqrt()
+    f = lambda o : torch.cat([o[..., :2] * 2 - 1, o[..., 2:]], dim=-1)
+    r_obs = torch.tensordot(f(datum.rewards[0]), w, dims=1) # N x state_dim | state_dim x n_features
+    r_next_obs = torch.tensordot(f(datum.rewards[1]), w, dims=1)
     r_obs = r_obs + torch.randn_like(r_obs) * noise_level
     r_next_obs = r_next_obs + torch.randn_like(r_next_obs) * noise_level
 
-    obs, next_obs = datum.obs, datum.next_obs
+    obs, next_obs = f(datum.obs), f(datum.next_obs)
     obs = torch.tensordot(obs, w, dims=1) 
     next_obs = torch.tensordot(next_obs, w, dims=1)
     obs = obs + torch.randn_like(obs) * noise_level
@@ -82,6 +101,7 @@ def linear_projection(datum, linear_projection, noise_level=0.01):
     return datum.modify(obs=obs, next_obs=next_obs, rewards=[r_obs, r_next_obs, datum.rewards[2]])
 
 def cubed(datum):
+    
     r_obs = datum.rewards[0] ** 3
     r_next_obs = datum.rewards[1] ** 3
 
