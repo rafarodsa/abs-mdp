@@ -13,7 +13,7 @@ from omegaconf import OmegaConf as oc
 import torch
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--dir', type=str)
+parser.add_argument('--dir', type=str, default='.')
 parser.add_argument('--phi-ckpt', type=str)
 parser.add_argument('--save-path', type=str, default=None)
 args = parser.parse_args()
@@ -26,5 +26,5 @@ data.setup()
 
 mdp = AbstractMDP.load(model, data.dataset)
 # save_path = f'{args.save_path}/mdp.pt' if args.save_path is not None else f'{args.dir}/mdp.pt'
-torch.save(mdp, f'{args.dir}/mdp.pt')
+torch.save(mdp, f'{args.dir}/cont_mdp.pt')
 

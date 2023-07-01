@@ -261,7 +261,7 @@ class AbstractMDPCritic(gym.Env):
         t = self.transition_fn.distribution(input)
         # print('sampling')
         # return t.sample()[0] + state
-        return t.mean #+ state
+        return t.mean + state
     
     def reward(self, state, action, next_state):
         a_ = self._action_to_one_hot(action)

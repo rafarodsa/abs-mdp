@@ -290,9 +290,9 @@ class PinballDataset(pl.LightningDataModule):
             self.transforms.append(partial(linear_projection, linear_projection=self.linear_transform, noise_level=cfg.noise_level))
         
         if cfg.non_linear_transform and self.obs_type != 'pixels':
-            self._load_linear_transform()
-            self.transforms.append(partial(linear_projection, linear_projection=self.linear_transform, noise_level=cfg.noise_level))
-            # self.transforms.append(cosine_transform)
+            # self._load_linear_transform()
+            # self.transforms.append(partial(linear_projection, linear_projection=self.linear_transform, noise_level=cfg.noise_level))
+            self.transforms.append(cosine_transform)
             
 
 
