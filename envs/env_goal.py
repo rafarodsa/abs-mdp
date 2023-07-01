@@ -15,9 +15,9 @@ class EnvGoalWrapper(gym.Env):
             next_s, r, done, info = ret
         else:
             next_s, r, done, truncated, info = ret
-            
+        r = 0 * r
         if self.goal_fn(next_s):
-            r = self.goal_reward
+            r = r + self.goal_reward
             done = True
             print('======================HERE! GOAL======================')
         # r_g = self.goal_fn(next_s).item()

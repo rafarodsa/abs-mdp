@@ -100,13 +100,13 @@ def grounding_goal_fn(grounding, phi, goal=[0.55, 0.06, 0., 0.]):
     return _goal
 
 def make_env(test=False, test_seed=0, train_seed=1, args=None):
-        goal_reward = 10000
+        goal_reward = 1
         goal_tol = 5
         print('================ CREATE ENVIRONMENT ================', goal_reward)
         if not test:
             env = torch.load(args.absmdp)
-            env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
-            # env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder), goal_reward=goal_reward)
+            # env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
+            env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder), goal_reward=goal_reward)
             env.seed(train_seed)
         else:
             # # evaluation in real env
@@ -119,8 +119,8 @@ def make_env(test=False, test_seed=0, train_seed=1, args=None):
             #     return np.sqrt(np.linalg.norm(state[:2] - goal)) <= goal_tol
             # env = EnvGoalWrapper(env, goal_fn=_goal_fn, goal_reward=goal_reward)
             env = torch.load(args.absmdp)
-            env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
-            # env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder), goal_reward=goal_reward)
+            # env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
+            env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder), goal_reward=goal_reward)
             env.seed(test_seed)
         if args.monitor:
             env = pfrl.wrappers.Monitor(
@@ -129,6 +129,41 @@ def make_env(test=False, test_seed=0, train_seed=1, args=None):
         if args.render:
             env = pfrl.wrappers.Render(env)
         return env
+
+def make_ground_env(test=False, test_seed=0, train_seed=1, args=None):
+    goal_reward = 1
+    goal_tol = 1/18
+    print('================ CREATE GROUND ENVIRONMENT ================', goal_reward)
+    def _goal_fn(state, goal=[0.55, 0.06], goal_tol=goal_tol):
+            return np.linalg.norm(state[:2] - goal) <= goal_tol
+    if not test:
+        env = PinballEnvContinuous(config='envs/pinball/configs/pinball_simple_single.cfg')
+        if args.render:
+            env.render_mode = 'human'
+        options = create_position_options(env)
+        env = EnvOptionWrapper(options, env)
+        
+        # env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
+        env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder), goal_reward=goal_reward)
+        env.seed(train_seed)
+    else:
+        # evaluation in real env
+        env = PinballEnvContinuous(config='envs/pinball/configs/pinball_simple_single.cfg')
+        if args.render:
+            env.render_mode = 'human'
+        options = create_position_options(env)
+        env = EnvOptionWrapper(options, env)
+        # env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
+        env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder), goal_reward=goal_reward)
+        env.seed(test_seed)
+    if args.monitor:
+        env = pfrl.wrappers.Monitor(
+            env, args.outdir, mode="evaluation" if test else "training"
+        )
+    if args.render:
+        env = pfrl.wrappers.Render(env)
+    return env
+
 
 
 def main():
@@ -188,9 +223,9 @@ def main():
         help="Total number of timesteps to train the agent.",
     )
     parser.add_argument(
-        "--max-frames",
+        "--max-steps",
         type=int,
-        default=30 * 60 * 60,  # 30 minutes with 60 fps
+        default=50,  # 30 minutes with 60 fps
         help="Maximum number of frames for each episode.",
     )
     parser.add_argument(
@@ -291,18 +326,27 @@ def main():
     q_func = parse_arch(args.arch, n_actions)
 
     def action_mask(s):
-        return (torch.sigmoid(env.env.initiation_set(s.float())) > 0.8).float()
+        return (torch.sigmoid(env.env.initiation_set(s.float())) > 0.5).float()
 
     if args.noisy_net_sigma is not None:
         pnn.to_factorized_noisy(q_func, sigma_scale=args.noisy_net_sigma)
         # Turn off explorer
         explorer = explorers.Greedy()
     else:
+        def random_selection(obs):
+            _mask = action_mask(obs)
+            _mask = _mask / _mask.sum(-1, keepdim=True)
+            n_actions = _mask.shape[-1]
+            # printarr(_mask, n_actions)
+            selection =  np.random.choice(n_actions, p=_mask.squeeze().numpy())
+            # printarr(selection)
+            return selection
+
         explorer = AbstractLinearDecayEpsilonGreedy(
             1.0,
             args.final_epsilon,
             args.final_exploration_frames,
-            lambda obs: np.random.choice(action_mask(obs).numpy().argmax(axis=-1)),
+            lambda obs: random_selection(obs),
         )
 
     # Use the Nature paper's hyperparameters
@@ -322,7 +366,7 @@ def main():
         # Anneal beta from beta0 to 1 throughout training
         betasteps = args.steps / args.update_interval
         rbuf = replay_buffers.PrioritizedReplayBuffer(
-            10**6,
+            2*10**5,
             alpha=0.6,
             beta0=0.4,
             betasteps=betasteps,
@@ -350,7 +394,7 @@ def main():
         update_interval=args.update_interval,
         batch_accumulator="sum",
         phi=lambda x: x,
-        minibatch_size=256
+        minibatch_size=32
     )
 
     if args.load:
@@ -381,7 +425,7 @@ def main():
             save_best_so_far_agent=False,
             eval_env=eval_env,
             use_tensorboard=True,
-            train_max_episode_len=50,
+            train_max_episode_len=args.max_steps,
         )
 
 

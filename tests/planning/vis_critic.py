@@ -79,7 +79,10 @@ if __name__ == '__main__':
         printarr(energy, z_q, goals)
    
     # Plot heatmap
-    plt.figure()
+    fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
     plt.scatter(z_q[:, 0], z_q[:, 1], c=energy, cmap=cm.coolwarm, s=5)
+    # ax.plot_surface(z_q[:, 0], z_q[:, 1], energy.unsqueeze(-1), antialiased=False, linewidth=0)
+    
     plt.colorbar()
-    plt.savefig(os.path.join(args.save_path, 'heatmap.png'))
+    plt.show()
+    # plt.savefig(os.path.join(args.save_path, 'heatmap.png'))
