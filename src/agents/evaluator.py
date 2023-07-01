@@ -35,7 +35,7 @@ def _run_episodes(
             episode_len = 0
             info = {}
         a = agent.act(obs)
-        obs, r, done, info = env.step(a)
+        obs, r, done, info = env.step(a.cpu())
         test_r += r
         episode_len += 1
         timestep += 1

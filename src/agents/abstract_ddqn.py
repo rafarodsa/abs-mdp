@@ -283,5 +283,6 @@ class AbstractLinearDecayEpsilonGreedy(explorers.LinearDecayEpsilonGreedy):
         )
         greedy_str = "greedy" if greedy else "non-greedy"
         self.logger.debug("t:%s a:%s %s", t, a, greedy_str)
+        # printarr(a)
         return a
     

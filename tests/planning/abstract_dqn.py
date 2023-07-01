@@ -325,8 +325,9 @@ def main():
     n_actions = env.action_space.n
     q_func = parse_arch(args.arch, n_actions)
 
+    init = env.env.init_classifier.to(f'cuda:{args.gpu}') if args.gpu >= 0 else env.env.initiation_set
     def action_mask(s):
-        return (torch.sigmoid(env.env.initiation_set(s.float())) > 0.5).float()
+        return (torch.sigmoid(init(s.float())) > 0.5).float()
 
     if args.noisy_net_sigma is not None:
         pnn.to_factorized_noisy(q_func, sigma_scale=args.noisy_net_sigma)
@@ -338,9 +339,9 @@ def main():
             _mask = _mask / _mask.sum(-1, keepdim=True)
             n_actions = _mask.shape[-1]
             # printarr(_mask, n_actions)
-            selection =  np.random.choice(n_actions, p=_mask.squeeze().numpy())
+            selection =  np.random.choice(n_actions, p=_mask.squeeze().cpu().numpy())
             # printarr(selection)
-            return selection
+            return torch.tensor(selection)
 
         explorer = AbstractLinearDecayEpsilonGreedy(
             1.0,

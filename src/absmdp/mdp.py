@@ -253,7 +253,7 @@ class AbstractMDPCritic(gym.Env):
 
     def transition(self, state, action):
         batch = state.shape[0] if len(state.size()) > 1 else 1
-        
+        # printarr(state, action)
         if len(state.size()) == 1:
             input = torch.cat([state, self._action_to_one_hot(action)], dim=-1)
         else: 
@@ -303,7 +303,12 @@ class AbstractMDPCritic(gym.Env):
     
     def _prepare_initial_states(self):
         self.initial_states = torch.stack([d.obs for d in self.data if d.p0 == 1])
-    
+
+    def to(self, device):
+        elems = ['encoder', 'grounding', 'transition', 'reward', 'init_classifier', 'tau']
+        for e in elems:
+            elems.to(device)
+
     @staticmethod
     def _prepare_models(mdp_trainer):
         encoder = mdp_trainer.encoder

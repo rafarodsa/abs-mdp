@@ -7,9 +7,10 @@
 import logging
 import os
 
-from pfrl.experiments.evaluator import Evaluator, save_agent
+from pfrl.experiments.evaluator import save_agent
 from pfrl.utils.ask_yes_no import ask_yes_no
 
+from src.agents.evaluator import Evaluator
 
 def save_agent_replay_buffer(agent, t, outdir, suffix="", logger=None):
     logger = logger or logging.getLogger(__name__)
@@ -62,7 +63,7 @@ def train_agent(
             # a_t
             action = agent.act(obs)
             # o_{t+1}, r_{t+1}
-            obs, r, done, info = env.step(action)
+            obs, r, done, info = env.step(action.cpu())
             t += 1
             episode_r += r
             episode_len += 1
