@@ -12,7 +12,7 @@ class EnvOptionWrapper(gym.Env):
     def step(self, action):
         option = self.options[action]
         next_s, r, done, truncated, info = self._execute_option(option)
-        return next_s, r, done, truncated, info
+        return next_s.astype(np.float32), r, done, truncated, info
 
     def _execute_option(self, option):
         s = np.array(self.env.state)
@@ -39,11 +39,11 @@ class EnvOptionWrapper(gym.Env):
             next_s = self.env.state
             truncated = False
 
-        info['execution_length'] = t  # add execution length to info dict
+        info['tau'] = t  # add execution length to info dict
         return next_s, r, done, truncated, info
 
     def reset(self, state=None):
-        return self.env.reset(state)
+        return self.env.reset(state).astype(np.float32)
     
     def render(self, *args, **kwargs):
         return self.env.render(*args, **kwargs)

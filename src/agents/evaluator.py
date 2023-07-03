@@ -40,7 +40,7 @@ def _run_episodes(
         episode_len += 1
         timestep += 1
         reset = done or episode_len == max_episode_len or info.get("needs_reset", False)
-        tau = 1 if info['tau'] is None else info['tau']
+        tau = 1 if 'tau' not in info else info['tau']
         agent.observe(obs, r, done, (reset, tau))
 
         if reset:

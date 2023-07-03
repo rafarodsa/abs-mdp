@@ -64,11 +64,11 @@ class AbstractMDP(gym.Env):
 
     def step(self, action):
         next_s = self.transition(self.state, action)
-        self._state = next_s
         r = self.reward(self.state, action, next_s).item()
         done = False
         tau =  self.tau(self.state, action)
         info = {'expected_length': tau.item()}
+        self._state = next_s
         return next_s.numpy(), r, done, info
 
     @property
@@ -214,6 +214,10 @@ class AbstractMDPCritic(gym.Env):
     
     def reset(self, state=None):
         # sample initial state
+        # state = np.array([0.49, 0.12, 0.2, 0.2]).astype(np.float32)
+        # distance = 1/15
+        # x, y = np.random.uniform(0, 1, 2) * distance - distance/2
+        # state = np.array([0.08 + x, 0.8+y, 0.1, 0.1]).astype(np.float32)
         self._state = self.get_initial_states() if state is None else self.encode(torch.from_numpy(state)).squeeze(0)
         return self._state.numpy()
 
@@ -260,8 +264,8 @@ class AbstractMDPCritic(gym.Env):
             input = torch.cat([state, self._action_to_one_hot(action)], dim=0)
         t = self.transition_fn.distribution(input)
         # print('sampling')
-        # return t.sample()[0] + state
-        return t.mean + state
+        return t.sample()[0] + state
+        # return t.mean + state
     
     def reward(self, state, action, next_state):
         a_ = self._action_to_one_hot(action)

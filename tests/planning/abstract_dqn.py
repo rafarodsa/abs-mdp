@@ -41,7 +41,7 @@ class SingleSharedBias(nn.Module):
         return x + self.bias.expand_as(x)
 
 
-def parse_arch(arch, n_actions):
+def parse_arch(arch, n_actions, state_dim):
     if arch == "nature":
         return nn.Sequential(
             pnn.LargeAtariCNN(),
@@ -63,7 +63,7 @@ def parse_arch(arch, n_actions):
         )
     elif arch == 'mlp':
         return nn.Sequential(
-            nn.Linear(2, 128),
+            nn.Linear(state_dim, 128),
             nn.ReLU(),
             nn.Linear(128, 128),
             nn.ReLU(),
@@ -133,6 +133,7 @@ def make_env(test=False, test_seed=0, train_seed=1, args=None):
 def make_ground_env(test=False, test_seed=0, train_seed=1, args=None):
     goal_reward = 1
     goal_tol = 1/18
+    enc = lambda x: x[..., :2]
     print('================ CREATE GROUND ENVIRONMENT ================', goal_reward)
     def _goal_fn(state, goal=[0.55, 0.06], goal_tol=goal_tol):
             return np.linalg.norm(state[:2] - goal) <= goal_tol
@@ -143,8 +144,8 @@ def make_ground_env(test=False, test_seed=0, train_seed=1, args=None):
         options = create_position_options(env)
         env = EnvOptionWrapper(options, env)
         
-        # env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
-        env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder), goal_reward=goal_reward)
+        env = EnvGoalWrapper(env, goal_fn=goal_fn(enc, goal_tol=goal_tol), goal_reward=goal_reward)
+        # env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder), goal_reward=goal_reward)
         env.seed(train_seed)
     else:
         # evaluation in real env
@@ -153,8 +154,8 @@ def make_ground_env(test=False, test_seed=0, train_seed=1, args=None):
             env.render_mode = 'human'
         options = create_position_options(env)
         env = EnvOptionWrapper(options, env)
-        # env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
-        env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder), goal_reward=goal_reward)
+        env = EnvGoalWrapper(env, goal_fn=goal_fn(enc, goal_tol=goal_tol), goal_reward=goal_reward)
+        # env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder), goal_reward=goal_reward)
         env.seed(test_seed)
     if args.monitor:
         env = pfrl.wrappers.Monitor(
@@ -173,6 +174,12 @@ def main():
         '--absmdp',
         type=str,
         default='./mdp.pt'
+    )
+
+    parser.add_argument(
+        '--absgroundmdp',
+        action='store_true',
+        default=False
     )
 
     parser.add_argument(
@@ -317,17 +324,30 @@ def main():
     args.outdir = experiments.prepare_output_dir(args, args.outdir, make_backup=False)
     print("Output files are saved in {}".format(args.outdir))
 
-    
-    
-    env = make_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args)
-    eval_env = make_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args)
-
+    if not args.absgroundmdp:
+        env = make_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args)
+        eval_env = make_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args)
+        state_dim = 2
+    else:
+        env = make_ground_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args)
+        eval_env = make_ground_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args)
+        state_dim = 4
     n_actions = env.action_space.n
-    q_func = parse_arch(args.arch, n_actions)
+    q_func = parse_arch(args.arch, n_actions, state_dim=state_dim)
 
-    init = env.env.init_classifier.to(f'cuda:{args.gpu}') if args.gpu >= 0 else env.env.initiation_set
-    def action_mask(s):
-        return (torch.sigmoid(init(s.float())) > 0.5).float()
+
+    
+    if not args.absgroundmdp:
+        init = env.env.init_classifier.to(f'cuda:{args.gpu}') if args.gpu >= 0 else env.env.initiation_set
+        def action_mask(s):
+            return (torch.sigmoid(init(s.float())) > 0.5).float()
+    else:
+        options = create_position_options(env.env.env)
+        def action_mask(state):
+            mask = torch.from_numpy(np.array([o.initiation(state[0].numpy()) for o in options]).T).float().unsqueeze(0)
+            # printarr(mask)
+            return mask
+
 
     if args.noisy_net_sigma is not None:
         pnn.to_factorized_noisy(q_func, sigma_scale=args.noisy_net_sigma)
@@ -367,7 +387,7 @@ def main():
         # Anneal beta from beta0 to 1 throughout training
         betasteps = args.steps / args.update_interval
         rbuf = replay_buffers.PrioritizedReplayBuffer(
-            2*10**5,
+            5*10**5,
             alpha=0.6,
             beta0=0.4,
             betasteps=betasteps,

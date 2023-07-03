@@ -11,7 +11,7 @@ from pfrl.experiments.evaluator import save_agent
 from pfrl.utils.ask_yes_no import ask_yes_no
 
 from src.agents.evaluator import Evaluator
-
+from src.utils.printarr import printarr
 def save_agent_replay_buffer(agent, t, outdir, suffix="", logger=None):
     logger = logger or logging.getLogger(__name__)
     filename = os.path.join(outdir, "{}{}.replay.pkl".format(t, suffix))
@@ -68,7 +68,7 @@ def train_agent(
             episode_r += r
             episode_len += 1
             reset = episode_len == max_episode_len or info.get("needs_reset", False)
-            tau = 1 if info['tau'] is None else info['tau']
+            tau = 1 if 'tau' not in info  else info['tau']
             agent.observe(obs, r, done, (reset, tau))
 
             for hook in step_hooks:

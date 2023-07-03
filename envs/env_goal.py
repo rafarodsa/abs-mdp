@@ -2,7 +2,7 @@ import gym
 
 
 class EnvGoalWrapper(gym.Env):
-    def __init__(self, env, goal_fn, goal_reward=1000):
+    def __init__(self, env, goal_fn, goal_reward=1):
         self.env = env
         self.goal_fn = goal_fn
         self.goal_reward = goal_reward
@@ -15,7 +15,7 @@ class EnvGoalWrapper(gym.Env):
             next_s, r, done, info = ret
         else:
             next_s, r, done, truncated, info = ret
-        r = 0 * r
+        r = 1e-4 * r
         if self.goal_fn(next_s):
             r = r + self.goal_reward
             done = True
@@ -27,6 +27,7 @@ class EnvGoalWrapper(gym.Env):
         return next_s, r, done, info
 
     def reset(self):
+        # print('===================resetting')
         return self.env.reset()
     
     def render(self, *args, **kwargs):
