@@ -39,15 +39,18 @@ init_s = np.array(init_s)
 # convex hull of init_s
 ch = scipy.spatial.ConvexHull(init_s)
 
-for traj in range(100):
+for traj in range(10):
     t = []
     s = mdp.reset()
     next_s = s
-    for i in range(5):
+    for i in range(25):
         s = next_s
-        initset = torch.sigmoid(mdp.initiation_set(torch.from_numpy(s))).numpy() > 0.8
+        initset = torch.sigmoid(mdp.initiation_set(torch.from_numpy(s))).numpy() > 0.85
         actions_avail = np.nonzero(initset)[0]
-        sample = np.random.choice(len(actions_avail))
+        n_actions = len(actions_avail)
+        if n_actions <= 0:
+            break
+        sample = np.random.choice(n_actions)
         a = actions_avail[sample]
         # a = 2
         next_s, r, d, info = mdp.step(a)
@@ -56,6 +59,8 @@ for traj in range(100):
     trajs.append(t)
 
 goals = np.random.randn(100, 2) * 0.1/3 + goal[np.newaxis]
+
+
 
 # plt.scatter(goals[:, 0], goals[:, 1], c='g', s=100)
 for t in trajs:
@@ -67,9 +72,17 @@ for t in trajs:
     plt.scatter(s[-1, 0], s[-1, 1], c='g', s=20)
     plt.plot(s[:, 0], s[:, 1], c='k')
 
-for simplex in ch.simplices:
-    plt.plot(init_s[simplex, 0], init_s[simplex, 1], 'k-')
+# for simplex in ch.simplices:
+#     plt.plot(init_s[simplex, 0], init_s[simplex, 1], 'k-')
 plt.grid()
+
+init_states = []
+for i in range(10000):
+    init_states.append(mdp.reset())
+
+init_states = np.array(init_states)
+plt.scatter(init_states[:, 0], init_states[:, 1], s=5, c='y', alpha=0.15)
+
 
 plt.savefig('traj.png')
 plt.show()

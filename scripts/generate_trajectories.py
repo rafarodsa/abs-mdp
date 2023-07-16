@@ -58,7 +58,7 @@ if __name__== "__main__":
 
     ######## Parameters
     np.set_printoptions(precision=3)
-    configuration_file = "/Users/rrs/Desktop/abs-mdp/envs/pinball/configs/pinball_simple_single.cfg"
+    configuration_file = "envs/pinball/configs/pinball_simple_single.cfg"
     num_traj = 100
     observation_type = 'simple'
 
@@ -74,10 +74,11 @@ if __name__== "__main__":
     parser.add_argument('--max-horizon', type=int, default=100)
     parser.add_argument('--observation', type=str, default=observation_type)
     parser.add_argument('--n-jobs', type=int, default=1)
-    parser.add_argument('--max-exec-time', type=int, default=1000)
+    parser.add_argument('--max-exec-time', type=int, default=100)
     parser.add_argument('--image-size', type=int, default=100)
     parser.add_argument('--option_type', type=str, default='continuous-v1')
-    parser.add_argument('--grid_size', type=int, default=10)
+    parser.add_argument('--grid_size', type=int, default=20)
+    parser.add_argument('--with-failures', action='store_true')
     args = parser.parse_args()
 
     dir, name = os.path.split(args.save_path)
@@ -104,7 +105,7 @@ if __name__== "__main__":
     
     options_desc = {i: str(o) for i, o in enumerate(options)}
 
-    trajectories = Parallel(n_jobs=args.n_jobs)(delayed(collect_trajectory)(env, options, obs_type=args.observation, max_exec_time=max_exec_time, horizon=args.max_horizon) for i in tqdm(range(args.num_traj)))        
+    trajectories = Parallel(n_jobs=args.n_jobs)(delayed(collect_trajectory)(env, options, obs_type=args.observation, max_exec_time=max_exec_time, horizon=args.max_horizon, with_failures=args.with_failures) for i in tqdm(range(args.num_traj)))        
     
     if args.observation == 'pixel':
         trajectories = save_and_compress(trajectories, zfile)

@@ -28,7 +28,7 @@ loss:
   initset_const: 1
   n_samples: 1
 data:
-  data_path: ${experiment_cwd}/data/simple-v1.zip
+  data_path: ${experiment_cwd}/data/simple-contv1-failures-no-errors.zip
   save_path: ${save_path}
   batch_size: ${batch_size}
   num_workers: 3
@@ -51,7 +51,7 @@ model:
   n_options: 4
   obs_dims: ${data.n_out_feats}
   latent_dim: 2
-  encoder: ${loadcfg:${experiment_cwd}/config/models/encoder_mlp_big.yaml}
+  encoder: ${loadcfg:${experiment_cwd}/config/models/encoder_mlp.yaml}
   decoder: ${loadcfg:${experiment_cwd}/config/models/decoder_mlp_critic.yaml}
   transition: ${loadcfg:${experiment_cwd}/config/models/transition_gaussian.yaml}
   init_class: ${loadcfg:${experiment_cwd}/config/models/init_class_mlp.yaml}

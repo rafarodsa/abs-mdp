@@ -16,7 +16,7 @@ from src.absmdp.datasets import PinballDataset
 from omegaconf import OmegaConf as oc
 
 
-from sklearn.decomposition import PCA
+from sklearn import manifold
 
 from collections import namedtuple
 import os
@@ -92,6 +92,44 @@ if __name__ == '__main__':
     os.makedirs(args.save_path, exist_ok=True)
     # Plot encoder space
     _action = batch.action.argmax(-1)
+    
+    ### ISOMAP
+    print('Isomap...')
+    n_neighbors = 10
+    n_components = 2
+    Y = manifold.Isomap(n_neighbors=n_neighbors, n_components=n_components).fit_transform(z)
+    plt.figure()
+    plt.scatter(Y[:, 0], Y[:, 1], s=5)
+    plt.grid()
+    plt.savefig(f'{args.save_path}/isomap-z-space.png')
+    
+    ## LLE
+    print('LLE... (modified)')
+    Y = manifold.LocallyLinearEmbedding(n_components=n_components, n_neighbors=n_neighbors, method='modified').fit_transform(z)
+    plt.figure()
+    plt.scatter(Y[:, 0], Y[:, 1], s=5)
+    plt.grid()
+    plt.savefig(f'{args.save_path}/lle-z-space.png')
+    
+    
+    # ##Local Tangent space alignment LLE 
+    # print('LLE... (LTSA)')
+    # Y = manifold.LocallyLinearEmbedding(n_components=n_components, n_neighbors=n_neighbors, method='ltsa', eigen_solver='dense').fit_transform(z)
+    # plt.figure()
+    # plt.scatter(Y[:, 0], Y[:, 1], s=5)
+    # plt.grid()
+    # plt.savefig(f'{args.save_path}/ltsa-lle-z-space.png')
+    
+   
+    
+    ## Spectral
+    print('Spectral Embedding...')
+    Y = manifold.SpectralEmbedding(n_components=n_components, n_neighbors=n_neighbors).fit_transform(z)
+    plt.figure()
+    plt.scatter(Y[:, 0], Y[:, 1], s=5)
+    plt.grid()
+    plt.savefig(f'{args.save_path}/spectral-z-space.png')
+    
     plt.figure()
     ax = plt.axes(projection='3d')
     ax.scatter3D(z[:, 0], z[:, 1], z[:, 2], s=5, marker='o', color='b', label='z')
@@ -100,8 +138,33 @@ if __name__ == '__main__':
         next_z_a = next_z[_action==a]
         ax.scatter3D(next_z_a[:, 0], next_z_a[:, 1], next_z_a[:, 2], s=5, marker='^', label=f'next_z: action {action_names[a]}')   
     plt.legend() 
-    plt.savefig(f'{args.save_path}/z-space.png')
-    plt.show()
-    # Plot initial states
+    plt.savefig(f'{args.save_path}/3D-z-space.png')
+    
+    ### TSNE embedding
+    print('TSNE...')
+    tsne = manifold.TSNE(n_components=n_components, init='pca')
+    Z = tsne.fit_transform(z)
+    plt.figure()
+    plt.scatter(Z[:, 0], Z[:, 1], s=5)
+    plt.grid()
+    plt.savefig(f'{args.save_path}/tsne-z-space.png')
 
-
+    # ## Hessian LLE 
+    # print('LLE... (hessian)')
+    # nn = n_components * (n_components+3)/2 + 1
+    # Y = manifold.LocallyLinearEmbedding(n_components=n_components, n_neighbors=int(nn), method='hessian', eigen_solver='dense').fit_transform(z)
+    # plt.figure()
+    # plt.scatter(Y[:, 0], Y[:, 1], s=5)
+    # plt.grid()
+    # plt.savefig(f'{args.save_path}/hess-lle-z-space.png')
+    
+    
+    ## MDS
+    print('MDS...')
+    Y = manifold.MDS(n_components=n_components, normalized_stress='auto').fit_transform(z)
+    plt.figure()
+    plt.scatter(Y[:, 0], Y[:, 1], s=5)
+    plt.grid()
+    plt.savefig(f'{args.save_path}/mds-z-space.png')
+    
+    print('Done...')

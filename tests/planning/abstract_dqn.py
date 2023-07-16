@@ -19,6 +19,7 @@ from envs.env_goal import EnvGoalWrapper
 from src.options.policies import SoftmaxCategoricalHeadInitiation, OptionPolicyInit
 from src.absmdp.policies import AbstractPolicyWrapper
 from src.agents.abstract_ddqn import AbstractDoubleDQN as AbstractDDQN, AbstractLinearDecayEpsilonGreedy
+from src.agents.abstract_ddqn import AbstractDDQNGrounded
 
 from src.agents.train_agent import train_agent_with_evaluation
 from src.agents.evaluator import eval_performance
@@ -81,21 +82,42 @@ def parse_agent(agent):
 
 
 
+def compute_nearest_pos(position, n_pos=20, min_pos=0.05, max_pos=0.95):
+    # batch = position.shape[0] if len(position.shape) > 1 else 1
+    step = (max_pos - min_pos) / n_pos
+    pos_ = (position - min_pos) / (max_pos-min_pos) * n_pos
+    min_i, max_i = np.floor(pos_), np.ceil(pos_) # closest grid position to move
+    min = np.vstack([min_i, max_i])
+    x, y = np.meshgrid(min[:,0], min[:, 1])
+    pts = np.stack([x.reshape(-1), y.reshape(-1)], axis=1)
+    distances =  np.linalg.norm(pts - pos_[np.newaxis], axis=-1)
+    _min_dis = distances.argmax()
+    goal = pts[_min_dis] * step + min_pos
+
+    goal = goal.clip(min_pos, max_pos)
+    return goal
+
 # goal
-def goal_fn(phi, goal=[0.55, 0.06, 0., 0.], goal_tol=0.01):
+def goal_fn(phi, goal=[0.2, 0.9, 0., 0.], goal_tol=0.01):
     goal = phi(torch.Tensor(goal)).numpy()
+    # goal = compute_nearest_pos(goal)
     def _goal(state):
-        return np.linalg.norm(state[:2] - goal) <= goal_tol
+        distance =  np.linalg.norm(state[:2] - goal)
+        # print(distance, state[:2], goal)
+        return distance <= goal_tol
     return _goal
 
-def grounding_goal_fn(grounding, phi, goal=[0.55, 0.06, 0., 0.]):
+def grounding_goal_fn(grounding, phi, goal=[0.2, 0.9, 0., 0.]):
+    # goal = compute_nearest_pos(np.array(goal[:2]))
+    print(goal)
+    # goal = np.concatenate([goal, [0., 0.]])
     goal = torch.Tensor(goal).unsqueeze(0)
     def _goal(state):
         _goal = torch.Tensor(goal)
         # printarr(_goal, state)
         s = torch.from_numpy(state).unsqueeze(0)
         v = torch.tanh(grounding(_goal, s))
-        return v > 0.
+        return v > 0.7
 
     return _goal
 
@@ -109,15 +131,6 @@ def make_env(test=False, test_seed=0, train_seed=1, args=None):
             env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder), goal_reward=goal_reward)
             env.seed(train_seed)
         else:
-            # # evaluation in real env
-            # env = PinballEnvContinuous(config='envs/pinball/configs/pinball_simple_single.cfg')
-            # if args.render:
-            #     env.render_mode = 'human'
-            # options = create_position_options(env)
-            # env = EnvOptionWrapper(options, env)
-            # def _goal_fn(state, goal=[0.55, 0.06], goal_tol=1/18):
-            #     return np.sqrt(np.linalg.norm(state[:2] - goal)) <= goal_tol
-            # env = EnvGoalWrapper(env, goal_fn=_goal_fn, goal_reward=goal_reward)
             env = torch.load(args.absmdp)
             # env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
             env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder), goal_reward=goal_reward)
@@ -132,30 +145,49 @@ def make_env(test=False, test_seed=0, train_seed=1, args=None):
 
 def make_ground_env(test=False, test_seed=0, train_seed=1, args=None):
     goal_reward = 1
-    goal_tol = 1/18
+    goal_tol = 1/10
     enc = lambda x: x[..., :2]
     print('================ CREATE GROUND ENVIRONMENT ================', goal_reward)
-    def _goal_fn(state, goal=[0.55, 0.06], goal_tol=goal_tol):
-            return np.linalg.norm(state[:2] - goal) <= goal_tol
+    
+    def _grounding_goal_fn(grounding, phi, goal=[0.55, 0.06, 0., 0.]):
+        goal = compute_nearest_pos(np.array(goal[:2]))
+        goal = np.concatenate([goal, [0., 0.]])
+        goal = torch.Tensor(goal).unsqueeze(0)
+        def _goal(state):
+            _goal = torch.Tensor(goal)
+            # printarr(_goal, state)
+            s = phi(torch.from_numpy(state).unsqueeze(0))
+            v = torch.tanh(grounding(_goal, s))
+            return v > 0.7
+
+        return _goal
+
+
     if not test:
         env = PinballEnvContinuous(config='envs/pinball/configs/pinball_simple_single.cfg')
         if args.render:
             env.render_mode = 'human'
-        options = create_position_options(env)
+        print('grid options')
+        options = PinballGridOptions(env)
+        env_sim = torch.load(args.absmdp)
         env = EnvOptionWrapper(options, env)
-        
-        env = EnvGoalWrapper(env, goal_fn=goal_fn(enc, goal_tol=goal_tol), goal_reward=goal_reward)
-        # env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder), goal_reward=goal_reward)
+        # env = EnvGoalWrapper(env, goal_fn=goal_fn(enc, goal_tol=goal_tol), goal_reward=goal_reward)
+        env = EnvGoalWrapper(env, goal_fn=_grounding_goal_fn(env_sim.grounding, env_sim.encoder), goal_reward=goal_reward)
         env.seed(train_seed)
     else:
         # evaluation in real env
         env = PinballEnvContinuous(config='envs/pinball/configs/pinball_simple_single.cfg')
         if args.render:
             env.render_mode = 'human'
+        print('cont options')
         options = create_position_options(env)
+        # print('grid options')
+        # options = PinballGridOptions(env)
         env = EnvOptionWrapper(options, env)
+        env_sim = torch.load(args.absmdp)
+        print('here')
         env = EnvGoalWrapper(env, goal_fn=goal_fn(enc, goal_tol=goal_tol), goal_reward=goal_reward)
-        # env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder), goal_reward=goal_reward)
+        # env = EnvGoalWrapper(env, goal_fn=_grounding_goal_fn(env_sim.grounding, env_sim.encoder), goal_reward=goal_reward)
         env.seed(test_seed)
     if args.monitor:
         env = pfrl.wrappers.Monitor(
@@ -165,6 +197,22 @@ def make_ground_env(test=False, test_seed=0, train_seed=1, args=None):
         env = pfrl.wrappers.Render(env)
     return env
 
+
+class RandomAgent(pfrl.agent.Agent):
+    def __init__(self, action_selection, encoder):
+        self.action_selection = action_selection
+        self.encoder = encoder
+    def act(self, obs):
+        z = self.encoder(torch.from_numpy(obs))
+        return self.action_selection(z)
+    def load(self, dirname):
+        pass
+    def get_statistics(self):
+        pass
+    def observe(self, *args):
+        pass
+    def save(self, dirname):
+        pass
 
 
 def main():
@@ -206,7 +254,7 @@ def main():
     parser.add_argument(
         "--final-exploration-frames",
         type=int,
-        default=10**5,
+        default=4*10**5,
         help="Timesteps after which we stop " + "annealing exploration rate",
     )
     parser.add_argument(
@@ -226,7 +274,7 @@ def main():
     parser.add_argument(
         "--steps",
         type=int,
-        default=5*10**5,
+        default=10**6,
         help="Total number of timesteps to train the agent.",
     )
     parser.add_argument(
@@ -244,7 +292,7 @@ def main():
     parser.add_argument(
         "--target-update-interval",
         type=int,
-        default=500,
+        default=1000,
         help="Frequency (in timesteps) at which " + "the target network is updated.",
     )
     parser.add_argument(
@@ -286,7 +334,7 @@ def main():
             "Monitor env. Videos and additional information are saved as output files."
         ),
     )
-    parser.add_argument("--lr", type=float, default=2.5e-4, help="Learning rate.")
+    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate.")
     parser.add_argument(
         "--prioritized",
         action="store_true",
@@ -307,6 +355,21 @@ def main():
         choices=["nature", "nips", "dueling", "doubledqn", "mlp"],
         help="Network architecture to use.",
     )
+    
+    parser.add_argument(
+        '--eval-random-agent',
+        action='store_true'
+    )
+    parser.add_argument(
+        '--init-thresh',
+        type=float,
+        default=0.7
+    )
+    
+    parser.add_argument(
+        '--finetune',
+        action='store_true'
+    )
 
     args = parser.parse_args()
 
@@ -323,39 +386,45 @@ def main():
 
     args.outdir = experiments.prepare_output_dir(args, args.outdir, make_backup=False)
     print("Output files are saved in {}".format(args.outdir))
-
-    if not args.absgroundmdp:
-        env = make_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args)
-        eval_env = make_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args)
-        state_dim = 2
-    else:
+    
+    if args.finetune:
         env = make_ground_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args)
         eval_env = make_ground_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args)
-        state_dim = 4
-    n_actions = env.action_space.n
+        env_sim = make_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args)
+        state_dim = env_sim.env.latent_dim
+        encoder = env_sim.env.encode
+    elif (not args.absgroundmdp and not args.demo):
+        env = make_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args)
+        eval_env = make_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args)
+        state_dim = env.env.latent_dim
+        encoder = env.env.encode
+    elif args.demo:
+        env = make_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args)
+        eval_env = make_ground_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args)
+        state_dim = env.env.latent_dim
+        encoder = env.env.encode
+    
+
+    n_actions = eval_env.action_space.n
     q_func = parse_arch(args.arch, n_actions, state_dim=state_dim)
 
 
     
-    if not args.absgroundmdp:
+    if not args.absgroundmdp and not args.finetune and not args.demo:
         init = env.env.init_classifier.to(f'cuda:{args.gpu}') if args.gpu >= 0 else env.env.initiation_set
         def action_mask(s):
-            return (torch.sigmoid(init(s.float())) > 0.5).float()
+            probs = torch.sigmoid(init(s.float()))
+            return (probs > args.init_thresh).float()
     else:
-        options = create_position_options(env.env.env)
+        options = eval_env.env.options
         def action_mask(state):
             mask = torch.from_numpy(np.array([o.initiation(state[0].numpy()) for o in options]).T).float().unsqueeze(0)
             # printarr(mask)
             return mask
 
 
-    if args.noisy_net_sigma is not None:
-        pnn.to_factorized_noisy(q_func, sigma_scale=args.noisy_net_sigma)
-        # Turn off explorer
-        explorer = explorers.Greedy()
-    else:
-        def random_selection(obs):
-            _mask = action_mask(obs)
+    def random_selection(obs):
+            _mask = action_mask(obs) + 1e-12
             _mask = _mask / _mask.sum(-1, keepdim=True)
             n_actions = _mask.shape[-1]
             # printarr(_mask, n_actions)
@@ -363,22 +432,18 @@ def main():
             # printarr(selection)
             return torch.tensor(selection)
 
+    if args.noisy_net_sigma is not None:
+        pnn.to_factorized_noisy(q_func, sigma_scale=args.noisy_net_sigma)
+        # Turn off explorer
+        explorer = explorers.Greedy()
+    else:
+
         explorer = AbstractLinearDecayEpsilonGreedy(
             1.0,
             args.final_epsilon,
             args.final_exploration_frames,
             lambda obs: random_selection(obs),
         )
-
-    # Use the Nature paper's hyperparameters
-    # opt = pfrl.optimizers.RMSpropEpsInsideSqrt(
-    #     q_func.parameters(),
-    #     lr=args.lr,
-    #     alpha=0.95,
-    #     momentum=0.0,
-    #     eps=1e-2,
-    #     centered=True,
-    # )
 
     # opt = torch.optim.RMSprop(q_func.parameters(), lr=args.lr)
     opt = torch.optim.Adam(q_func.parameters(), lr=args.lr, eps=1.5e-4)
@@ -417,13 +482,25 @@ def main():
         phi=lambda x: x,
         minibatch_size=32
     )
+    
+    
 
     if args.load:
         agent.load(args.load)
-
+    
     if args.demo:
+        
+        if args.eval_random_agent:
+            agent = RandomAgent(random_selection, encoder)
+        else:
+            agent = AbstractDDQNGrounded(encoder, agent, action_mask)
         eval_stats = eval_performance(
-            env=eval_env, agent=agent, n_steps=None, n_episodes=args.eval_n_runs
+            env=eval_env, 
+            agent=agent, 
+            n_steps=None, 
+            n_episodes=args.eval_n_runs, 
+            max_episode_len=50, 
+            discounted=True
         )
         print(
             "n_runs: {} mean: {} median: {} stdev {}".format(
@@ -434,6 +511,8 @@ def main():
             )
         )
     else:
+        if args.finetune:   
+            agent = AbstractDDQNGrounded(encoder, agent)
         train_agent_with_evaluation(
             agent=agent,
             env=env,
@@ -447,6 +526,7 @@ def main():
             eval_env=eval_env,
             use_tensorboard=True,
             train_max_episode_len=args.max_steps,
+            eval_max_episode_len=50
         )
 
 

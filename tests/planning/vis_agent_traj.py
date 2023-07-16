@@ -66,7 +66,7 @@ def parse_arch(arch, n_actions):
         )
     elif arch == 'mlp':
         return nn.Sequential(
-            nn.Linear(2, 128),
+            nn.Linear(3, 128),
             nn.ReLU(),
             nn.Linear(128, 128),
             nn.ReLU(),
@@ -84,50 +84,58 @@ def parse_agent(agent):
 
 
 
+def compute_nearest_pos(position, n_pos=20, min_pos=0.05, max_pos=0.95):
+    # batch = position.shape[0] if len(position.shape) > 1 else 1
+    step = (max_pos - min_pos) / n_pos
+    pos_ = (position - min_pos) / (max_pos-min_pos) * n_pos
+    min_i, max_i = np.floor(pos_), np.ceil(pos_) # closest grid position to move
+    min = np.vstack([min_i, max_i])
+    x, y = np.meshgrid(min[:,0], min[:, 1])
+    pts = np.stack([x.reshape(-1), y.reshape(-1)], axis=1)
+    distances =  np.linalg.norm(pts - pos_[np.newaxis], axis=-1)
+    _min_dis = distances.argmax()
+    goal = pts[_min_dis] * step + min_pos
+
+    goal = goal.clip(min_pos, max_pos)
+    return goal
+
 # goal
 def goal_fn(phi, goal=[0.55, 0.06, 0., 0.], goal_tol=0.01):
     goal = phi(torch.Tensor(goal)).numpy()
+    goal = compute_nearest_pos(goal)
     def _goal(state):
-        distance = np.linalg.norm(state[:2] - goal)
-        # print(distance, goal_tol)
-        # print(state, goal)
-        return  distance <= goal_tol
+        distance =  np.linalg.norm(state[:2] - goal)
+        # printarr(distance, state[:2], goal)
+        return distance <= goal_tol
     return _goal
 
 def grounding_goal_fn(grounding, phi, goal=[0.55, 0.06, 0., 0.]):
+    goal = compute_nearest_pos(np.array(goal[:2]))
+    goal = np.concatenate([goal, [0., 0.]])
     goal = torch.Tensor(goal).unsqueeze(0)
     def _goal(state):
         _goal = torch.Tensor(goal)
         # printarr(_goal, state)
         s = torch.from_numpy(state).unsqueeze(0)
         v = torch.tanh(grounding(_goal, s))
-        return v > 0.
+        return v > 0.7
 
     return _goal
 
 def make_env(test=False, test_seed=0, train_seed=1, args=None):
-        goal_reward = 10000
-        goal_tol = 3
+        goal_reward = 1
+        goal_tol = 5
         print('================ CREATE ENVIRONMENT ================', goal_reward)
         if not test:
             env = torch.load(args.absmdp)
-            env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
-            # env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder), goal_reward=goal_reward)
+            # env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
+            env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder), goal_reward=goal_reward)
             env.seed(train_seed)
         else:
-            # # evaluation in real env
-            # env = PinballEnvContinuous(config='envs/pinball/configs/pinball_simple_single.cfg')
-            # if args.render:
-            #     env.render_mode = 'human'
-            # options = create_position_options(env)
-            # env = EnvOptionWrapper(options, env)
-            # def _goal_fn(state, goal=[0.55, 0.06], goal_tol=1/18):
-            #     return np.sqrt(np.linalg.norm(state[:2] - goal)) <= goal_tol
-            # env = EnvGoalWrapper(env, goal_fn=_goal_fn, goal_reward=goal_reward)
             env = torch.load(args.absmdp)
-            env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
-            # env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder), goal_reward=goal_reward)
-            # env.seed(test_seed)
+            # env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
+            env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder), goal_reward=goal_reward)
+            env.seed(test_seed)
         if args.monitor:
             env = pfrl.wrappers.Monitor(
                 env, args.outdir, mode="evaluation" if test else "training"
@@ -135,6 +143,7 @@ def make_env(test=False, test_seed=0, train_seed=1, args=None):
         if args.render:
             env = pfrl.wrappers.Render(env)
         return env
+
 
 
 def main():
@@ -377,8 +386,12 @@ def main():
         trajs = []
 
         goal_tol = 3
-        goal = eval_env.env.encoder(torch.Tensor([0.55, 0.06, 0., 0.]))
-
+        goal = [0.55, 0.06, 0., 0.]
+        goal = compute_nearest_pos(np.array(goal[:2]))
+        goal = np.concatenate([goal, [0., 0.]])
+        goal = torch.Tensor(goal).unsqueeze(0)
+        goal = eval_env.env.encoder(goal)[0]
+        print(goal)
         with agent.eval_mode():
             for i in range(args.eval_n_runs):
                 terminate = False
@@ -399,17 +412,22 @@ def main():
                     trajs.append(t)
 
         fig, ax = plt.subplots()
+        ax = plt.axes(projection='3d')
         for t in trajs:
             s = np.array([_t[0] for _t in t] + [t[-1][3]])
             printarr(s)
-            plt.plot(s[:, 0], s[:, 1], c='k')
-            plt.scatter(s[:, 0], s[:, 1], s=10, c='b')
-            plt.scatter(s[-1,0], s[-1, 1], s=10, c='r')
-        plt.scatter(goal[0], goal[1], s=20, c='g')
-        c = plt.Circle((goal[0], goal[1]), goal_tol, color='g', fill=False)
-        ax.add_patch(c)
-            
+            ax.plot(s[:, 0], s[:, 1], s[:, 2], c='k')
+            # plt.plot(s[:, 0], s[:, 1], c='k')
+            # plt.scatter(s[:, 0], s[:, 1], s=10, c='b')
+            # plt.scatter(s[-1,0], s[-1, 1], s=10, c='r')
+            ax.scatter3D(s[:, 0], s[:, 1], s[:, 2], s=5, c='k')
+            ax.scatter3D(s[-1,0], s[-1, 1], s[-1, 2], s=20, c='r')
+            ax.scatter3D(s[0,0], s[0, 1], s[0, 2], s=20, c='b')
+        ax.scatter3D(goal[0], goal[1], goal[2], s=30, c='g')
+        # c = plt.Circle((goal[0], goal[1]), goal_tol, color='g', fill=False)
+        # ax.add_patch(c)
         plt.grid()
+        plt.savefig('agent-trajs.png')
         plt.show()
         
     else:

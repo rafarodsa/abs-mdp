@@ -88,13 +88,8 @@ class ConditionalMAFBlock(MAFBlock):
             cond: conditioning variable
         '''
         m, log_s = self.mean(x, cond), self.scale(x, cond)
-        # printarr(log_s, m)
-        log_s = torch.clamp(log_s, min=-10, max=10)
-        inv_s = torch.exp(-log_s)
-        # print(torch.isfinite(s))
-        u = (x - m) * inv_s
-        # if torch.any(torch.isnan(u)) or not torch.all(torch.isfinite(u)):
-        #     printarr(u, inv_s, m, x)
+        s = torch.exp(log_s)
+        u = (x - m) / s
         return u, m, log_s
     
     def inverse(self, u, cond):
@@ -105,7 +100,6 @@ class ConditionalMAFBlock(MAFBlock):
         x = torch.zeros_like(u)
         for j in range(self.input_dim):
             i = self.order[j]
-            # log_s = torch.clamp(self.scale(x, cond), min=-7)
             log_s = self.scale(x, cond)
             s = torch.exp(log_s)
             x[:, i-1] += u[:, i-1] * s[:, i-1] + self.mean(x, cond)[:, i-1]
@@ -151,14 +145,15 @@ class MAFDist:
             p.requires_grad_ = False
         return self
     def sample(self, n=1):
-        # printarr(self.cond)
         h = self.maf.features(self.cond)
         cond = h.repeat_interleave(n, dim=0)
         u = torch.randn(cond.shape[0], self.maf.input_dim)
-        # printarr(u, cond)
         samples = self.maf.inverse(u, cond)[0].reshape(self.cond.shape[0], n, self.maf.input_dim).permute(0, 2, 1)
-        # printarr(samples)
         return samples
+    @property
+    def mean(self):
+        samples = self.sample(n=10)
+        return samples.mean(-1)
 
 class MAFDistribution(ConditionalMAF):
 

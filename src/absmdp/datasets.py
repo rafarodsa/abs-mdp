@@ -17,6 +17,9 @@ from collections import namedtuple
 from typing import NamedTuple
 
 from src.utils.printarr import printarr
+from joblib import Parallel, delayed
+from itertools import tee, chain
+from tqdm import tqdm
 
 
 class ObservationImgFile(NamedTuple):
@@ -120,13 +123,39 @@ def cosine_transform(datum):
     next_obs = torch.cat([torch.cos(f(datum.next_obs)), torch.sin(f(datum.next_obs))], dim=-1)
     return datum.modify(obs=obs, next_obs=next_obs, rewards=[r_obs, r_next_obs, datum.rewards[2]])    
 
+def _process_pixel_obs(obs):
+    r,g,b = obs[:, :, 0], obs[:, :, 1], obs[:, :, 2]
+    noise = np.random.randn(*r.shape) * 1/255
+    return np.clip((0.2989 * r + 0.5870 * g + 0.1140 * b)[np.newaxis] / 255 + noise, 0, 1)
+
+
+def load_image(zfile, name):
+    try:
+        img = zfile.open(name)
+        img_ = Image.open(img)
+        img_ = np.array(img_)
+        img_ = _process_pixel_obs(img_)
+    except:
+        raise ValueError(f'Image {name} could not be opened')
+    return (name, img_)  
+
+def load_images(zfile_name, nl):
+    with zipfile.ZipFile(zfile_name, 'r') as zfile:
+        imgs = [load_image(zfile, n) for n in tqdm(nl)]
+    return imgs
+
+def split(_list, batch_size):
+    n_batches = len(_list) // batch_size
+    batches = [_list[i*batch_size:(i+1)*batch_size] for i in range(n_batches-1)]
+    batches.append(_list[(n_batches-1)*batch_size:])
+    return batches
 
 class PinballDataset_(torch.utils.data.Dataset):
     IMG_FORMAT = 'tj_{}_obs_{}.png'
 
-    def __init__(self, path_to_file, n_reward_samples=5, transforms=None, obs_type='full', dtype=torch.float32, noise_level=0.01, noise_dim=0, ar_coeff=0.9):
+    def __init__(self, path_to_file, n_reward_samples=5, transforms=None, obs_type='full', dtype=torch.float32, noise_level=0.01, noise_dim=0, ar_coeff=0.9, num_workers=1):
         self.zfile_name = path_to_file
-        self.zfile = zipfile.ZipFile(self.zfile_name) if obs_type == 'pixels' else None
+        # self.zfile = zipfile.ZipFile(self.zfile_name) if obs_type == 'pixels' else None
         self.n_reward_samples = n_reward_samples
         self.transforms = transforms
         self.dtype = dtype
@@ -134,14 +163,24 @@ class PinballDataset_(torch.utils.data.Dataset):
         self.noise_level = noise_level
         self.noise_dim = noise_dim
         self.ar_coeff = ar_coeff
+        self.num_workers = num_workers
         self.load()
         self.data = self.process_trajectories(self.trajectories)
-
+        
     def load(self):
         with zipfile.ZipFile(self.zfile_name, 'r') as zfile:
+            print('Loading trajectories...')
             self.trajectories = torch.load(zfile.open('transitions.pt'))
+            print('Loading rewards...')
             self.rewards = torch.load(zfile.open('rewards.pt'))
-        self.images_loaded = {}
+            nl = list(filter(lambda n: '.png' in n, zfile.namelist()))
+        if self.obs_type == 'pixels':
+            print(self.num_workers)
+            batch_size = len(nl) // self.num_workers
+            images_loaded = Parallel(n_jobs=self.num_workers)(delayed(load_images)(self.zfile_name, imgs) for imgs in split(nl, batch_size))
+            images_loaded = reduce(lambda x,acc: x+acc, images_loaded, [])
+            print(f'{len(images_loaded)} images loaded! ')
+            self.images_loaded = dict(images_loaded)     
 
     def __getitem__(self, index):
         datum = self.data[index]
@@ -297,7 +336,7 @@ class PinballDataset(pl.LightningDataModule):
 
 
     def setup(self, stage=None):
-        self.dataset = PinballDataset_(self.path_to_file, self.n_reward_samples, self.transforms, obs_type=self.obs_type, noise_dim=self.cfg.noise_dim, noise_level=self.cfg.noise_level, ar_coeff=self.cfg.ar_coeff)
+        self.dataset = PinballDataset_(self.path_to_file, self.n_reward_samples, self.transforms, obs_type=self.obs_type, noise_dim=self.cfg.noise_dim, noise_level=self.cfg.noise_level, ar_coeff=self.cfg.ar_coeff, num_workers=self.num_workers)
         self.train, self.val, self.test = torch.utils.data.random_split(self.dataset, [self.train_split, self.val_split, self.test_split])
 
     def train_dataloader(self):

@@ -9,8 +9,8 @@ features:
   residual:
     n_layers: 3
     in_channels: ${model.encoder.features.feat_maps}
-    out_channels: 64
-    kernel_size: 5
+    out_channels: 32
+    kernel_size: 3
 dist:
   type: diag_gaussian
   output_dim: ${model.latent_dim}

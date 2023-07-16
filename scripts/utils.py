@@ -80,7 +80,7 @@ def run_options(env, init_state, options, obs_type='simple', max_exec_time=200):
     return list(dataset), infos
 
 
-def collect_trajectory(env, options, obs_type='simple', max_exec_time=200, horizon=100):
+def collect_trajectory(env, options, obs_type='simple', max_exec_time=200, horizon=100, with_failures=True):
     '''
         Collect samples from sequential option execution. Uniform policy over available options.
     '''
@@ -96,14 +96,18 @@ def collect_trajectory(env, options, obs_type='simple', max_exec_time=200, horiz
     for t in range(horizon): # execute t options in sequence
         if done: # episode terminated
             break
-        if executed:
+        if executed or with_failures:
             initiation_mask_s = compute_initiation_masks(s, options).astype(np.float32)
         else:
             initiation_mask_s[option_n] = 0
 
-        if np.sum(initiation_mask_s) == 0:
+        if np.sum(initiation_mask_s) == 0 and not with_failures:
             break # no options available
-        option_n = np.random.choice(len(options), p=initiation_mask_s/np.sum(initiation_mask_s)) # sample option uniformly
+        if not with_failures:
+            option_n = np.random.choice(len(options), p=initiation_mask_s/np.sum(initiation_mask_s)) # sample option uniformly
+        else:
+            option_n = np.random.choice(len(options))
+            
         option = options[option_n]
         try:
             o, next_o, rewards, executed, duration, info = execute_option(env, np.array(s), option, obs_type=obs_type, max_exec_time=max_exec_time)

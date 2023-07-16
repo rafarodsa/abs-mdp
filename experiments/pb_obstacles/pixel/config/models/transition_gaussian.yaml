@@ -3,7 +3,8 @@ features:
   latent_dim: ${model.latent_dim}
   n_options: ${model.n_options}
   hidden_dims:
-  - 64
+  - 128
+  - 128
   activation: relu
 dist:
   type: diag_gaussian

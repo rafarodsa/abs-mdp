@@ -13,8 +13,11 @@ from envs.pinball.pinball import PinballModel, PinballView, BallModel
 
 from collections import UserDict, deque
 from matplotlib.path import Path
-
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 import pygame
+
+from src.utils.printarr import printarr
 
 class GoalPinballModel(PinballModel):
     def set_target_pos(self, target_pos):
@@ -47,7 +50,24 @@ class PinballEnv(gym.Env):
 
         self.pinball = GoalPinballModel(self.configuration)
         # self.state = self.pinball.get_state()
-        self._obstacles = [Path(obstacle.points) for obstacle in self.pinball.obstacles]
+        self._obstacles_cw = []
+        self._obstacles_ccw = []
+        self.vertices = []
+        for obstacle in self.pinball.obstacles:
+            vertices = obstacle.points + [obstacle.points[0]]
+            self._obstacles_cw.append(Path(vertices, closed=True))
+            self._obstacles_ccw.append(Path(vertices[::-1], closed=True))
+            vertices = np.array(vertices)
+            self.vertices.append(vertices)
+
+        # self._obstacles = [Path(obstacle.points + [obstacle.points[-1]], closed=True) for obstacle in self.pinball.obstacles]
+        
+        # f, ax = plt.subplots()
+        # for obs in self._obstacles:
+        #     patch = patches.PathPatch(obs)
+        #     ax.add_patch(patch)
+        # plt.savefig('obstacles')
+        
         if start_pos:
             self.pinball.set_initial_pos(start_pos)
         if target_pos:
@@ -97,25 +117,83 @@ class PinballEnv(gym.Env):
         """
         all_points = []
         total_points = 0
-        vels = np.random.uniform(size=(N, 2))
+        vels = np.random.uniform(size=(N, 2))-0.5
         while total_points < N:
             _p = np.random.uniform(low=0.02, high=0.98, size=(N, 2))
             points = self._get_points_outside_obstacles(_p)
             all_points.append(points)
             total_points += points.shape[0]
-        return np.hstack([np.vstack(all_points)[:N], vels])
+            
+        pos = np.vstack(all_points)[:N]
+        return np.concatenate([pos, vels], axis=-1)
+
+    def _inside_polygon(self,vertices, points, eps=1e-7):
+        '''
+            vertices: array (N, 2)
+            points: array (M, 2)
+        '''
+        tol = 1e-8
+        N, M = vertices.shape[0], points.shape[0]
+        p = points[:, np.newaxis].repeat(N, axis=1)
+        v = np.tile(vertices[np.newaxis], (M, 1, 1)) - p #+ eps #(M, N, 2)
+
+        y_sign = np.sign(v[..., 1])
+        sign_y = ((v[:, 1:, 1] * v[:, :-1, 1]) <= 0) # change of sign in y
+        
+        dirs =  (v[:, 1:] - v[:, :-1]) + 1e-8
+        betas = -v[:, :-1, 1] / dirs[:, :, 1]
+        x = v[:, :-1, 0] + betas * dirs[:, :, 0]
+
+        sign_x = np.where(sign_y, x, -1) >= 0
+        crossings = sign_x.sum(-1)
+        n_crossings = sign_y.sum(-1)
+
+        # point in boundary
+        alpha = -v[:, :-1] / dirs
+        on_segment = np.logical_and(alpha > 0-tol, alpha < 1+tol)
+        horizontal_line = np.abs(dirs[..., 1]) < tol
+        vertical_line = np.abs(dirs[..., 0]) < tol
+        on_segment_hor = np.logical_and(horizontal_line, on_segment[..., 0]).sum(-1) != 0
+        on_segment_ver = np.logical_and(vertical_line, on_segment[..., 1]).sum(-1) != 0
+
+        on_segment_line = np.logical_and(on_segment[..., 0], on_segment[..., 1])
+        on_boundary = np.logical_and(on_segment_line, np.abs(alpha[..., 0]-alpha[..., 1]) < tol).sum(-1) != 0
+
+        # printarr(x, betas, dirs, sign_x, sign_y, crossings, n_crossings)
+        # print(sign_y)
+        # print("beta", betas)
+        # print("x", x)
+        # print(y_sign)
+        # print(v[..., 1])
+        # print(vertices)
+        on_boundary = np.logical_or(on_boundary, np.logical_or(on_segment_hor, on_segment_ver))
+        crossings = np.mod(crossings, 2) != 0
+        return np.logical_or(crossings, on_boundary)
 
     def _get_points_outside_obstacles(self, points):
-        points_mask = np.ones(points.shape[0], dtype=np.bool8)
-        for obstacle in self._obstacles:
-            in_obstacle = obstacle.contains_points(points, radius=0.)
-            points_mask = np.logical_and(np.logical_not(in_obstacle), points_mask)
-        return points[points_mask]
+        points_mask = np.zeros(points.shape[0], dtype=np.bool8)
+        # for obstacle in self._obstacles_cw[4:]:
+        #     in_obstacle = obstacle.contains_points(points, radius=self.pinball.ball.radius+1e-9)
+        #     # in_obstacle = obstacle.contains_points(points, radius=-1e-9)
+        #     points_mask = np.logical_or(in_obstacle, points_mask)
+        # for obstacle in self._obstacles_ccw:
+        #     in_obstacle = obstacle.contains_points(points, radius=self.pinball.ball.radius-1e-9)
+        #     # in_obstacle = obstacle.contains_points(points, radius=1e-9)
+        #     points_mask = np.logical_or(in_obstacle, points_mask)
+        for i, vtx in enumerate(self.vertices[4:]):
+            in_obstacle = self._inside_polygon(vtx, points)
+            points_mask = np.logical_or(in_obstacle, points_mask)
+
+        p = points[np.logical_not(points_mask)]
+        return p
     
     def is_valid_state(self, state):
-        for obstacle in self._obstacles:
-            if obstacle.contains_points([state[:2]], radius=0.):
+        for obstacle_cw, obstacle_ccw, vtx in zip(self._obstacles_cw[4:], self._obstacles_ccw[4:], self.vertices[4:]):
+            # if obstacle_cw.contains_point(state[:2], radius=self.pinball.ball.radius+1e-9) or  obstacle_ccw.contains_point(state[:2], radius=self.pinball.ball.radius-1e-9):
+            if obstacle_cw.contains_point(state[:2], radius=1e-9) or  obstacle_ccw.contains_point(state[:2], radius=-1e-9):
+                self._inside_polygon(vtx, state[:2][np.newaxis])
                 return False
+            
         return True
 
     def reset(self, state=None):
@@ -201,6 +279,7 @@ class PinballEnvContinuous(PinballEnv):
     
     def reset(self, state=None):
         if state is None:
+            # print('state is none')
             state = self.sample_initial_positions(1)[0]
        
         if not self.is_valid_state(state):

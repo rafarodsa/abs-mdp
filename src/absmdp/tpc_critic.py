@@ -78,7 +78,7 @@ class InfoNCEAbstraction(pl.LightningModule):
 
     def step(self, batch, batch_idx):
         s, a, next_s, executed, initset_s, reward, duration = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets, batch.rewards, batch.duration.float()
-        assert torch.all(executed) # check all samples are successful executions.
+        # assert torch.all(executed) # check all samples are successful executions.
 
         grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss = self._run_step(s, a, next_s, initset_s, reward, duration)
 
@@ -115,7 +115,7 @@ class InfoNCEAbstraction(pl.LightningModule):
         b = next_z.shape[0]
         _next_s = next_s.repeat(b, *[1 for _ in range(len(next_s.shape)-1)])
         _next_z = torch.repeat_interleave(next_z, b, dim=0)
-        _log_t = torch.tanh(self.grounding(_next_s, _next_z).reshape(b, b)) * np.log(b) * 0.5
+        _log_t = torch.tanh(self.grounding(_next_s, _next_z).reshape(b, b)) * 100 #* np.log(b) * 0.5
         # _log_t = self.grounding(_next_s, _next_z).reshape(b, b)
         _loss = torch.diag(_log_t) - (torch.logsumexp(_log_t, dim=-1) - np.log(b))
 
@@ -160,7 +160,7 @@ class InfoNCEAbstraction(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         s, a, next_s, executed, initset_s, reward, duration = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets, batch.rewards, batch.duration.float()
-        assert torch.all(executed) # check all samples are successful executions.
+        # assert torch.all(executed) # check all samples are successful executions.
 
         grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss = self._run_step(s, a, next_s, initset_s, reward, duration)    
 
@@ -178,7 +178,7 @@ class InfoNCEAbstraction(pl.LightningModule):
                 'val_tau_loss': tau_loss.mean(),
                 'val_nll_loss': nll_loss.mean()
             }
-        self.log_dict(logs, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        self.log_dict(logs, on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         return logs['val_infomax']
 	
     def test_step(self, batch, batch_idx):

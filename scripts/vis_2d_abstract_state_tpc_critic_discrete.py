@@ -10,8 +10,7 @@ import torch
 import argparse
 
 from src.absmdp.infomax_attn import InfomaxAbstraction
-from src.absmdp.tpc_critic import InfoNCEAbstraction as TPCAbstraction
-from src.absmdp.discrete_tpc_critic import DiscreteInfoNCEAbstraction as DiscreteTPCAbstraction
+from src.absmdp.discrete_tpc_critic import DiscreteInfoNCEAbstraction as TPCAbstraction
 from src.absmdp.datasets import PinballDataset
 
 from omegaconf import OmegaConf as oc
@@ -23,6 +22,7 @@ from collections import namedtuple
 import os
 
 import lightning as pl
+from src.utils.printarr import printarr
 
 def predict_next_states(mdp, states, actions, executed):
     next_s = []
@@ -50,8 +50,6 @@ if __name__ == '__main__':
     parser.add_argument('--n-samples', type=int, default=1000)
     parser.add_argument('--config', type=str, default='experiments/pb_obstacles/fullstate/config/config.yaml')
     parser.add_argument('--save-path', type=str)
-    parser.add_argument('--discrete', action='store_true')
-    parser.add_argument('--device', type=str, default='cpu')
     args = parser.parse_args()
 
     # Load config
@@ -59,60 +57,56 @@ if __name__ == '__main__':
     
     # Load
     # model = InfomaxAbstraction.load_from_checkpoint(args.from_ckpt, cfg=cfg)
-    if not args.discrete:
-        model = TPCAbstraction.load_from_checkpoint(args.from_ckpt)
-    else:
-        model = DiscreteTPCAbstraction.load_from_checkpoint(args.from_ckpt)
+    model = TPCAbstraction.load_from_checkpoint(args.from_ckpt, cfg=cfg)
+
 
     data = PinballDataset(cfg.data)
 
 
     data.setup()
 
-    # trainer = pl.Trainer()
-    # trainer.test(model, data)
+    trainer = pl.Trainer()
+    trainer.test(model, data)
 
     batches = list(data.test_dataloader())
     batch = batches[0]
 
 
-    device = args.device
+
     _obs, _action, _next_obs = [], [], []
     for b in batches:
         obs, action, next_obs = b.obs, b.action, b.next_obs
-        _obs.append(obs.to(device))
-        _action.append(action.to(device))
-        _next_obs.append(next_obs.to(device))
+        _obs.append(obs)
+        _action.append(action)
+        _next_obs.append(next_obs)
     obs, action, next_obs = torch.cat(_obs, dim=0), torch.cat(_action, dim=0), torch.cat(_next_obs, dim=0)
 
 
     Batch = namedtuple('batch', ['obs', 'action', 'next_obs'])
     batch = Batch(obs, action, next_obs)
+
     with torch.no_grad():
         model.eval()
-        z_q = model.encoder(batch.obs)
-        z = z_q
+        z = model.encoder(batch.obs)
+        z, _ = model.quantizer(z.reshape(-1, model.factors, model.embedding_size))
+        z = z.reshape(-1, model.factors * model.embedding_size)
         next_z_q = model.encoder(batch.next_obs)
-        next_z = next_z_q
+        next_z, _ = model.quantizer(next_z_q.reshape(-1, model.factors, model.embedding_size))
+        next_z = next_z.reshape(-1, model.factors * model.embedding_size)
+
 
         transition_in = torch.cat((z, batch.action), dim=-1)
-        # predicted_z, q_z, _ = model.transition.sample_n_dist(transition_in, 1)
-        q_z = model.transition.distribution(transition_in)
-        predicted_z = q_z.mean + z
+        predicted_z = model.transition.distribution(transition_in).mode.squeeze()
+        # predicted_z = q_z.mean + z
         # predicted_next_s_q = model.grounding.distribution(predicted_z)
         # predicted_next_s = predicted_next_s_q.sample()
         # decoded_next_s_q = model.grounding.distribution(next_z)
 
-    # prepare for plotting. move to cpu
-    if device != 'cpu':
-        z = z.cpu()
-        predicted_z = predicted_z.cpu()
-        next_z = next_z.cpu()
-        _action = batch.action.argmax(-1).cpu()
+    printarr(predicted_z, next_z)
 
     os.makedirs(args.save_path, exist_ok=True)
     # Plot encoder space
-    
+    _action = batch.action.argmax(-1)
     plt.figure()
     plt.scatter(z[:, 0], z[:, 1], s=5, marker='o', color='b', label='z')
     action_names = {0: '-y', 1: '+y', 2: '-x', 3: '+x'}
@@ -123,11 +117,6 @@ if __name__ == '__main__':
     plt.savefig(f'{args.save_path}/z-space.png')
     # Plot initial states
     
-    plt.figure()
-    plt.scatter(z[:, 0], z[:, 1], s=5, marker='o', color='b', label='z')
-    plt.savefig(f'{args.save_path}/latent_s.png')
-
-
     acts = [1, 3]
     plt.figure()
     plt.subplot(1, 2, 1)

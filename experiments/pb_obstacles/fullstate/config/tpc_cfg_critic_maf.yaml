@@ -1,37 +1,37 @@
 # Config file for Pinball environment
 # Full State observation
 # Gridworld abstraction
-experiment_cwd: 'experiments/pb_obstacles/pixel'
+experiment_cwd: 'experiments/pb_obstacles/fullstate'
 seed: 0
 optimizer:
-  type: 'adam'
+  type: adam
   params:
-    lr: 2e-4
+    lr: 1e-4
 scheduler:
   type: 'linear_scheduler'
   params:
     start_factor: 1.
     end_factor: 1.
     total_iters: 1.
-batch_size: 64 
+batch_size: 128 
 epochs: 200
-accelerator: gpu
+accelerator: cpu
 devices: 1
 save_path: ${experiment_cwd}/mdps
 loss:
   grounding_const: 1.
   tpc_const: 1
   kl_const: 1
-  transition_const: 1
+  transition_const: 1.
   reward_const: 1
   tau_const: 1.
   initset_const: 1
   n_samples: 1
 data:
-  data_path: ${experiment_cwd}/data/simple-contv1-failures-no-errors-25.zip
+  data_path: ${experiment_cwd}/data/simple-contv1-failures-no-errors
   save_path: ${save_path}
   batch_size: ${batch_size}
-  num_workers: 0
+  num_workers: 3
   train_split: 0.8
   val_split: 0.1
   test_split: 0.1
@@ -40,7 +40,7 @@ data:
   n_options: ${model.n_options}
   n_out_feats: 4
   state_dim : 4
-  obs_type: pixels
+  obs_type: simple
   gamma: 0.99
   noise_level: 0.0
   noise_dim: 0
@@ -51,9 +51,9 @@ model:
   n_options: 4
   obs_dims: ${data.n_out_feats}
   latent_dim: 2
-  encoder: ${loadcfg:${experiment_cwd}/config/models/encoder_residual.yaml}
-  decoder: ${loadcfg:${experiment_cwd}/config/models/decoder_residual_critic.yaml}
-  transition: ${loadcfg:${experiment_cwd}/config/models/transition_gaussian.yaml}
+  encoder: ${loadcfg:${experiment_cwd}/config/models/encoder_mlp.yaml}
+  decoder: ${loadcfg:${experiment_cwd}/config/models/decoder_mlp_critic.yaml}
+  transition: ${loadcfg:${experiment_cwd}/config/models/transition_maf.yaml}
   init_class: ${loadcfg:${experiment_cwd}/config/models/init_class_mlp.yaml}
   reward: ${loadcfg:${experiment_cwd}/config/models/reward_mlp.yaml}
   tau: ${loadcfg:${experiment_cwd}/config/models/tau_mlp.yaml}

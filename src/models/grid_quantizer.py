@@ -128,7 +128,7 @@ class FactoredQuantizer(nn.Module):
         """
         
         _idx = indices + self.idx_offset
-        return torch.index_select(self.codebook.reshape(-1, self.embedding_size), 0, _idx.flatten()).reshape(indices.shape[0], indices.shape[1], self.embedding_size)
+        return torch.index_select(self.codebook.reshape(-1, self.embedding_size), 0, _idx.flatten()).reshape(*indices.shape, self.embedding_size)
 
     def codes_per_factor(self, factor):
         '''
@@ -187,8 +187,8 @@ class FactoredCategoricalDistribution(torch.distributions.Distribution):
         return code
 
     def sample(self):
-        return torch.stack([categorical.sample() for categorical in self.categoricals], dim=-1)
-    
+        idx = torch.stack([categorical.sample() for categorical in self.categoricals], dim=-1)
+        return self.codebook.codes(idx)
     def log_prob(self, value):
         # value B x M
         # printarr(value)

@@ -16,6 +16,7 @@ def _run_episodes(
     n_episodes,
     max_episode_len=None,
     logger=None,
+    discounted=False
 ):
     """Run multiple episodes and return returns."""
     assert (n_steps is None) != (n_episodes is None)
@@ -25,7 +26,7 @@ def _run_episodes(
     lengths = []
     terminate = False
     timestep = 0
-
+    tau_total = 0
     reset = True
     while not terminate:
         if reset:
@@ -34,15 +35,21 @@ def _run_episodes(
             test_r = 0
             episode_len = 0
             info = {}
+            tau_total = 0
+            
         a = agent.act(obs)
         obs, r, done, info = env.step(a.cpu())
-        test_r += r
+        
         episode_len += 1
         timestep += 1
         reset = done or episode_len == max_episode_len or info.get("needs_reset", False)
         tau = 1 if 'tau' not in info else info['tau']
         agent.observe(obs, r, done, (reset, tau))
-
+        if not discounted:
+            test_r += r
+        else:
+            test_r += (agent.gamma ** tau_total) * r
+            tau_total += tau
         if reset:
             logger.info(
                 "evaluation episode %s length:%s R:%s", len(scores), episode_len, test_r
@@ -72,6 +79,7 @@ def run_evaluation_episodes(
     n_episodes,
     max_episode_len=None,
     logger=None,
+    discounted=False
 ):
     """Run multiple evaluation episodes and return returns.
 
@@ -96,6 +104,7 @@ def run_evaluation_episodes(
             n_episodes=n_episodes,
             max_episode_len=max_episode_len,
             logger=logger,
+            discounted=discounted
         )
 
 
@@ -254,7 +263,7 @@ def batch_run_evaluation_episodes(
 
 
 def eval_performance(
-    env, agent, n_steps, n_episodes, max_episode_len=None, logger=None
+    env, agent, n_steps, n_episodes, max_episode_len=None, logger=None, discounted=True
 ):
     """Run multiple evaluation episodes and return statistics.
 
@@ -291,6 +300,7 @@ def eval_performance(
             n_episodes,
             max_episode_len=max_episode_len,
             logger=logger,
+            discounted=discounted
         )
     stats = dict(
         episodes=len(scores),
@@ -463,7 +473,6 @@ class Evaluator(object):
             self.tb_writer = create_tb_writer(outdir)
 
     def evaluate_and_update_max_score(self, t, episodes):
-        print('evakuating')
         self.env_clear_stats()
         eval_stats = eval_performance(
             self.env,

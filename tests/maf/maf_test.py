@@ -27,7 +27,7 @@ class MAFTrainer(L.LightningModule):
     
     
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=3e-5)
+        return torch.optim.Adam(self.parameters(), lr=1e-3)
     
 
 
@@ -46,7 +46,7 @@ if __name__ == "__main__":
 
     # train
     model = MAFTrainer(5)
-    trainer = L.Trainer(max_epochs=60, accelerator='cpu', detect_anomaly=True)
+    trainer = L.Trainer(max_epochs=5, accelerator='cpu', detect_anomaly=True)
     trainer.fit(model, data)
 
     y_pred, log_s = model.maf.inverse(x)
@@ -100,4 +100,4 @@ if __name__ == "__main__":
         # plt.scatter(w_pred[..., 0], w_pred[..., 1], marker='+')
 
 
-        plt.show()
+        plt.savefig('maf.png')

@@ -286,3 +286,37 @@ class AbstractLinearDecayEpsilonGreedy(explorers.LinearDecayEpsilonGreedy):
         # printarr(a)
         return a
     
+
+class AbstractDDQNGrounded(pfrl.agent.Agent):
+    def __init__(self, encoder, agent, action_mask):
+        self.agent = agent
+        self.encoder = encoder
+        self.action_mask = action_mask
+        self.gamma = agent.gamma
+        print(self.gamma)
+        
+    def act(self, obs):
+        z = self.encoder(torch.from_numpy(obs)).unsqueeze(0)
+        # printarr(obs, z)
+        q_values = self.agent._evaluate_model_and_update_recurrent_states(z)
+        
+        mask = (1-self.action_mask(torch.from_numpy(obs).unsqueeze(0))) * -1e9
+        action = (q_values.q_values + mask).argmax(-1)
+        self.agent.batch_act(z)
+        return action
+
+    
+    def load(self, dirname):
+        self.agent.load(dirname)
+    
+    def observe(self, obs, reward, done, reset):
+        z = self.encoder(torch.from_numpy(obs))
+        self.agent.observe(z, reward, done, reset)
+    
+    def save(self, dirname):
+        self.agent.save(dirname)
+    
+    def get_statistics(self):
+        return self.agent.get_statistics()
+        
+    

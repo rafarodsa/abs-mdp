@@ -1,0 +1,14 @@
+features:
+  type: mlp
+  input_dim: ${eval:${model.latent_dim}+${model.n_options}}
+  hidden_dims:
+  - 64
+  output_dim: 64
+  activation: relu
+dist:
+  type: maf
+  num_blocks: 3
+  hidden_dims:
+    - 64
+  input_dim: 64
+  output_dim: ${model.latent_dim}

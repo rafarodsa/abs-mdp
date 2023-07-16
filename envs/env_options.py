@@ -29,7 +29,7 @@ class EnvOptionWrapper(gym.Env):
                 if action is None:
                     break
                 next_s, _r, done, truncated, info = self.env.step(action)
-                r += self.env.gamma ** t * _r# accumulate discounted reward
+                r += self.env.gamma ** t * _r # accumulate discounted reward
                 t += 1
             if t >= option.max_executing_time and not done:
                 truncated = True

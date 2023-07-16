@@ -263,7 +263,6 @@ class AbstractMDPCritic(gym.Env):
         else: 
             input = torch.cat([state, self._action_to_one_hot(action)], dim=0)
         t = self.transition_fn.distribution(input)
-        # print('sampling')
         return t.sample()[0] + state
         # return t.mean + state
     
