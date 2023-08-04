@@ -2,7 +2,7 @@ import gym
 
 
 class EnvGoalWrapper(gym.Env):
-    def __init__(self, env, goal_fn, goal_reward=1, gamma=0.99, reward_scale=0.):
+    def __init__(self, env, goal_fn, goal_reward=1, gamma=0.99, reward_scale=0., init_state_sampler=None):
         self.env = env
         self.goal_fn = goal_fn
         self.goal_reward = goal_reward
@@ -10,6 +10,7 @@ class EnvGoalWrapper(gym.Env):
         self.observation_space = env.observation_space
         self.gamma = gamma
         self.reward_scale = reward_scale
+        self.init_state_sampler = init_state_sampler if init_state_sampler is not None else lambda: None
     
     def step(self, action):
         ret = self.env.step(action)
@@ -31,7 +32,8 @@ class EnvGoalWrapper(gym.Env):
 
     def reset(self, state=None):
         # print('===================resetting')
-        return self.env.reset(state)
+        s = self.init_state_sampler()
+        return self.env.reset(s)
     
     def render(self, *args, **kwargs):
         return self.env.render(*args, **kwargs)

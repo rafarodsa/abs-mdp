@@ -145,7 +145,6 @@ class InfoNCEAbstraction(pl.LightningModule):
         loss = F.mse_loss(r, r_pred, reduction='none')
         return loss
 
-
     def duration_loss(self, tau_target, z, a):
         tau = symlog(tau_target)
         t = self.tau(torch.cat([z, a], dim=-1).detach()).squeeze()
@@ -167,6 +166,9 @@ class InfoNCEAbstraction(pl.LightningModule):
         z = self.encoder(s)
         t_in = torch.cat([z, a], dim=-1)
         next_z = self.transition.distribution(t_in).mean + z
+        initset_pred = (torch.sigmoid(self.initsets(z)) >= 0.5).float()
+        initset_acc = (initset_pred == initset_s).float().mean()
+
         nll_loss = self.grounding_loss(next_z, next_s).mean()
 
         logs = {
@@ -174,6 +176,7 @@ class InfoNCEAbstraction(pl.LightningModule):
                 'val_transition': transition_loss.mean(),
                 'val_tpc_loss': tpc_loss.mean(),
                 'val_initset_loss': initset_loss.mean(),
+                'val_initset_acc': initset_acc,
                 'val_reward_loss': reward_loss.mean(), 
                 'val_tau_loss': tau_loss.mean(),
                 'val_nll_loss': nll_loss.mean()
@@ -182,12 +185,25 @@ class InfoNCEAbstraction(pl.LightningModule):
         return logs['val_infomax']
 	
     def test_step(self, batch, batch_idx):
-        state, action, next_s = batch.obs, batch.action, batch.next_obs
-        z = self.encoder(state)
-        t_in = torch.cat([z, action], dim=-1)
+        s, a, next_s, executed, initset_s, reward, duration = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets, batch.rewards, batch.duration.float()
+        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss = self._run_step(s, a, next_s, initset_s, reward, duration)    
+
+        z = self.encoder(s)
+        t_in = torch.cat([z, a], dim=-1)
         next_z = self.transition.distribution(t_in).mean + z
         nll_loss = self.grounding_loss(next_z, next_s).mean()
-        self.log_dict({'nll_loss': nll_loss},on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        initset_pred = torch.sigmoid(self.initsets(z)) >= 0.5
+        initset_acc = (initset_pred == initset_s).float().mean()
+
+        self.log_dict({
+                       'nll_loss': nll_loss,
+                       'initset_acc': initset_acc,
+                       'initset_loss': initset_loss.mean(),
+                       'reward_loss': reward_loss.mean(),
+                       'transition_loss': transition_loss.mean(),
+                       'tau_loss': tau_loss.mean()
+                       }
+                       ,on_step=False, on_epoch=True, prog_bar=True, logger=True)
         return nll_loss
 		
     def configure_optimizers(self):

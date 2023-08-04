@@ -16,8 +16,6 @@ from envs.pinball.pinball_gym import PinballEnvContinuous, PinballEnv
 from envs.pinball.controllers_pinball import PinballGridOptions, create_position_options
 from envs.env_options import EnvOptionWrapper
 from envs.env_goal import EnvGoalWrapper
-from src.options.policies import SoftmaxCategoricalHeadInitiation, OptionPolicyInit
-from src.absmdp.policies import AbstractPolicyWrapper
 from src.agents.abstract_ddqn import AbstractDoubleDQN as AbstractDDQN, AbstractLinearDecayEpsilonGreedy
 from src.agents.abstract_ddqn import AbstractDDQNGrounded
 
@@ -43,26 +41,7 @@ class SingleSharedBias(nn.Module):
 
 
 def parse_arch(arch, n_actions, state_dim):
-    if arch == "nature":
-        return nn.Sequential(
-            pnn.LargeAtariCNN(),
-            init_chainer_default(nn.Linear(512, n_actions)),
-            DiscreteActionValueHead(),
-        )
-    elif arch == "doubledqn":
-        return nn.Sequential(
-            pnn.LargeAtariCNN(),
-            init_chainer_default(nn.Linear(512, n_actions, bias=False)),
-            SingleSharedBias(),
-            DiscreteActionValueHead(),
-        )
-    elif arch == "nips":
-        return nn.Sequential(
-            pnn.SmallAtariCNN(),
-            init_chainer_default(nn.Linear(256, n_actions)),
-            DiscreteActionValueHead(),
-        )
-    elif arch == 'mlp':
+    if arch == 'mlp':
         return nn.Sequential(
             nn.Linear(state_dim, 128),
             nn.ReLU(),
@@ -71,15 +50,12 @@ def parse_arch(arch, n_actions, state_dim):
             nn.Linear(128, n_actions),
             DiscreteActionValueHead()
         )
-    elif arch == "dueling":
-        return DuelingDQN(n_actions)
     else:
         raise RuntimeError("Not supported architecture: {}".format(arch))
 
 
 def parse_agent(agent):
     return {"DQN": agents.DQN, "DoubleDQN": agents.DoubleDQN, "PAL": agents.PAL}[agent]
-
 
 
 def compute_nearest_pos(position, n_pos=20, min_pos=0.05, max_pos=0.95):
@@ -96,6 +72,25 @@ def compute_nearest_pos(position, n_pos=20, min_pos=0.05, max_pos=0.95):
 
     goal = goal.clip(min_pos, max_pos)
     return goal
+
+
+def check_init_state(state, goal, step_size, tol):
+    n_steps = np.abs(state[:2]-goal[:2])/step_size
+    min_n = np.floor(n_steps)
+    max_n = np.ceil(n_steps)
+    return np.all(np.logical_or(np.abs(min_n-n_steps) <= tol, np.abs(max_n-n_steps) <= tol)) and state[1] < 0.1
+
+def init_state_sampler(goal, step_size=1/15, tol=0.015):
+    config = 'envs/pinball/configs/pinball_simple_single.cfg'
+    pinball_env = PinballEnvContinuous(config)
+    
+    def __sampler():
+        accepted = False
+        while not accepted:
+            s = pinball_env.sample_initial_positions(1)[0].astype(np.float32)
+            accepted = np.linalg.norm(goal[:2]-s[:2]) >= 0.2
+        return s
+    return __sampler
 
 # goal
 def goal_fn(phi, goal=[0.2, 0.9, 0., 0.], goal_tol=0.01):
@@ -121,19 +116,22 @@ def grounding_goal_fn(grounding, phi, goal=[0.2, 0.9, 0., 0.]):
 
     return _goal
 
-def make_env(test=False, test_seed=0, train_seed=1, args=None):
+goal = [0.5, 0.5, 0., 0.]
+
+def make_env(test=False, test_seed=127, train_seed=255, args=None):
         goal_reward = 1
         goal_tol = 5
+        
         print('================ CREATE ENVIRONMENT ================', goal_reward)
         if not test:
             env = torch.load(args.absmdp)
             # env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
-            env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder), goal_reward=goal_reward)
+            env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder, goal=goal), goal_reward=goal_reward, init_state_sampler=init_state_sampler(goal))
             env.seed(train_seed)
         else:
             env = torch.load(args.absmdp)
             # env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
-            env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder), goal_reward=goal_reward)
+            env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder, goal=goal), goal_reward=goal_reward, init_state_sampler=init_state_sampler(goal))
             env.seed(test_seed)
         if args.monitor:
             env = pfrl.wrappers.Monitor(
@@ -167,12 +165,13 @@ def make_ground_env(test=False, test_seed=0, train_seed=1, args=None):
         env = PinballEnvContinuous(config='envs/pinball/configs/pinball_simple_single.cfg')
         if args.render:
             env.render_mode = 'human'
-        print('grid options')
-        options = PinballGridOptions(env)
+        # print('grid options')
+        # options = PinballGridOptions(env)
+        options = create_position_options(env)
         env_sim = torch.load(args.absmdp)
         env = EnvOptionWrapper(options, env)
         # env = EnvGoalWrapper(env, goal_fn=goal_fn(enc, goal_tol=goal_tol), goal_reward=goal_reward)
-        env = EnvGoalWrapper(env, goal_fn=_grounding_goal_fn(env_sim.grounding, env_sim.encoder), goal_reward=goal_reward)
+        env = EnvGoalWrapper(env, goal_fn=_grounding_goal_fn(env_sim.grounding, env_sim.encoder, goal=goal), goal_reward=goal_reward, init_state_sampler=init_state_sampler(goal))
         env.seed(train_seed)
     else:
         # evaluation in real env
@@ -185,9 +184,8 @@ def make_ground_env(test=False, test_seed=0, train_seed=1, args=None):
         # options = PinballGridOptions(env)
         env = EnvOptionWrapper(options, env)
         env_sim = torch.load(args.absmdp)
-        print('here')
-        env = EnvGoalWrapper(env, goal_fn=goal_fn(enc, goal_tol=goal_tol), goal_reward=goal_reward)
-        # env = EnvGoalWrapper(env, goal_fn=_grounding_goal_fn(env_sim.grounding, env_sim.encoder), goal_reward=goal_reward)
+        # env = EnvGoalWrapper(env, goal_fn=goal_fn(enc, goal_tol=goal_tol), goal_reward=goal_reward)
+        env = EnvGoalWrapper(env, goal_fn=_grounding_goal_fn(env_sim.grounding, env_sim.encoder, goal=goal), goal_reward=goal_reward, init_state_sampler=init_state_sampler(goal))
         env.seed(test_seed)
     if args.monitor:
         env = pfrl.wrappers.Monitor(
@@ -245,7 +243,7 @@ def main():
             " If it does not exist, it will be created."
         ),
     )
-    parser.add_argument("--seed", type=int, default=0, help="Random seed [0, 2 ** 31)")
+    parser.add_argument("--seed", type=int, default=31, help="Random seed [0, 2 ** 31)")
     parser.add_argument(
         "--gpu", type=int, default=0, help="GPU to use, set to -1 if no GPU."
     )
@@ -280,7 +278,7 @@ def main():
     parser.add_argument(
         "--max-steps",
         type=int,
-        default=50,  # 30 minutes with 60 fps
+        default=50,  
         help="Maximum number of frames for each episode.",
     )
     parser.add_argument(
@@ -403,7 +401,12 @@ def main():
         eval_env = make_ground_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args)
         state_dim = env.env.latent_dim
         encoder = env.env.encode
-    
+    elif args.absgroundmdp:
+        print('absgroundmdp')
+        env = make_ground_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args)
+        eval_env = make_ground_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args)
+        state_dim = 4
+        
 
     n_actions = eval_env.action_space.n
     q_func = parse_arch(args.arch, n_actions, state_dim=state_dim)
@@ -418,19 +421,20 @@ def main():
     else:
         options = eval_env.env.options
         def action_mask(state):
-            mask = torch.from_numpy(np.array([o.initiation(state[0].numpy()) for o in options]).T).float().unsqueeze(0)
-            # printarr(mask)
+            state = state.cpu()
+            device = f'cuda:{args.gpu}' if args.gpu >= 0 else 'cpu'
+            mask = torch.from_numpy(np.array([o.initiation(state[0].numpy()) for o in options]).T).float().unsqueeze(0).to(device)
             return mask
 
 
     def random_selection(obs):
-            _mask = action_mask(obs) + 1e-12
-            _mask = _mask / _mask.sum(-1, keepdim=True)
-            n_actions = _mask.shape[-1]
-            # printarr(_mask, n_actions)
-            selection =  np.random.choice(n_actions, p=_mask.squeeze().cpu().numpy())
-            # printarr(selection)
-            return torch.tensor(selection)
+        _mask = action_mask(obs) + 1e-12
+        _mask = _mask / _mask.sum(-1, keepdim=True)
+        n_actions = _mask.shape[-1]
+        # printarr(_mask, n_actions)
+        selection =  np.random.choice(n_actions, p=_mask.squeeze().cpu().numpy())
+        # printarr(selection)
+        return torch.tensor(selection)
 
     if args.noisy_net_sigma is not None:
         pnn.to_factorized_noisy(q_func, sigma_scale=args.noisy_net_sigma)
@@ -445,7 +449,6 @@ def main():
             lambda obs: random_selection(obs),
         )
 
-    # opt = torch.optim.RMSprop(q_func.parameters(), lr=args.lr)
     opt = torch.optim.Adam(q_func.parameters(), lr=args.lr, eps=1.5e-4)
     # Select a replay buffer to use
     if args.prioritized:
@@ -482,7 +485,6 @@ def main():
         phi=lambda x: x,
         minibatch_size=32
     )
-    
     
 
     if args.load:

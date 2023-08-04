@@ -78,7 +78,7 @@ if __name__== "__main__":
     parser.add_argument('--image-size', type=int, default=100)
     parser.add_argument('--option_type', type=str, default='continuous-v1')
     parser.add_argument('--grid_size', type=int, default=20)
-    parser.add_argument('--with-failures', action='store_true')
+    parser.add_argument('--with-failures', action='store_true', default=False)
     args = parser.parse_args()
 
     dir, name = os.path.split(args.save_path)
@@ -93,7 +93,7 @@ if __name__== "__main__":
     env = Pinball(config=args.env_config, width=grid_size, height=grid_size, render_mode='rgb_array') 
 
     if args.option_type == 'continuous-v1':
-        options = OptionFactory2(env)
+        options = OptionFactory2(env, translation_distance=1/args.grid_size)
     elif args.option_type == 'continuous-v0':
         options = OptionFactory(env)
     elif args.option_type == 'grid':

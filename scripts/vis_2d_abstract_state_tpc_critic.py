@@ -108,7 +108,7 @@ if __name__ == '__main__':
         z = z.cpu()
         predicted_z = predicted_z.cpu()
         next_z = next_z.cpu()
-        _action = batch.action.argmax(-1).cpu()
+    _action = batch.action.argmax(-1).cpu()
 
     os.makedirs(args.save_path, exist_ok=True)
     # Plot encoder space

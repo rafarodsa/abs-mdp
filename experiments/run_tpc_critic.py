@@ -58,8 +58,8 @@ def run(cfg, ckpt=None, args=None):
     
     cfg.data.save_path = save_path
     # torch._dynamo.config.verbose=True
-    model = torch.compile(TPCAbstraction(cfg))
-    # model = TPCAbstraction(cfg)
+    # model = torch.compile(TPCAbstraction(cfg))
+    model = TPCAbstraction(cfg)
     
     data = PinballDataset(cfg.data)
     

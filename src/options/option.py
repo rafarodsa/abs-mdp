@@ -8,7 +8,7 @@ import numpy as np
 
 
 class Option:
-    def __init__(self, initiation_classifier, policy_func_factory, termination_prob, max_executing_time=100, name=''):
+    def __init__(self, initiation_classifier, policy_func_factory, termination_prob, max_executing_time=20, name=''):
         self.initiation = initiation_classifier
         self.policy_factory = policy_func_factory
         self.executing = False

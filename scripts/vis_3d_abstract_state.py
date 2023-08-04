@@ -47,6 +47,7 @@ if __name__ == '__main__':
     parser.add_argument('--n-samples', type=int, default=1000)
     parser.add_argument('--config', type=str, default='experiments/pb_obstacles/fullstate/config/config.yaml')
     parser.add_argument('--save-path', type=str)
+    parser.add_argument('--device', type=str, default='cpu')
     args = parser.parse_args()
 
     # Load config
@@ -65,9 +66,9 @@ if __name__ == '__main__':
     _obs, _action, _next_obs = [], [], []
     for b in batches:
         obs, action, next_obs = b.obs, b.action, b.next_obs
-        _obs.append(obs)
-        _action.append(action)
-        _next_obs.append(next_obs)
+        _obs.append(obs.to(args.device))
+        _action.append(action.to(args.device))
+        _next_obs.append(next_obs.to(args.device))
     obs, action, next_obs = torch.cat(_obs, dim=0), torch.cat(_action, dim=0), torch.cat(_next_obs, dim=0)
 
 
@@ -88,10 +89,18 @@ if __name__ == '__main__':
         # predicted_next_s = predicted_next_s_q.sample()
         # decoded_next_s_q = model.grounding.distribution(torch.cat([next_z, torch.zeros_like(batch.action)], dim=-1))
 
+    _action = batch.action.argmax(-1)
+    
+    if args.device != 'cpu':
+        z = z.cpu()
+        next_z = next_z.cpu()
+        _action = _action.cpu()
+       
+
 
     os.makedirs(args.save_path, exist_ok=True)
     # Plot encoder space
-    _action = batch.action.argmax(-1)
+ 
     
     ### ISOMAP
     print('Isomap...')
