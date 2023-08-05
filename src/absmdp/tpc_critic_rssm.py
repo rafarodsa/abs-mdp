@@ -1,0 +1,222 @@
+"""
+    Option Model using CPC/InfoNCE loss
+    author: Rafael Rodriguez-Sanchez (rrs@brown.edu)
+    date: June 13th, 2023
+"""
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+import lightning as pl
+
+
+from src.models.factories import build_distribution, build_model
+from src.models.optimizer_factories import build_optimizer, build_scheduler
+from src.utils.symlog import symlog
+from src.absmdp.configs import TrainerConfig
+
+from omegaconf import OmegaConf as oc
+
+import logging
+
+from src.utils.printarr import printarr
+
+class RSSMAbstraction(pl.LightningModule):
+    def __init__(self, cfg: TrainerConfig):
+        super().__init__()
+        oc.resolve(cfg)
+        self.save_hyperparameters()
+        self.cfg = cfg
+        self.data_cfg = cfg.data
+        self.obs_dim = cfg.model.obs_dims
+        self.latent_dim = cfg.model.latent_dim
+        self.n_options = cfg.model.n_options
+
+        self.encoder = build_model(cfg.model.encoder.features)
+        self.transition = build_distribution(cfg.model.transition)
+        self.grounding = build_model(cfg.model.decoder)
+        self.initsets = build_model(cfg.model.init_class)
+        self.tau = build_model(cfg.model.tau)
+        self.reward_fn = build_model(cfg.model.reward)
+        self.lr = cfg.optimizer.params.lr
+        self.hyperparams = cfg.loss
+        self.kl_const =  self.hyperparams.kl_const
+
+
+    def forward(self, state, action):
+        z = self.encoder(state)
+        t_in = torch.cat([z, action], dim=-1)
+        # printarr(z)
+        next_z = self.transition.distribution(t_in).mean + z
+        return next_z
+
+    def _run_step(self, s, a, next_s, initset_s, reward, duration):
+        
+        # sample encoding of (s, s') and add noise
+        z = self.encoder(s)
+        z_c = z
+        next_z_c = self.encoder(next_s)
+        noise_std = 0.2
+        z = z + torch.randn_like(z) * noise_std
+        next_z  =  next_z_c + torch.randn_like(z) * noise_std 
+
+        grounding_loss = self.grounding_loss(next_z, next_s)
+        reward_loss = self.reward_loss(reward, z_c, a, next_z_c)
+        tau_loss = self.duration_loss(duration, z_c, a)
+
+        # transition losses
+        transition_loss = self.consistency_loss(z, next_z, a)
+        tpc_loss = self.tpc_loss(z, next_z, a)
+
+        # initsets
+        initset_pred = self.initsets(z)
+        initset_loss = F.binary_cross_entropy_with_logits(initset_pred, initset_s, reduction='none').mean(-1)
+        return grounding_loss.mean(), transition_loss.mean(), tpc_loss.mean(), initset_loss.mean(), reward_loss.mean(), tau_loss.mean()
+
+
+    def step(self, batch, batch_idx):
+        s, a, next_s, initset_s, reward, duration = batch.obs, batch.action, batch.next_obs, batch.initsets, batch.rewards, batch.duration.float()
+
+        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss = self._run_step(s, a, next_s, initset_s, reward, duration)
+
+        loss = self.hyperparams.grounding_const * grounding_loss + \
+                self.hyperparams.transition_const * transition_loss + \
+                self.hyperparams.tpc_const * tpc_loss + \
+                self.hyperparams.initset_const * initset_loss + \
+                self.hyperparams.reward_const * reward_loss + \
+                self.hyperparams.tau_const * tau_loss
+        
+
+        # log std deviations for encoder.
+        logs = {
+            'grounding_loss': grounding_loss,
+            'transition_loss': transition_loss,
+            'tpc_loss': tpc_loss,
+            'initset_loss': initset_loss,
+            'loss': loss
+
+        }
+        # logger.debug(f'Losses: {logs}')
+        return loss, logs
+	
+    def consistency_loss(self, z, next_z, action):
+        '''
+            -log T(z'|z, a) 
+        '''
+        return -self.transition.distribution(torch.cat([z, action], dim=-1)).log_prob(next_z-z).sum(-1)
+	
+    def grounding_loss(self, next_z, next_s):
+        '''
+            -MI(s'; \phi(s')) 
+        '''
+        b = next_z.shape[:-1]
+        b_size = np.prod(b)
+        next_z, next_s = next_z.reshape(b_size, -1), next_s.reshape(b_size, -1)
+        _next_s = next_s.repeat(b_size, *[1 for _ in range(len(next_s.shape)-1)])
+        _next_z = torch.repeat_interleave(next_z, b_size, dim=0)
+        _log_t = torch.tanh(self.grounding(_next_s, _next_z).reshape(b_size, b_size)) * 100 #* np.log(b) * 0.5
+        _loss = torch.diag(_log_t) - (torch.logsumexp(_log_t, dim=-1) - np.log(b_size))
+
+        return -_loss.reshape(*b)
+    
+
+    def tpc_loss(self, z, next_z, a):
+        '''
+            -MI(z'; z, a)
+        '''
+        b, z_dim = next_z.shape[:-1], next_z.shape[-1]
+        b_size = np.prod(b)
+        next_z, z, a = next_z.reshape(b_size, -1), z.reshape(b_size, -1), a.reshape(b_size, -1)
+        _z_a = torch.cat([z, a], dim=-1).repeat(b_size, 1)
+        _next_z = torch.repeat_interleave(next_z, b_size, dim=0)
+        _log_t = self.transition.distribution(_z_a).log_prob(_next_z-_z_a[..., :z_dim]).reshape(b_size, b_size)
+        _loss = torch.diag(_log_t) - (torch.logsumexp(_log_t, dim=-1) - np.log(b_size))
+
+        return -_loss.reshape(*b)
+    
+    def reward_loss(self, r_target, z, a, next_z):
+        '''
+            MSE(R, R_pred)
+        '''
+        r = symlog(r_target)
+        r_pred = self.reward_fn(torch.cat([z, a, next_z], dim=-1).detach()).squeeze()
+        loss = F.mse_loss(r.reshape(-1), r_pred.reshape(-1), reduction='none')
+        return loss
+
+    def duration_loss(self, tau_target, z, a):
+        tau = symlog(tau_target)
+        t = self.tau(torch.cat([z, a], dim=-1).detach()).squeeze()
+        loss = F.mse_loss(tau.reshape(-1), t.reshape(-1), reduction='none')
+
+        return loss
+
+    def training_step(self, batch, batch_idx):
+        loss, logs = self.step(batch, batch_idx)
+        self.log_dict({f"train_{k}": v for k, v in logs.items()}, on_step=True, on_epoch=False, logger=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        s, a, next_s, executed, initset_s, reward, duration = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets, batch.rewards, batch.duration.float()
+        # assert torch.all(executed) # check all samples are successful executions.
+
+        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss = self._run_step(s, a, next_s, initset_s, reward, duration)    
+
+        z = self.encoder(s)
+        t_in = torch.cat([z, a], dim=-1)
+        next_z = self.transition.distribution(t_in).mean + z
+        initset_pred = (torch.sigmoid(self.initsets(z)) >= 0.5).float()
+        initset_acc = (initset_pred == initset_s).float().mean()
+
+        nll_loss = self.grounding_loss(next_z, next_s).mean()
+
+        logs = {
+                'val_infomax': grounding_loss.mean(),
+                'val_transition': transition_loss.mean(),
+                'val_tpc_loss': tpc_loss.mean(),
+                'val_initset_loss': initset_loss.mean(),
+                'val_initset_acc': initset_acc,
+                'val_reward_loss': reward_loss.mean(), 
+                'val_tau_loss': tau_loss.mean(),
+                'val_nll_loss': nll_loss.mean()
+            }
+        self.log_dict(logs, on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        return logs['val_infomax']
+	
+    def test_step(self, batch, batch_idx):
+        s, a, next_s, executed, initset_s, reward, duration = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets, batch.rewards, batch.duration.float()
+        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss = self._run_step(s, a, next_s, initset_s, reward, duration)    
+
+        z = self.encoder(s)
+        t_in = torch.cat([z, a], dim=-1)
+        next_z = self.transition.distribution(t_in).mean + z
+        nll_loss = self.grounding_loss(next_z, next_s).mean()
+        initset_pred = torch.sigmoid(self.initsets(z)) >= 0.5
+        initset_acc = (initset_pred == initset_s).float().mean()
+
+        self.log_dict({
+                       'nll_loss': nll_loss,
+                       'initset_acc': initset_acc,
+                       'initset_loss': initset_loss.mean(),
+                       'reward_loss': reward_loss.mean(),
+                       'transition_loss': transition_loss.mean(),
+                       'tau_loss': tau_loss.mean()
+                       }
+                       ,on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        return nll_loss
+		
+    def configure_optimizers(self):
+        optimizer = build_optimizer(self.cfg.optimizer, self.parameters())
+        scheduler = build_scheduler(self.cfg.scheduler, optimizer)
+        return {"optimizer": optimizer, "scheduler": scheduler}
+	
+    @staticmethod
+    def load_config(path):
+        try:
+            with open(path, "r") as f:
+                #TODO add structured configs when they have settled.
+                # cfg = oc.merge(oc.structured(TrainerConfig), oc.load(f))
+                cfg = oc.load(f)
+                return cfg
+        except FileNotFoundError:
+            raise ValueError(f"Could not find config file at {path}")
