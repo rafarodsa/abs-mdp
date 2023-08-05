@@ -205,7 +205,7 @@ class PinballDataset_(torch.utils.data.Dataset):
         img_path = self.IMG_FORMAT.format(obs.traj, obs.timestep)
         if img_path in self.images_loaded:
             return self.images_loaded[img_path]
-        else: # load
+        else: #load
             try:
                 img = self.zfile.open(img_path)
                 img_ = Image.open(img)
