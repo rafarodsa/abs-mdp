@@ -66,9 +66,10 @@ class RSSMAbstraction(pl.LightningModule):
         tau_loss = self.duration_loss(duration, z_c, a)
 
         # transition losses
-        transition_loss = self.consistency_loss(z, next_z, a)
-        tpc_loss = self.tpc_loss(z, next_z, a)
-
+        next_z_dist = self.transition.distribution(torch.cat([z, a], dim=-1))
+        transition_loss = self.consistency_loss(z, next_z, next_z_dist)
+        tpc_loss = self.tpc_loss(z, next_z, next_z_dist)
+        # tpc_loss = torch.zeros(10)
         # initsets
         initset_pred = self.initsets(z)
         initset_loss = F.binary_cross_entropy_with_logits(initset_pred, initset_s, reduction='none').mean(-1)
@@ -100,11 +101,11 @@ class RSSMAbstraction(pl.LightningModule):
         # logger.debug(f'Losses: {logs}')
         return loss, logs
 	
-    def consistency_loss(self, z, next_z, action):
+    def consistency_loss(self, z, next_z, next_z_dist):
         '''
             -log T(z'|z, a) 
         '''
-        return -self.transition.distribution(torch.cat([z, action], dim=-1)).log_prob(next_z-z).sum(-1)
+        return -next_z_dist.log_prob(next_z-z).sum(-1)
 	
     def grounding_loss(self, next_z, next_s):
         '''
@@ -121,19 +122,20 @@ class RSSMAbstraction(pl.LightningModule):
         return -_loss.reshape(*b)
     
 
-    def tpc_loss(self, z, next_z, a):
+    def tpc_loss(self, z, next_z, next_z_dist):
         '''
             -MI(z'; z, a)
         '''
         b, z_dim = next_z.shape[:-1], next_z.shape[-1]
         b_size = np.prod(b)
-        next_z, z, a = next_z.reshape(b_size, -1), z.reshape(b_size, -1), a.reshape(b_size, -1)
-        _z_a = torch.cat([z, a], dim=-1).repeat(b_size, 1)
-        _next_z = torch.repeat_interleave(next_z, b_size, dim=0)
-        _log_t = self.transition.distribution(_z_a).log_prob(_next_z-_z_a[..., :z_dim]).reshape(b_size, b_size)
-        _loss = torch.diag(_log_t) - (torch.logsumexp(_log_t, dim=-1) - np.log(b_size))
+        n_traj, length = b[0], b[1]
+        _next_z = torch.repeat_interleave(next_z, n_traj, dim=0)
+        _z = z.repeat(n_traj, 1, 1)
+        _log_t = next_z_dist.log_prob(_next_z-_z, batched=True).reshape(n_traj, n_traj, length)
+        _diag = torch.diagonal(_log_t).T 
+        _loss = _diag - (torch.logsumexp(_log_t, dim=1) - np.log(n_traj)) # n_traj x length
 
-        return -_loss.reshape(*b)
+        return -_loss.sum(-1)
     
     def reward_loss(self, r_target, z, a, next_z):
         '''

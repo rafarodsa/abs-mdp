@@ -22,6 +22,7 @@ class RSSM(nn.Module):
 
         if hidden is None:
             hidden = self._init_state(batch_size=batch_size, batched=batched)
+            hidden = hidden.to(input.get_device())
         else:
             assert len(hidden.shape) == 2
             assert hidden.shape[-1] == self.hidden_dim

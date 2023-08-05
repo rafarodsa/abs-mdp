@@ -1,11 +1,13 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-
+import numpy as np
 from .configs import DiagGaussianConfig
 
 from functools import partial
 from torch.distributions import Normal, register_kl, MultivariateNormal, kl_divergence
+from src.utils.printarr import printarr
+
 
 class DiagonalNormal(torch.distributions.Distribution):
     def __init__(self, mean, std):
@@ -27,11 +29,19 @@ class DiagonalNormal(torch.distributions.Distribution):
     def sample(self, n_samples=1):
         return self.dist.rsample(torch.zeros(n_samples).size())
     
-    def log_prob(self, x):
-        # logp = self.dist.log_prob(x).sum(-1)
-        p_m = MultivariateNormal(self.mean, covariance_matrix=torch.diag_embed(self.var))
-        # assert torch.allclose(p_m.log_prob(x), logp)
-        return p_m.log_prob(x)
+    def log_prob(self, x, batched=False):
+        
+        if batched:
+            batch_size = x.shape[0] // self.mean.shape[0]
+            _mean = self.mean.repeat(batch_size, 1, 1)
+            _var = self.var.repeat(batch_size, 1, 1)
+            _log_prob = -(x - _mean) ** 2 / _var - 0.5 * (torch.log(_var) + np.log(2 * np.pi))
+            _log_prob = _log_prob.sum(-1)
+        else:
+            p_m = MultivariateNormal(self.mean, covariance_matrix=torch.diag_embed(self.var))
+            _log_prob = p_m.log_prob(x)
+
+        return _log_prob
     
     def entropy(self):
         h = self.dist.entropy().sum(-1)
