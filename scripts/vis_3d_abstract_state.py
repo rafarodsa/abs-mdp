@@ -13,6 +13,9 @@ from src.absmdp.infomax_attn import InfomaxAbstraction
 from src.absmdp.tpc_critic import InfoNCEAbstraction as TPCAbstraction
 from src.absmdp.datasets import PinballDataset
 
+from src.absmdp.tpc_critic_rssm import RSSMAbstraction
+from src.absmdp.datasets_traj import PinballDatasetTrajectory
+
 from omegaconf import OmegaConf as oc
 
 
@@ -48,6 +51,7 @@ if __name__ == '__main__':
     parser.add_argument('--config', type=str, default='experiments/pb_obstacles/fullstate/config/config.yaml')
     parser.add_argument('--save-path', type=str)
     parser.add_argument('--device', type=str, default='cpu')
+    parser.add_argument('--rssm', action='store_true')
     args = parser.parse_args()
 
     # Load config
@@ -55,11 +59,15 @@ if __name__ == '__main__':
     
     # Load
     # model = InfomaxAbstraction.load_from_checkpoint(args.from_ckpt, cfg=cfg)
-    model = TPCAbstraction.load_from_checkpoint(args.from_ckpt, cfg=cfg)
-    
+    if not args.rssm:
+        model = TPCAbstraction.load_from_checkpoint(args.from_ckpt, cfg=cfg)
+        data = PinballDataset(cfg.data)
+    else:
+        model = RSSMAbstraction.load_from_checkpoint(args.from_ckpt)
+        data = PinballDatasetTrajectory(cfg.data)
 
-    data = PinballDataset(cfg.data)
     data.setup()
+
     batches = list(data.test_dataloader())
     batch = batches[0]
 
@@ -82,15 +90,21 @@ if __name__ == '__main__':
         next_z_q = model.encoder(batch.next_obs)
         next_z = next_z_q
 
-        # transition_in = torch.cat((z, batch.action), dim=-1)
-        # predicted_z, q_z, _ = model.transition.sample_n_dist(transition_in, 1)
-        # predicted_z = q_z.mean + z
-        # predicted_next_s_q = model.grounding.distribution(torch.cat([predicted_z, torch.zeros_like(batch.action)], dim=-1))
-        # predicted_next_s = predicted_next_s_q.sample()
-        # decoded_next_s_q = model.grounding.distribution(torch.cat([next_z, torch.zeros_like(batch.action)], dim=-1))
+        transition_in = torch.cat((z, batch.action), dim=-1)
+        q_z = model.transition.distribution(transition_in)
+        predicted_z = q_z.mean + z
+
+
+
 
     _action = batch.action.argmax(-1)
     
+    if args.rssm:
+        z = z.reshape(-1, z.shape[-1])
+        next_z = next_z.reshape(-1, z.shape[-1])
+        predicted_z = predicted_z.reshape(-1, z.shape[-1])
+        _action = _action.reshape(-1)
+
     if args.device != 'cpu':
         z = z.cpu()
         next_z = next_z.cpu()
@@ -102,43 +116,6 @@ if __name__ == '__main__':
     # Plot encoder space
  
     
-    ### ISOMAP
-    print('Isomap...')
-    n_neighbors = 10
-    n_components = 2
-    Y = manifold.Isomap(n_neighbors=n_neighbors, n_components=n_components).fit_transform(z)
-    plt.figure()
-    plt.scatter(Y[:, 0], Y[:, 1], s=5)
-    plt.grid()
-    plt.savefig(f'{args.save_path}/isomap-z-space.png')
-    
-    ## LLE
-    print('LLE... (modified)')
-    Y = manifold.LocallyLinearEmbedding(n_components=n_components, n_neighbors=n_neighbors, method='modified').fit_transform(z)
-    plt.figure()
-    plt.scatter(Y[:, 0], Y[:, 1], s=5)
-    plt.grid()
-    plt.savefig(f'{args.save_path}/lle-z-space.png')
-    
-    
-    # ##Local Tangent space alignment LLE 
-    # print('LLE... (LTSA)')
-    # Y = manifold.LocallyLinearEmbedding(n_components=n_components, n_neighbors=n_neighbors, method='ltsa', eigen_solver='dense').fit_transform(z)
-    # plt.figure()
-    # plt.scatter(Y[:, 0], Y[:, 1], s=5)
-    # plt.grid()
-    # plt.savefig(f'{args.save_path}/ltsa-lle-z-space.png')
-    
-   
-    
-    ## Spectral
-    print('Spectral Embedding...')
-    Y = manifold.SpectralEmbedding(n_components=n_components, n_neighbors=n_neighbors).fit_transform(z)
-    plt.figure()
-    plt.scatter(Y[:, 0], Y[:, 1], s=5)
-    plt.grid()
-    plt.savefig(f'{args.save_path}/spectral-z-space.png')
-    
     plt.figure()
     ax = plt.axes(projection='3d')
     ax.scatter3D(z[:, 0], z[:, 1], z[:, 2], s=5, marker='o', color='b', label='z')
@@ -148,32 +125,91 @@ if __name__ == '__main__':
         ax.scatter3D(next_z_a[:, 0], next_z_a[:, 1], next_z_a[:, 2], s=5, marker='^', label=f'next_z: action {action_names[a]}')   
     plt.legend() 
     plt.savefig(f'{args.save_path}/3D-z-space.png')
+
+    ### ISOMAP
+    print('Isomap...')
+    try:
+        n_neighbors = 10
+        n_components = 2
+        Y = manifold.Isomap(n_neighbors=n_neighbors, n_components=n_components).fit_transform(z)
+        plt.figure()
+        plt.scatter(Y[:, 0], Y[:, 1], s=5)
+        plt.grid()
+        plt.savefig(f'{args.save_path}/isomap-z-space.png')
+    except:
+        print('Isomap failed..')
     
+    ## LLE
+    print('LLE... (modified)')
+    try:
+        t = manifold.LocallyLinearEmbedding(n_components=n_components, n_neighbors=n_neighbors, method='modified', eigen_solver='dense').fit(z)
+        Y = t.transform(z)
+        _next_z = t.transform(predicted_z)
+        plt.figure()
+        plt.scatter(Y[:, 0], Y[:, 1], s=5)
+        plt.scatter(_next_z[:, 0], _next_z[:, 1])
+        plt.grid()
+        plt.savefig(f'{args.save_path}/lle-z-space.png')
+    except:
+        print('LLE did not work')
+   
+    
+    ##Local Tangent space alignment LLE 
+    try:
+        print('LLE... (LTSA)')
+        Y = manifold.LocallyLinearEmbedding(n_components=n_components, n_neighbors=n_neighbors, method='ltsa', eigen_solver='dense').fit_transform(z)
+        plt.figure()
+        plt.scatter(Y[:, 0], Y[:, 1], s=5)
+        plt.grid()
+        plt.savefig(f'{args.save_path}/ltsa-lle-z-space.png')
+    except:
+        print('LLE... (LSTA) failed')
+    
+    ## Spectral
+    print('Spectral Embedding...')
+    try:
+        Y = manifold.SpectralEmbedding(n_components=n_components, n_neighbors=n_neighbors).fit_transform(z)
+        plt.figure()
+        plt.scatter(Y[:, 0], Y[:, 1], s=5)
+        plt.grid()
+        plt.savefig(f'{args.save_path}/spectral-z-space.png')
+    except:
+        print('Spectral embedding did not work')
+        
+   
     ### TSNE embedding
-    print('TSNE...')
-    tsne = manifold.TSNE(n_components=n_components, init='pca')
-    Z = tsne.fit_transform(z)
-    plt.figure()
-    plt.scatter(Z[:, 0], Z[:, 1], s=5)
-    plt.grid()
-    plt.savefig(f'{args.save_path}/tsne-z-space.png')
+    try:
+        print('TSNE...')
+        tsne = manifold.TSNE(n_components=n_components, init='pca')
+        Z = tsne.fit_transform(z)
+        plt.figure()
+        plt.scatter(Z[:, 0], Z[:, 1], s=5)
+        plt.grid()
+        plt.savefig(f'{args.save_path}/tsne-z-space.png')
+    except:
+        print('TSNE failed...')
 
     # ## Hessian LLE 
-    # print('LLE... (hessian)')
-    # nn = n_components * (n_components+3)/2 + 1
-    # Y = manifold.LocallyLinearEmbedding(n_components=n_components, n_neighbors=int(nn), method='hessian', eigen_solver='dense').fit_transform(z)
-    # plt.figure()
-    # plt.scatter(Y[:, 0], Y[:, 1], s=5)
-    # plt.grid()
-    # plt.savefig(f'{args.save_path}/hess-lle-z-space.png')
-    
+    try:
+        print('LLE... (hessian)')
+        nn = n_components * (n_components+3)/2 + 1
+        Y = manifold.LocallyLinearEmbedding(n_components=n_components, n_neighbors=int(nn), method='hessian', eigen_solver='dense').fit_transform(z)
+        plt.figure()
+        plt.scatter(Y[:, 0], Y[:, 1], s=5)
+        plt.grid()
+        plt.savefig(f'{args.save_path}/hess-lle-z-space.png')
+    except:
+        print('LLE Hessian failed')
     
     ## MDS
-    print('MDS...')
-    Y = manifold.MDS(n_components=n_components, normalized_stress='auto').fit_transform(z)
-    plt.figure()
-    plt.scatter(Y[:, 0], Y[:, 1], s=5)
-    plt.grid()
-    plt.savefig(f'{args.save_path}/mds-z-space.png')
+    try:
+        print('MDS...')
+        Y = manifold.MDS(n_components=n_components, normalized_stress='auto').fit_transform(z)
+        plt.figure()
+        plt.scatter(Y[:, 0], Y[:, 1], s=5)
+        plt.grid()
+        plt.savefig(f'{args.save_path}/mds-z-space.png')
+    except:
+        print('MDS failed...')
     
     print('Done...')

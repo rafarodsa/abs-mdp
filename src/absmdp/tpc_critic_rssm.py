@@ -51,7 +51,7 @@ class RSSMAbstraction(pl.LightningModule):
         next_z = self.transition.distribution(t_in).mean + z
         return next_z
 
-    def _run_step(self, s, a, next_s, initset_s, reward, duration):
+    def _run_step(self, s, a, next_s, initset_s, reward, duration, lengths):
         
         # sample encoding of (s, s') and add noise
         z = self.encoder(s)
@@ -60,26 +60,28 @@ class RSSMAbstraction(pl.LightningModule):
         noise_std = 0.2
         z = z + torch.randn_like(z) * noise_std
         next_z  =  next_z_c + torch.randn_like(z) * noise_std 
-
-        grounding_loss = self.grounding_loss(next_z, next_s)
-        reward_loss = self.reward_loss(reward, z_c, a, next_z_c)
-        tau_loss = self.duration_loss(duration, z_c, a)
+        
+        batch_size, length = s.shape[0], s.shape[1]
+        _mask = torch.arange(length).to(s.get_device()).repeat(batch_size, 1) < lengths.unsqueeze(1)
+        grounding_loss = self.grounding_loss(next_z[_mask], next_s[_mask])
+        reward_loss = self.reward_loss(reward[_mask], z_c[_mask], a[_mask], next_z_c[_mask])
+        tau_loss = self.duration_loss(duration[_mask], z_c[_mask], a[_mask])
 
         # transition losses
         next_z_dist = self.transition.distribution(torch.cat([z, a], dim=-1))
-        transition_loss = self.consistency_loss(z, next_z, next_z_dist)
-        tpc_loss = self.tpc_loss(z, next_z, next_z_dist)
+        transition_loss = self.consistency_loss(z, next_z, next_z_dist, mask=_mask)
+        tpc_loss = self.tpc_loss(z, next_z, next_z_dist, min_length=lengths.min())
         # tpc_loss = torch.zeros(10)
         # initsets
-        initset_pred = self.initsets(z)
-        initset_loss = F.binary_cross_entropy_with_logits(initset_pred, initset_s, reduction='none').mean(-1)
+        initset_pred = self.initsets(z[_mask])
+        initset_loss = F.binary_cross_entropy_with_logits(initset_pred, initset_s[_mask], reduction='none').mean(-1)
         return grounding_loss.mean(), transition_loss.mean(), tpc_loss.mean(), initset_loss.mean(), reward_loss.mean(), tau_loss.mean()
 
 
     def step(self, batch, batch_idx):
-        s, a, next_s, initset_s, reward, duration = batch.obs, batch.action, batch.next_obs, batch.initsets, batch.rewards, batch.duration.float()
+        s, a, next_s, initset_s, reward, duration, lengths = batch.obs, batch.action, batch.next_obs, batch.initsets, batch.rewards, batch.duration.float(), batch.length
 
-        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss = self._run_step(s, a, next_s, initset_s, reward, duration)
+        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths)
 
         loss = self.hyperparams.grounding_const * grounding_loss + \
                 self.hyperparams.transition_const * transition_loss + \
@@ -101,11 +103,11 @@ class RSSMAbstraction(pl.LightningModule):
         # logger.debug(f'Losses: {logs}')
         return loss, logs
 	
-    def consistency_loss(self, z, next_z, next_z_dist):
+    def consistency_loss(self, z, next_z, next_z_dist, mask):
         '''
             -log T(z'|z, a) 
         '''
-        return -next_z_dist.log_prob(next_z-z).sum(-1)
+        return -(next_z_dist.log_prob(next_z-z) * mask).sum(-1)
 	
     def grounding_loss(self, next_z, next_s):
         '''
@@ -122,7 +124,7 @@ class RSSMAbstraction(pl.LightningModule):
         return -_loss.reshape(*b)
     
 
-    def tpc_loss(self, z, next_z, next_z_dist):
+    def tpc_loss(self, z, next_z, next_z_dist, min_length):
         '''
             -MI(z'; z, a)
         '''
@@ -131,7 +133,7 @@ class RSSMAbstraction(pl.LightningModule):
         n_traj, length = b[0], b[1]
         _next_z = torch.repeat_interleave(next_z, n_traj, dim=0)
         _z = z.repeat(n_traj, 1, 1)
-        _log_t = next_z_dist.log_prob(_next_z-_z, batched=True).reshape(n_traj, n_traj, length)
+        _log_t = next_z_dist.log_prob(_next_z-_z, batched=True).reshape(n_traj, n_traj, length)[..., :min_length]
         _diag = torch.diagonal(_log_t).T 
         _loss = _diag - (torch.logsumexp(_log_t, dim=1) - np.log(n_traj)) # n_traj x length
 
@@ -159,18 +161,21 @@ class RSSMAbstraction(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        s, a, next_s, executed, initset_s, reward, duration = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets, batch.rewards, batch.duration.float()
+        s, a, next_s, executed, initset_s, reward, duration, lengths = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets, batch.rewards, batch.duration.float(), batch.length
         # assert torch.all(executed) # check all samples are successful executions.
 
-        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss = self._run_step(s, a, next_s, initset_s, reward, duration)    
+        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths)    
+
+        batch_size, length = s.shape[0], s.shape[1]
+        _mask = torch.arange(length).to(s.get_device()).repeat(batch_size, 1) < lengths.unsqueeze(1)
 
         z = self.encoder(s)
         t_in = torch.cat([z, a], dim=-1)
         next_z = self.transition.distribution(t_in).mean + z
-        initset_pred = (torch.sigmoid(self.initsets(z)) >= 0.5).float()
-        initset_acc = (initset_pred == initset_s).float().mean()
+        initset_pred = (torch.sigmoid(self.initsets(z[_mask])) >= 0.5).float()
+        initset_acc = (initset_pred == initset_s[_mask]).float().mean()
 
-        nll_loss = self.grounding_loss(next_z, next_s).mean()
+        nll_loss = self.grounding_loss(next_z[_mask], next_s[_mask]).mean()
 
         logs = {
                 'val_infomax': grounding_loss.mean(),
@@ -186,15 +191,19 @@ class RSSMAbstraction(pl.LightningModule):
         return logs['val_infomax']
 	
     def test_step(self, batch, batch_idx):
-        s, a, next_s, executed, initset_s, reward, duration = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets, batch.rewards, batch.duration.float()
-        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss = self._run_step(s, a, next_s, initset_s, reward, duration)    
+        s, a, next_s, executed, initset_s, reward, duration, lengths = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets, batch.rewards, batch.duration.float(), batch.length
+        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths)    
+
+        batch_size, length = s.shape[0], s.shape[1]
+        _mask = torch.arange(length).to(s.get_device()).repeat(batch_size, 1) < lengths.unsqueeze(1)
 
         z = self.encoder(s)
         t_in = torch.cat([z, a], dim=-1)
         next_z = self.transition.distribution(t_in).mean + z
-        nll_loss = self.grounding_loss(next_z, next_s).mean()
-        initset_pred = torch.sigmoid(self.initsets(z)) >= 0.5
-        initset_acc = (initset_pred == initset_s).float().mean()
+        initset_pred = (torch.sigmoid(self.initsets(z[_mask])) >= 0.5).float()
+        initset_acc = (initset_pred == initset_s[_mask]).float().mean()
+
+        nll_loss = self.grounding_loss(next_z[_mask], next_s[_mask]).mean()
 
         self.log_dict({
                        'nll_loss': nll_loss,

@@ -52,8 +52,9 @@ class Trajectory(NamedTuple):
     executed: torch.Tensor
     duration: torch.Tensor
     initsets: torch.Tensor
-    info: List[Dict]
+    # info: List[Dict]
     p0: torch.Tensor
+    length: torch.Tensor
 
 
 def _geometric_return(rewards, gamma):
@@ -134,13 +135,14 @@ def split(_list, batch_size):
 class PinballDatasetTrajectory_(torch.utils.data.Dataset):
     IMG_FORMAT = 'tj_{}_obs_{}.png'
 
-    def __init__(self, path_to_file, transforms=None, obs_type='full', dtype=torch.float32, noise_level=0.01, num_workers=1):
+    def __init__(self, path_to_file, transforms=None, obs_type='full', length=32, dtype=torch.float32, noise_level=0.01, num_workers=1):
         self.zfile_name = path_to_file
         self.transforms = transforms
         self.dtype = dtype
         self.obs_type = obs_type
         self.noise_level = noise_level
         self.num_workers = num_workers
+        self.length = length
         self.load()
 
     def load(self):
@@ -170,22 +172,28 @@ class PinballDatasetTrajectory_(torch.utils.data.Dataset):
         for t in self.transforms:
             datum = t(datum)
         return datum
+    
 
     def __getitem__(self, index):
         trajectory = self.trajectories[index]
         trajectory = [self.__transform_transition(datum) for datum in trajectory]
-        s, a, next_s, rewards, done, executed, duration, initsets, info, p0 = zip(*trajectory)
-        s = torch.stack(s)
-        a = torch.stack(a)
-        next_s = torch.stack(next_s)
-        rewards = torch.stack(rewards)
-        done = torch.Tensor(done)
-        executed = torch.stack(executed)
-        duration = torch.stack(duration)
-        initsets = torch.stack(initsets)
-        p0 = torch.Tensor(p0)
+        length = len(trajectory)
+        padding = self.length - length
+        assert padding >= 0 and length > 0
 
-        return Trajectory(s, a, next_s, rewards, done, executed, duration, initsets, info, p0)
+        s, a, next_s, rewards, done, executed, duration, initsets, _, p0 = zip(*trajectory)
+        s = torch.stack(list(s) + [torch.zeros_like(s[0]) for _ in range(padding)])
+        a = torch.stack(list(a) + [torch.zeros_like(a[0]) for _ in range(padding)])
+        next_s = torch.stack(list(next_s) + [torch.zeros_like(next_s[0]) for _ in range(padding)])
+        rewards = torch.cat([torch.stack(rewards), torch.zeros(padding, 1)], dim=0)
+        done = torch.cat([torch.Tensor(done), torch.zeros(padding)], dim=0)
+        executed = torch.cat([torch.Tensor(executed), torch.zeros(padding)], dim=0)
+        duration = torch.cat([torch.Tensor(duration), torch.zeros(padding)], dim=0)
+        initsets = torch.stack(list(initsets) + [torch.zeros_like(initsets[0]) for _ in range(padding)])
+        p0 = torch.cat([torch.Tensor(p0), torch.zeros(padding)], dim=0)
+        # info = list(info) + [dict() for _ in range(padding)]
+
+        return Trajectory(s, a, next_s, rewards, done, executed, duration, initsets, p0, length)
 
     def __len__(self):
         return len(self.trajectories)
@@ -229,6 +237,7 @@ class PinballDatasetTrajectory(pl.LightningDataModule):
         self.obs_type = cfg.obs_type
         self.train_split, self.val_split, self.test_split = cfg.train_split, cfg.val_split, cfg.test_split
         self.shuffle = cfg.shuffle
+        self.length = cfg.length
         self.cfg = cfg
         self.transforms = [
                             partial(compute_return, gamma=cfg.gamma), 
@@ -244,7 +253,7 @@ class PinballDatasetTrajectory(pl.LightningDataModule):
 
 
     def setup(self, stage=None):
-        self.dataset = PinballDatasetTrajectory_(self.path_to_file, self.transforms, obs_type=self.obs_type, noise_level=self.cfg.noise_level, num_workers=self.num_workers)
+        self.dataset = PinballDatasetTrajectory_(self.path_to_file, self.transforms, obs_type=self.obs_type, noise_level=self.cfg.noise_level, num_workers=self.num_workers, length=self.length)
         self.train, self.val, self.test = torch.utils.data.random_split(self.dataset, [self.train_split, self.val_split, self.test_split])
 
     def train_dataloader(self):

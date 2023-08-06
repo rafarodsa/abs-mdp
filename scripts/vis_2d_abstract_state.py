@@ -11,6 +11,7 @@ import argparse
 
 from src.absmdp.infomax_attn import InfomaxAbstraction
 from src.absmdp.tpc import InfoNCEAbstraction as TPCAbstraction
+
 from src.absmdp.datasets import PinballDataset
 
 from omegaconf import OmegaConf as oc
@@ -47,6 +48,7 @@ if __name__ == '__main__':
     parser.add_argument('--n-samples', type=int, default=1000)
     parser.add_argument('--config', type=str, default='experiments/pb_obstacles/fullstate/config/config.yaml')
     parser.add_argument('--save-path', type=str)
+    
     args = parser.parse_args()
 
     # Load config
@@ -54,8 +56,9 @@ if __name__ == '__main__':
     
     # Load
     model = InfomaxAbstraction.load_from_checkpoint(args.from_ckpt, cfg=cfg)
-
     data = PinballDataset(cfg.data)
+
+    
     data.setup()
     batches = list(data.test_dataloader())
     batch = batches[0]

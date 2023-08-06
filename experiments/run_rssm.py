@@ -32,7 +32,7 @@ def parse_oc_args(oc_args):
 
 # load the config
 def run(cfg, ckpt=None, args=None):
-    # torch.set_float32_matmul_precision('medium')
+    torch.set_float32_matmul_precision('medium')
     set_seeds(cfg.seed)
     save_path = f'{cfg.save_path}/{args.tag}'
     os.makedirs(save_path, exist_ok=True)
