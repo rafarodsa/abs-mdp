@@ -23,6 +23,8 @@ from PIL import Image
 
 from src.absmdp.datasets import ObservationImgFile as ObservationFile
 
+import matplotlib.pyplot as plt
+
 def preprocess_img(img_array):
     img = (img_array * 255).astype(np.uint8)
     return Image.fromarray(img)
@@ -151,9 +153,23 @@ if __name__== "__main__":
             'state_change_mean': state_change_mean,
             'state_change_std': state_change_std
         }
+        
+        #### PLOT TEST
+
+        s_not_executed = s[idx][_executed==0]
+        next_s_not_executed = next_s[idx][_executed==0]
+        lines = np.vstack([s_not_executed[None], next_s_not_executed[None]])
+        print(s_not_executed)
+        # import ipdb
+        # ipdb.set_trace()
+        plt.scatter(s_not_executed[:, 0], s_not_executed[:, 1], s=5, c='r')
+        plt.scatter(next_s_not_executed[:, 0], next_s_not_executed[:, 1], s=5, c='g')
+        line_type = ['-', '--', ':', '-.']
+        for j in range(s_not_executed.shape[0]):
+            plt.plot(lines[:, j, 0], lines[:, j, 1], c='k', linestyle=line_type[i])
 
         print(f'--------Option-{i}: {options_desc[i]}---------')
-        print(f"Executed {n_executions}/{n_samples} times")
+        print(f"Executed {n_executions}/{_executed.shape[0]} times ({n_executions/_executed.shape[0]})")
         print(f"Average duration {avg_duration}")
         print(f"Average reward {option_rewards.mean()}. Max reward: {option_rewards.max()}. Min reward: {option_rewards.min()}")
         print(f"Reward length: mean: {np.array(_r_len)[idx].mean()}, max: {np.array(_r_len)[idx].max()}, min: {np.array(_r_len)[idx].min()}")
@@ -165,8 +181,16 @@ if __name__== "__main__":
         'stats': stats
     }
 
+    obstacles = [np.array(o.points + [o.points[0]]) for o in env.get_obstacles()]
+    def plot_obstacles(ax=None):
+        ax = ax if ax is not None else plt
+        for o in obstacles:
+            ax.plot(o[:, 0], o[:, 1], c='k')
+    plot_obstacles()
+    plt.savefig(f'./failures.png')
+
+
     ########### SAVE DATASET ###########
-    
     
 
     # zfile = zipfile.ZipFile(save_path, 'w')

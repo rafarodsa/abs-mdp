@@ -1,6 +1,7 @@
 import argparse
 import torch
 import numpy as np
+import os
 
 from src.absmdp.discrete_tpc_critic import DiscreteInfoNCEAbstraction as DiscreteAbstraction
 from src.absmdp.mdp import AbstractMDP
@@ -19,6 +20,7 @@ args = parser.parse_args()
 
 mdp = torch.load(args.absmdp)
 
+os.makedirs(args.save_path, exist_ok=True)
 
 trajs = []
 n_actions = int(len(mdp.get_actions()))

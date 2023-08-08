@@ -24,7 +24,7 @@ def ball_collides(pinball_env, initial_position, final_position):
     """ 
         Detects collision at position
     """
-    ball_radius = pinball_env.pinball.ball.radius * 2
+    ball_radius = pinball_env.pinball.ball.radius * 1.5
     # ball_radius = 0.01
     # print(ball_radius)
     for obstacle in pinball_env.get_obstacles():
@@ -51,11 +51,18 @@ def _intersect_obstable(obstacle, initial_position, final_position, ball_radius=
             return True
     return False
 
-def _intersect(edge, initial_position, final_position, ball_rad=0.02):
-
-    displacement = np.array(final_position) - np.array(initial_position)
+def _intersect(edge, initial_position, final_position, ball_rad=0.02, overshoot=0.06):
+    final_position = np.array(final_position)
+    initial_position = np.array(initial_position)
+    displacement = final_position - initial_position
     d = np.linalg.norm(displacement) + 1e-12
-    # displacement = ball_rad * displacement/d + displacement
+    # final_position += displacement/d * overshoot
+    final_position += displacement / d * ball_rad * 1.5
+    # initial_position -= displacement/d * ball_rad * 1.5
+    displacement = final_position-initial_position
+
+
+    # displacement = 0.2 * displacement + displacement
     edge = np.array(edge)
     edge_segment = edge[1]-edge[0]
     edge_vector = edge_segment/np.linalg.norm(edge_segment)
@@ -224,7 +231,15 @@ def position_controller_continuous(goal, kp_vel, ki_vel, kp_pos, kd_pos, ki_pos=
     return __controller
 
 def position_controller_factory(init_state, distance, continuous=True):
-    return position_controller_continuous(init_state + distance, kp_vel=5, ki_vel=0.01, kp_pos=100, kd_pos=0, ki_pos=20) if continuous else position_controller_discrete(init_state+distance, kp_vel=10, ki_vel=0.1, kp_pos=50, kd_pos=0., ki_pos=1)
+    PID_PARAMS = {
+         "kp_vel": 8.,
+         "ki_vel": 0.,
+         "kp_pos": 50, 
+         "kd_pos": 0.,
+         "ki_pos": 10
+    }
+    # return position_controller_continuous(init_state + distance, kp_vel=8, ki_vel=0., kp_pos=20, kd_pos=0., ki_pos=10) if continuous else position_controller_discrete(init_state+distance, kp_vel=10, ki_vel=0.1, kp_pos=50, kd_pos=0., ki_pos=1)
+    return position_controller_continuous(init_state + distance, **PID_PARAMS) if continuous else position_controller_discrete(init_state+distance, kp_vel=10, ki_vel=0.1, kp_pos=50, kd_pos=0., ki_pos=1)
 
 def create_position_controllers_v0(env, translation_distance=1/10):
     '''
@@ -261,7 +276,7 @@ def create_position_options(env, translation_distance=1/15, std_dev=0.01):
     '''
     position_options = []
     controller_factory = position_controller_factory
-    std_dev_vel = translation_distance/2/2  #0.01
+    std_dev_vel = translation_distance/5/4  #0.01
     for y in [-1., 1.]:
         distance = np.array([0., y*translation_distance, 0., 0.])
         o = Option(initiation_set(env, distance[:2]),

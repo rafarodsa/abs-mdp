@@ -13,6 +13,8 @@ from src.absmdp.infomax_attn import InfomaxAbstraction
 from src.absmdp.tpc_critic import InfoNCEAbstraction as TPCAbstraction
 from src.absmdp.discrete_tpc_critic import DiscreteInfoNCEAbstraction as DiscreteTPCAbstraction
 from src.absmdp.datasets import PinballDataset
+from src.absmdp.tpc_critic_rssm import RSSMAbstraction
+from src.absmdp.datasets_traj import PinballDatasetTrajectory
 
 from omegaconf import OmegaConf as oc
 
@@ -52,6 +54,7 @@ if __name__ == '__main__':
     parser.add_argument('--save-path', type=str)
     parser.add_argument('--discrete', action='store_true')
     parser.add_argument('--device', type=str, default='cpu')
+    parser.add_argument('--rssm', action='store_true')
     args = parser.parse_args()
 
     # Load config
@@ -59,13 +62,15 @@ if __name__ == '__main__':
     
     # Load
     # model = InfomaxAbstraction.load_from_checkpoint(args.from_ckpt, cfg=cfg)
-    if not args.discrete:
-        model = TPCAbstraction.load_from_checkpoint(args.from_ckpt)
+    if not args.rssm:
+        if not args.discrete:
+            model = TPCAbstraction.load_from_checkpoint(args.from_ckpt)
+        else:
+            model = DiscreteTPCAbstraction.load_from_checkpoint(args.from_ckpt)
+        data = PinballDataset(cfg.data)
     else:
-        model = DiscreteTPCAbstraction.load_from_checkpoint(args.from_ckpt)
-
-    data = PinballDataset(cfg.data)
-
+        model = RSSMAbstraction.load_from_checkpoint(args.from_ckpt)
+        data = PinballDatasetTrajectory(cfg.data)
 
     data.setup()
 
@@ -90,25 +95,30 @@ if __name__ == '__main__':
     batch = Batch(obs, action, next_obs)
     with torch.no_grad():
         model.eval()
+        model.to(device)
         z_q = model.encoder(batch.obs)
         z = z_q
         next_z_q = model.encoder(batch.next_obs)
         next_z = next_z_q
 
         transition_in = torch.cat((z, batch.action), dim=-1)
-        # predicted_z, q_z, _ = model.transition.sample_n_dist(transition_in, 1)
         q_z = model.transition.distribution(transition_in)
         predicted_z = q_z.mean + z
-        # predicted_next_s_q = model.grounding.distribution(predicted_z)
-        # predicted_next_s = predicted_next_s_q.sample()
-        # decoded_next_s_q = model.grounding.distribution(next_z)
+        action = batch.action.argmax(-1)
+
+    if args.rssm:
+        z = z.reshape(-1, z.shape[-1])
+        next_z = next_z.reshape(-1, z.shape[-1])
+        predicted_z = predicted_z.reshape(-1, z.shape[-1])
+        _action = action.reshape(-1)
 
     # prepare for plotting. move to cpu
     if device != 'cpu':
         z = z.cpu()
         predicted_z = predicted_z.cpu()
         next_z = next_z.cpu()
-    _action = batch.action.argmax(-1).cpu()
+        _action = _action.cpu()
+   
 
     os.makedirs(args.save_path, exist_ok=True)
     # Plot encoder space

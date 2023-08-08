@@ -12,7 +12,8 @@ import argparse
 from src.absmdp.infomax_attn import InfomaxAbstraction
 from src.absmdp.tpc_critic import InfoNCEAbstraction as TPCAbstraction
 from src.absmdp.datasets import PinballDataset
-
+from src.absmdp.tpc_critic_rssm import RSSMAbstraction
+from src.absmdp.datasets_traj import PinballDatasetTrajectory
 from omegaconf import OmegaConf as oc
 
 
@@ -33,6 +34,7 @@ if __name__ == '__main__':
     parser.add_argument('--n-samples', type=int, default=1000)
     parser.add_argument('--config', type=str, default='experiments/pb_obstacles/fullstate/config/config.yaml')
     parser.add_argument('--save-path', type=str, default='.')
+    parser.add_argument('--rssm', action='store_true')
     args = parser.parse_args()
 
     # Load config
@@ -40,11 +42,13 @@ if __name__ == '__main__':
     
     # Load
     # model = InfomaxAbstraction.load_from_checkpoint(args.from_ckpt, cfg=cfg)
-    model = TPCAbstraction.load_from_checkpoint(args.from_ckpt, cfg=cfg)
-
-
-    data = PinballDataset(cfg.data)
-
+    if not args.rssm:
+        model = TPCAbstraction.load_from_checkpoint(args.from_ckpt, cfg=cfg)
+        data = PinballDataset(cfg.data)
+    else:
+        model = RSSMAbstraction.load_from_checkpoint(args.from_ckpt)
+        model.to('cpu')
+        data = PinballDatasetTrajectory(cfg.data)
 
     data.setup()
 
@@ -69,20 +73,28 @@ if __name__ == '__main__':
     batch = Batch(obs, action, next_obs)
 
     n_samples = 5
-    goals = batch.obs[torch.randint(0, batch.obs.shape[0], (n_samples,))]
+    obs = batch.obs.reshape(-1, batch.obs.shape[-1])
+    goals = obs[torch.randint(0, batch.obs.shape[0], (n_samples,))]
 
     with torch.no_grad():
 
         model.eval()
         z_q = model.encoder(batch.obs)
+        z_q = z_q.reshape(-1, z_q.shape[-1])
+        encoded_goals = model.encoder(goals)
+        energy_goals = torch.tanh(model.grounding(goals, encoded_goals))
         energy = torch.tanh(model.grounding(goals.repeat(z_q.shape[0], 1), z_q.repeat_interleave(n_samples, dim=0))).reshape(z_q.shape[0], n_samples).max(-1).values
+        energy = energy.reshape(n_samples, -1)
+        for i in range(n_samples):
+            energy[i, energy[i] < energy_goals[i] - 0.01] = 0
         printarr(energy, z_q, goals)
+        energy = energy.sum(0)
    
     # Plot heatmap
-    fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
-    plt.scatter(z_q[:, 0], z_q[:, 1], c=energy, cmap=cm.coolwarm, s=5)
+    # fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
+    plt.scatter(obs[:, 0], obs[:, 1], c=energy, cmap=cm.coolwarm, s=5)
+    plt.colorbar()
+    plt.scatter(goals[:, 0], goals[:, 1], c='k', s=1)
     # ax.plot_surface(z_q[:, 0], z_q[:, 1], energy.unsqueeze(-1), antialiased=False, linewidth=0)
     
-    plt.colorbar()
-    plt.show()
-    # plt.savefig(os.path.join(args.save_path, 'heatmap.png'))
+    plt.savefig(os.path.join(args.save_path, 'heatmap.png'))

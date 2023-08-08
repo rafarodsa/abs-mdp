@@ -93,7 +93,7 @@ def batch_experiences(experiences, device, phi, gamma, batch_states=batch_states
 
 
 class AbstractDoubleDQN(DoubleDQN):
-    
+    saved_attributes = ("model", "target_model", "optimizer")
     def __init__(self, action_mask_fn, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.action_mask = action_mask_fn
@@ -102,6 +102,7 @@ class AbstractDoubleDQN(DoubleDQN):
 
         batch_next_state = exp_batch["next_state"] 
         action_mask = (1-self.action_mask(batch_next_state)) * -1e12
+        # action_mask = self.action_mask(batch_next_state)
         with evaluating(self.model):
             if self.recurrent:
                 next_qout, _ = pack_and_forward(
@@ -123,6 +124,7 @@ class AbstractDoubleDQN(DoubleDQN):
 
         # print('masking action selection')
         greedy_actions = (next_qout.q_values + action_mask).argmax(axis=1)
+
         next_q_max = target_next_qout.evaluate_actions(greedy_actions)
 
         batch_rewards = exp_batch["reward"]
@@ -266,6 +268,18 @@ class AbstractDoubleDQN(DoubleDQN):
         self.optimizer.step()
         self.optim_t += 1
 
+    def save(self, dirname):
+        super().save(dirname)
+        self.replay_buffer.save(f'{dirname}/replay_buffer.pt')
+
+    def load(self, dirname):
+        super().load(dirname)
+        try:
+            self.replay_buffer.load(f'{dirname}/replay_buffer.pt')
+        except: 
+            print('replay buffer not loaded.')
+
+
 
 
 def select_action_epsilon_greedily(batch_obs, epsilon, random_action_func, greedy_action_func):
@@ -289,15 +303,17 @@ class AbstractLinearDecayEpsilonGreedy(explorers.LinearDecayEpsilonGreedy):
     
 
 class AbstractDDQNGrounded(pfrl.agent.Agent):
-    def __init__(self, encoder, agent, action_mask):
+    def __init__(self, encoder, agent, action_mask, device='cpu'):
         self.agent = agent
         self.encoder = encoder
         self.action_mask = action_mask
         self.gamma = agent.gamma
+        self.device = device
+        self.agent.device = device
         print(self.gamma)
         
     def act(self, obs):
-        z = self.encoder(torch.from_numpy(obs)).unsqueeze(0)
+        z = self.encoder(torch.from_numpy(obs).to(self.device)).unsqueeze(0)
         # printarr(obs, z)
         q_values = self.agent._evaluate_model_and_update_recurrent_states(z)
         
@@ -311,11 +327,12 @@ class AbstractDDQNGrounded(pfrl.agent.Agent):
         self.agent.load(dirname)
     
     def observe(self, obs, reward, done, reset):
-        z = self.encoder(torch.from_numpy(obs))
+        z = self.encoder(torch.from_numpy(obs).to(self.device))
         self.agent.observe(z, reward, done, reset)
     
     def save(self, dirname):
         self.agent.save(dirname)
+        
     
     def get_statistics(self):
         return self.agent.get_statistics()
