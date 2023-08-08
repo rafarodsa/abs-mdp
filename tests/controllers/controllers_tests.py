@@ -19,9 +19,9 @@ def test_ball_collision():
         _init_f = initiation_set(env, np.array(test[0][2:]))
         assert _init_f(np.array(test[0][:2])) == test[1]
 
-def test_run_pid_controller(displacement, kp_vel, ki_vel, kp_pos, kd_pos, horizon=100):
+def test_run_pid_controller(displacement, kp_vel, ki_vel, kp_pos, kd_pos, horizon=100, s0=None):
     env = PinballEnv(CONFIG_FILE)
-    s = env.reset()
+    s = env.reset() if s0 is None else env.reset(s0)
     goal = np.concatenate([s[:2], np.zeros(2)], axis=0) + displacement
     controller = position_controller_discrete(goal, kp_vel, ki_vel, kp_pos, kd_pos)
     trajectory = [s]
@@ -34,17 +34,16 @@ def test_run_pid_controller(displacement, kp_vel, ki_vel, kp_pos, kd_pos, horizo
     vel_error = np.sqrt(np.linalg.norm(error[2:]))
     return trajectory, pos_error, vel_error, goal
 
-def test_run_pid_controller_continuous(displacement, kp_vel, ki_vel, kp_pos, kd_pos, ki_pos, horizon=100):
-    env = PinballEnvContinuous(CONFIG_FILE)
-    s = env.sample_initial_positions(1)
-    s = np.array([4.044e-01,  2.759e-01,  0.000e+00,  0.000e+00])[np.newaxis, :]
-    s = env.reset(s[0])
+def test_run_pid_controller_continuous(displacement, kp_vel, ki_vel, kp_pos, kd_pos, ki_pos, horizon=100, s0=None):
+    env = PinballEnvContinuous(CONFIG_FILE, render_mode='human')
+    s = env.reset() if s0 is None else env.reset(s0)
     goal = np.concatenate([s[:2], np.zeros(2)], axis=0) + displacement
     controller = position_controller_continuous(goal, kp_vel, ki_vel, kp_pos, kd_pos, ki_pos)
     trajectory = [s]
     for _ in range(horizon):
         s = env.step(controller(s))[0]
         trajectory.append(s)
+        env.render()
     
     error = goal - s
     pos_error = np.sqrt(np.linalg.norm(error[:2]))
@@ -77,12 +76,20 @@ def plot_trajectory_with_termination(trajectory, goal, terminated):
     plt.show()
 
 def tune_pid():
-    result = test_run_pid_controller(np.array([2.447e-02, 6.388e-01,  2.376e-17,  3.880e-01]), 10, 0.1, 100, 0.)
+    result = test_run_pid_controller(np.array([0, 0.05, 0., 0.]), 10, 0.1, 100, 0.)
     plot_trajectory(result[0], result[-1])
 
 def tune_pid_continuous():
     n=25
-    result = test_run_pid_controller_continuous(np.array([1/n, 1/n, 0, 0]),  kp_vel=8., ki_vel=0., kp_pos=50, kd_pos=0., ki_pos=0.10)
+    s0 = np.array([0.804, 0.233, 0.,    0.   ])
+    displacement= {
+        '-y': np.array([0,-1/n, 0, 0]),
+        '+y': np.array([0, 1/n, 0, 0]),
+        '-x': np.array([-1/n, 0, 0, 0]),
+        '+x': np.array([1/n, 0, 0, 0]),
+    }
+    print(s0+displacement['-y'])
+    result = test_run_pid_controller_continuous(displacement['-y'],  kp_vel=8., ki_vel=0., kp_pos=50, kd_pos=0., ki_pos=10, s0=s0)
     plot_trajectory(result[0], result[-1])
 
 

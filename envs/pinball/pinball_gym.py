@@ -60,13 +60,14 @@ class PinballEnv(gym.Env):
             vertices = np.array(vertices)
             self.vertices.append(vertices)
 
-        # self._obstacles = [Path(obstacle.points + [obstacle.points[-1]], closed=True) for obstacle in self.pinball.obstacles]
-        
+        self.expanded_obs = self._expand_obstacles(ball_rad=self.pinball.ball.radius)
+
+        # # plot obstacles
         # f, ax = plt.subplots()
-        # for obs in self._obstacles:
-        #     patch = patches.PathPatch(obs)
-        #     ax.add_patch(patch)
-        # plt.savefig('obstacles')
+        # for n_obs, obs in zip(new_obs, self.vertices[4:]):
+        #     ax.plot(obs[:, 0], obs[:, 1], c='k')
+        #     ax.plot(n_obs[:, 0], n_obs[:, 1], c='r')
+        # plt.savefig('obstacles.png')
         
         if start_pos:
             self.pinball.set_initial_pos(start_pos)
@@ -126,6 +127,38 @@ class PinballEnv(gym.Env):
             
         pos = np.vstack(all_points)[:N]
         return np.concatenate([pos, vels], axis=-1)
+    
+    def _expand_obstacles(self, ball_rad=0.02):
+        '''
+            Assume that vertices are given in CW order.
+        '''
+        new_obs = []
+        for obs in self.vertices[4:]:
+            vtx = np.array(obs)
+            edges = vtx[1:] - vtx[:-1]
+            normals = np.zeros_like(edges)
+            normals[:, 0] = -edges[:, 1]
+            normals[:, 1] = edges[:, 0]
+            normals = normals / np.linalg.norm(normals, axis=-1, keepdims=True)
+            
+            assert np.allclose(np.diag(edges @ normals.T), np.zeros(edges.shape[0]))
+            assert np.allclose(np.linalg.norm(normals, axis=-1), np.ones(normals.shape[0]))
+
+            vtxs = vtx[:-1] + 0.5 * ball_rad * normals + 0.5 * ball_rad * np.roll(normals, 1, axis=0)
+            vtxs = np.vstack([vtxs, vtxs[0]])
+            new_vtxs = vtxs
+
+            # b = -edges # (2, N)
+            # line_vectors = np.vstack([edges, edges[0]]) # N+1
+            # A = np.stack([-line_vectors[:-1], line_vectors[1:]], axis=-1) # (N, 2, 2)
+            # printarr(b, A, line_vectors, vtxs, edges, vtx)
+            # coeffs = np.linalg.solve(A, b) # (N, 2)
+            # new_vtxs = vtxs[:-1] + coeffs[:, 0:1] * edges
+            # new_vtxs = np.vstack([new_vtxs, new_vtxs[0]])
+
+            new_obs.append(new_vtxs)
+        return new_obs
+
 
     def _inside_polygon(self,vertices, points, eps=1e-7):
         '''
@@ -180,7 +213,8 @@ class PinballEnv(gym.Env):
         #     in_obstacle = obstacle.contains_points(points, radius=self.pinball.ball.radius-1e-9)
         #     # in_obstacle = obstacle.contains_points(points, radius=1e-9)
         #     points_mask = np.logical_or(in_obstacle, points_mask)
-        for i, vtx in enumerate(self.vertices[4:]):
+        # for i, vtx in enumerate(self.vertices[4:]):
+        for i, vtx in enumerate(self.expanded_obs):
             in_obstacle = self._inside_polygon(vtx, points)
             points_mask = np.logical_or(in_obstacle, points_mask)
 
