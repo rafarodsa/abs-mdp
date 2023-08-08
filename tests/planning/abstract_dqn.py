@@ -170,7 +170,6 @@ def make_ground_env(test=False, test_seed=0, train_seed=1, args=None):
         options = create_position_options(env)
         env_sim = torch.load(args.absmdp)
         env = EnvOptionWrapper(options, env)
-        # env = EnvGoalWrapper(env, goal_fn=goal_fn(enc, goal_tol=goal_tol), goal_reward=goal_reward)
         env = EnvGoalWrapper(env, goal_fn=_grounding_goal_fn(env_sim.grounding, env_sim.encoder, goal=goal), goal_reward=goal_reward, init_state_sampler=init_state_sampler(goal))
         env.seed(train_seed)
     else:
@@ -180,11 +179,8 @@ def make_ground_env(test=False, test_seed=0, train_seed=1, args=None):
             env.render_mode = 'human'
         print('cont options')
         options = create_position_options(env)
-        # print('grid options')
-        # options = PinballGridOptions(env)
         env = EnvOptionWrapper(options, env)
         env_sim = torch.load(args.absmdp)
-        # env = EnvGoalWrapper(env, goal_fn=goal_fn(enc, goal_tol=goal_tol), goal_reward=goal_reward)
         env = EnvGoalWrapper(env, goal_fn=_grounding_goal_fn(env_sim.grounding, env_sim.encoder, goal=goal), goal_reward=goal_reward, init_state_sampler=init_state_sampler(goal))
         env.seed(test_seed)
     if args.monitor:

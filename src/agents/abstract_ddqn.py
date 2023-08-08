@@ -93,6 +93,7 @@ def batch_experiences(experiences, device, phi, gamma, batch_states=batch_states
 
 
 class AbstractDoubleDQN(DoubleDQN):
+    
     def __init__(self, action_mask_fn, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.action_mask = action_mask_fn

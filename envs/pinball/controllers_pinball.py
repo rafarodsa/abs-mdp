@@ -24,8 +24,11 @@ def ball_collides(pinball_env, initial_position, final_position):
     """ 
         Detects collision at position
     """
+    ball_radius = pinball_env.pinball.ball.radius * 2
+    # ball_radius = 0.01
+    # print(ball_radius)
     for obstacle in pinball_env.get_obstacles():
-        if _intersect_obstable(obstacle, initial_position, final_position):
+        if _intersect_obstable(obstacle, initial_position, final_position, ball_radius=ball_radius):
             # print(f'Obstacle intersected: {initial_position}->{final_position}')
             return True
     return False
@@ -43,15 +46,8 @@ def _intersect_obstable(obstacle, initial_position, final_position, ball_radius=
         
     
     for edge in zip(a, b):
-        alpha, beta = _intersect(edge, initial_position, final_position)
+        alpha, beta = _intersect(edge, initial_position, final_position, ball_rad=ball_radius)
         if alpha <= 1 and alpha >= 0 and beta >= 0 and beta <= 1:
-           
-            # plot points 
-            # print(f'Edge intersected: {edge}, alpha: {alpha}, beta: {beta}')
-            # plot_polygon(points)
-            # plt.scatter(initial_position[0], initial_position[1], c='r')
-            # plt.scatter(final_position[0], final_position[1], c='b')
-            # plt.show()
             return True
     return False
 
@@ -59,8 +55,14 @@ def _intersect(edge, initial_position, final_position, ball_rad=0.02):
 
     displacement = np.array(final_position) - np.array(initial_position)
     d = np.linalg.norm(displacement) + 1e-12
-    displacement = ball_rad * displacement/d + displacement
-    edge_segment = np.array(edge[1])-np.array(edge[0])
+    # displacement = ball_rad * displacement/d + displacement
+    edge = np.array(edge)
+    edge_segment = edge[1]-edge[0]
+    edge_vector = edge_segment/np.linalg.norm(edge_segment)
+    edge[1] += edge_vector * ball_rad
+    edge[0] -= edge_vector * ball_rad
+    edge_segment = edge[1]-edge[0]
+
     b = edge[0] - initial_position
     # print(displacement, edge_segment, b)
     A = np.vstack([displacement, -edge_segment]).T
@@ -222,7 +224,7 @@ def position_controller_continuous(goal, kp_vel, ki_vel, kp_pos, kd_pos, ki_pos=
     return __controller
 
 def position_controller_factory(init_state, distance, continuous=True):
-    return position_controller_continuous(init_state + distance, 5, 0.01, 100, 0.) if continuous else position_controller_discrete(init_state+distance, 10, 0.1, 100, 0.)
+    return position_controller_continuous(init_state + distance, kp_vel=5, ki_vel=0.01, kp_pos=100, kd_pos=0, ki_pos=20) if continuous else position_controller_discrete(init_state+distance, kp_vel=10, ki_vel=0.1, kp_pos=50, kd_pos=0., ki_pos=1)
 
 def create_position_controllers_v0(env, translation_distance=1/10):
     '''
