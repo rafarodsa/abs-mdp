@@ -57,7 +57,19 @@ def train_agent(
 
     eval_stats_history = []  # List of evaluation episode stats dict
     episode_len = 0
+
+
+
+
     try:
+        # eval at 0
+        if evaluator is not None:
+            eval_score = evaluator.evaluate_and_update_max_score(t=t, episodes=episode_idx)
+            if eval_score is not None:
+                eval_stats = dict(agent.get_statistics())
+                eval_stats["eval_score"] = eval_score
+                eval_stats_history.append(eval_stats)
+
         while t < steps:
 
             # a_t

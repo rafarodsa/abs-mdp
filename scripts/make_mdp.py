@@ -19,6 +19,7 @@ parser.add_argument('--dir', type=str, default='.')
 parser.add_argument('--phi-ckpt', type=str)
 parser.add_argument('--save-path', type=str, default=None)
 parser.add_argument('--discrete', action='store_true')
+parser.add_argument('--rssm', action='store_true')
 args = parser.parse_args()
 
 phi_ckpt_path = f'{args.phi_ckpt}'
@@ -28,7 +29,7 @@ model.cfg.data.non_linear_transform = False
 data = PinballDataset(model.cfg.data)
 data.setup()
 
-mdp = AbstractMDP.load(model, data.dataset) if not args.discrete else DiscreteAbstractMDP.load(model, data.dataset)
+mdp = AbstractMDP.load(model, data.dataset, rssm=args.rssm) if not args.discrete else DiscreteAbstractMDP.load(model, data.dataset)
 # save_path = f'{args.save_path}/mdp.pt' if args.save_path is not None else f'{args.dir}/mdp.pt'
 torch.save(mdp, f'{args.dir}/{"disc" if args.discrete else "cont"}_mdp.pt')
 

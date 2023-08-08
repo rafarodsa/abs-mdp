@@ -192,6 +192,7 @@ class AbstractMDPCritic(gym.Env):
                  obs_dim,
                  init_classifier,
                  gamma=0.99,
+                 rssm=False
                 ):
         
         self.encoder = encoder
@@ -205,6 +206,16 @@ class AbstractMDPCritic(gym.Env):
         self.obs_dim = obs_dim
         self.init_classifier = init_classifier
         self._gamma = gamma
+        self.rssm = rssm
+        self.device='cpu'
+
+        self.modules = [encoder, grounding, transition, reward, init_classifier, tau]
+        for m in self.modules:
+            m.eval()
+            m.to(self.device)
+
+        self.transition_fn.feats.eval()
+        print(self.transition_fn.feats.training)
 
         # define action and observation space
         self.action_space = gym.spaces.Discrete(n_options)
@@ -213,25 +224,24 @@ class AbstractMDPCritic(gym.Env):
         self.reset()
     
     def reset(self, state=None):
-        # sample initial state
-        # state = np.array([0.49, 0.12, 0.2, 0.2]).astype(np.float32)
-        # distance = 1/15
-        # x, y = np.random.uniform(0, 1, 2) * distance - distance/2
-        # state = np.array([0.08 + x, 0.8+y, 0.1, 0.1]).astype(np.float32)
-        self._state = self.get_initial_states() if state is None else self.encode(torch.from_numpy(state)).squeeze(0)
-        return self._state.numpy()
+        if self.rssm:
+            self.transition_fn.feats.reset(self.device) # reset hidden state.
+        self._state = self.get_initial_states() if state is None else self.encode(torch.from_numpy(state).to(self.device)).squeeze(0)
+        self._state = self._state.to(self.device)
+        return self._state.cpu().numpy()
 
     def render(self):
         pass
 
     def step(self, action):
+        action = action.to(self.device)
         next_s = self.transition(self.state, action)
         r = self.reward(self.state, action, next_s).item()
         done = False
         tau =  self.tau(self.state, action)
         info = {'tau': tau.item()}
         self._state = next_s
-        return next_s.numpy(), r, done, info
+        return next_s.cpu().numpy(), r, done, info
 
     @property
     def state(self):
@@ -262,8 +272,12 @@ class AbstractMDPCritic(gym.Env):
             input = torch.cat([state, self._action_to_one_hot(action)], dim=-1)
         else: 
             input = torch.cat([state, self._action_to_one_hot(action)], dim=0)
-        t = self.transition_fn.distribution(input)
-        return t.sample()[0] + state
+        
+        t = self.transition_fn.distribution(input.unsqueeze(0))
+        # delta_s = t.sample()[0]
+        delta_s = t.mean
+        next_s = delta_s + state
+        return next_s[0]
         # return t.mean + state
     
     def reward(self, state, action, next_state):
@@ -297,20 +311,20 @@ class AbstractMDPCritic(gym.Env):
         return self._latent_dim
     
     @staticmethod
-    def load(model, data):
+    def load(model, data, rssm=False):
         mdp_elems = AbstractMDPCritic._prepare_models(model)
         initial_states = torch.stack([d.obs for d in data if d.p0 == 1])
         mdp_elems['initial_states'] = initial_states
-        return AbstractMDPCritic(**mdp_elems)
+        return AbstractMDPCritic(**mdp_elems, rssm=rssm)
     
     
     def _prepare_initial_states(self):
         self.initial_states = torch.stack([d.obs for d in self.data if d.p0 == 1])
 
     def to(self, device):
-        elems = ['encoder', 'grounding', 'transition', 'reward', 'init_classifier', 'tau']
-        for e in elems:
-            elems.to(device)
+        self.device = device
+        for m in self.modules:
+            m.to(device)
 
     @staticmethod
     def _prepare_models(mdp_trainer):
@@ -325,6 +339,8 @@ class AbstractMDPCritic(gym.Env):
         init_classifier = mdp_trainer.initsets
         init_classifier.requires_grad_(False)
         tau = mdp_trainer.tau
+        
+
         tau.requires_grad_(False)
         mdp_elems = {
                      'encoder': encoder, 

@@ -41,10 +41,12 @@ def execute_option(env, initial_state, option, obs_type='simple', max_exec_time=
         duration = t 
         next_o = np.array(env.render()) if obs_type == 'pixel' else next_s
     else:
-        duration = 0
-        next_o = o
-        next_s = s
-        rewards = []
+        # duration = 0
+        # next_o = o
+        # next_s = s
+        # rewards = []
+        duration = t
+        next_o = next_s
         can_execute = False
 
     info = {'state': s, 'next_state': next_s, 'done': done}

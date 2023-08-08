@@ -28,6 +28,7 @@ parser.add_argument('--n-jobs', type=int, default=1)
 parser.add_argument('--save-path', type=str, default='.')
 parser.add_argument('--dqn-agent', type=str)
 parser.add_argument('--n-samples', type=int, default=1000)
+parser.add_argument('--ground', action='store_true')
 
 args = parser.parse_args()
 
@@ -48,15 +49,17 @@ def compute_nearest_pos(position, n_pos=20, min_pos=0.05, max_pos=0.95):
 
 
 def _grounding_goal_fn(grounding, phi, goal=[0.55, 0.06, 0., 0.]):
-    goal = compute_nearest_pos(np.array(goal[:2]))
-    goal = np.concatenate([goal, [0., 0.]])
+    # goal = compute_nearest_pos(np.array(goal[:2]))
+    # goal = np.concatenate([goal, [0., 0.]])
     goal = torch.Tensor(goal).unsqueeze(0)
+    energy_goal = torch.tanh(grounding(goal, phi(goal)))
+    eps = 0.01
     def _goal(state):
         _goal = torch.Tensor(goal)
         # printarr(_goal, state)
         s = phi(torch.from_numpy(state).unsqueeze(0))
         v = torch.tanh(grounding(_goal, s))
-        return v > 0.7
+        return v > energy_goal-eps
 
     return _goal
 
@@ -69,7 +72,7 @@ def action_mask(state):
     return mask
 
 def action_mask_learned(encoded_s):
-    return (torch.sigmoid(env_sim.env.init_classifier(encoded_s)) > 0.7).float()
+    return (torch.sigmoid(env_sim.env.init_classifier(encoded_s)) > 0.5).float()
 
 
 
@@ -78,7 +81,7 @@ def action_mask_learned(encoded_s):
 N_SAMPLES = args.n_samples
 n_actions = 4
 # goal = [0.55, 0.06, 0., 0.]
-goal = torch.Tensor([0.2, 0.9, 0., 0.])
+goal = torch.Tensor([0.6, 0.5, 0., 0.])
 # goal = compute_nearest_pos(np.array(goal[:2]))
 ##################
 
@@ -119,7 +122,7 @@ encoded_s = env_sim.env.encode(torch.from_numpy(states))
 actions_semantics = ['-Y', '+Y', '-X', '+X']
 
 with torch.no_grad():
-    q_values = q_func(encoded_s)
+    q_values = q_func(encoded_s) if not args.ground else q_func(torch.from_numpy(states))
 q_values = q_values.numpy()
 printarr(states, encoded_s, q_values, goal)
 
@@ -128,9 +131,45 @@ printarr(states, encoded_s, q_values, goal)
 ### plot q-values
 
 plt.figure()
+action_mask_t = action_mask(states)
+action_mask_l = action_mask_learned(encoded_s)
+for a in range(n_actions):
+    plt.subplot(2,4,a+1)
+    plt.scatter(states[:, 0], states[:, 1], c=action_mask_t[:, a], s=5)
+    plt.scatter(goal[0], goal[1], s=10, c='r')
+    plot_obstacles()
+    plt.colorbar()
+    plt.grid()
+    plt.title(f'Action {actions_semantics[a]}')
+
+# plt.savefig(f'{args.save_path}/action_mask_ground.png')
+
+for a in range(n_actions):
+    plt.subplot(2,4,4+a+1)
+    plt.scatter(states[:, 0], states[:, 1], c=action_mask_l[:, a], s=5)
+    plt.scatter(goal[0], goal[1], s=10, c='r')
+    plot_obstacles()
+    plt.colorbar()
+    plt.grid()
+    plt.title(f'Action {actions_semantics[a]}')
+
+plt.savefig(f'{args.save_path}/action_mask.png')
+
+plt.figure()
+plt.scatter(states[:, 0], states[:, 1], c=action_mask_l.sum(-1), s=5)
+plot_obstacles()
+plt.colorbar()
+plt.grid()
+plt.savefig(f'{args.save_path}/action_mask_agg.png')
+
+q_min = q_values.min()
+masked_values_t = torch.from_numpy((1-action_mask_t)) * q_min
+q_masked_values = torch.from_numpy((1-action_mask_t)) * -1e12 + q_values
+printarr(masked_values_t, q_min, action_mask_t, q_values)
+q_masked_values_plot = q_values * action_mask_t + masked_values_t.numpy()
 for a in range(n_actions):
     plt.subplot(2,2,a+1)
-    plt.scatter(states[:, 0], states[:, 1], c=q_values[:, a], s=5)
+    plt.scatter(states[:, 0], states[:, 1], c=q_masked_values_plot[:, a], s=5)
     plt.scatter(goal[0], goal[1], s=10, c='r')
     plot_obstacles()
     plt.colorbar()
@@ -139,7 +178,7 @@ for a in range(n_actions):
 
 plt.savefig(f'{args.save_path}/q-heatmap.png')
 
-q_max = q_values.max(-1)
+q_max = q_masked_values_plot.max(-1)
 
 printarr(q_max)
 plt.figure()
@@ -151,9 +190,9 @@ plt.grid()
 plt.savefig(f'{args.save_path}/q-greedy-heatmap.png')
 
 ### greedy policy
-action_mask_t  = action_mask(states)
-masked_values_t = torch.from_numpy((1-action_mask_t)) * -1e2
-q_masked_values = masked_values_t + q_values
+# action_mask_t  = action_mask(states)
+# masked_values_t = torch.from_numpy((1-action_mask_t)) * -1e2
+# q_masked_values = masked_values_t + q_values
 greedy_policy = q_masked_values.argmax(-1)
 
 action_vel_x = np.array([0., 0., -1., 1.]) * 1/15
@@ -179,7 +218,7 @@ ax.set_title('w/True initset')
 
 
 ### greedy policy with learned initset
-action_mask_l = action_mask_learned(encoded_s)
+
 masked_values_l = (1-action_mask_l) * -1e2
 q_masked_values = masked_values_l + q_values
 greedy_policy = q_masked_values.argmax(-1)
@@ -227,8 +266,8 @@ def softmax(a, dim=-1, beta=1.):
     return torch.exp(x - torch.logsumexp(x, dim=dim))
 
 #### Plot Trajectories.
-def sample_real_trajectory(env, encoder, q_func, initiation_mask, max_len=50, greedy=True):
-    s = env.reset()
+def sample_real_trajectory(env, encoder, q_func, initiation_mask, max_len=50, greedy=True, s0=None, epsilon=0.0):
+    s = env.reset(s0)
     done = False
     z = encoder
     timestep = 0
@@ -239,7 +278,11 @@ def sample_real_trajectory(env, encoder, q_func, initiation_mask, max_len=50, gr
         initset = initiation_mask(s)
         q_masked_values = (1-initset) * -1e12 + q_values
         if greedy: 
-            action = q_masked_values.argmax(-1) # act greedily
+            if np.random.random() > epsilon:
+                action = q_masked_values.argmax(-1) # act greedily
+            else:
+                avail_actions = np.nonzero(initset)
+                action = np.random.choice(avail_actions[0])
         else:
             probs = softmax(q_masked_values, dim=-1, beta=10).detach().numpy()
             action = np.random.choice(n_actions, p=probs)
@@ -260,49 +303,19 @@ def plot_trajectory(s, ax=None):
     ax.scatter(s[1:-1, 0], s[1:-1, 1], s=0.5, c='k')
     ax.scatter(s[-1, 0], s[-1, 1], s=2, c='g')
 
+
+### Plot trajectories!
+
 N_TRAJS = 15
 z = env_sim.env.encode
-GREEDY = False
-# Generate Trajectories with ground initset
-for _ in range(N_TRAJS):
-    traj = sample_real_trajectory(env, z, q_func, lambda s : torch.from_numpy(action_mask(s).astype(np.float32)), greedy=GREEDY)
-    s, a, next_s = zip(*traj)
-    s = np.array(s + (next_s[-1],))
-    printarr(s)
-
-    ax = axes.flat[0]
-    plot_trajectory(s, ax)
-    
-# Generate Trajectories with learned initset
-for _ in range(N_TRAJS):
-    traj = sample_real_trajectory(env, z, q_func, lambda s: action_mask_learned(z(torch.from_numpy(s))), greedy=GREEDY)
-    s, a, next_s = zip(*traj)
-    s = np.array(s + (next_s[-1],))
-    printarr(s)
-
-    ax = axes.flat[1]
-    plot_trajectory(s, ax)
-    
-
-# Generate Trajectories no mask
-for _ in range(N_TRAJS):
-    traj = sample_real_trajectory(env, z, q_func, lambda s: torch.ones(n_actions), greedy=GREEDY)
-    s, a, next_s = zip(*traj)
-    s = np.array(s + (next_s[-1],))
-    printarr(s)
-
-    ax = axes.flat[2]
-    plot_trajectory(s, ax)
-
-plt.savefig(f'{args.save_path}/trajs-softmax.pdf')
-
-
+start_states = env_p.sample_init_states(N_TRAJS)
 
 GREEDY = True
-f, axes = plt.subplots(1, 3, sharex=True, sharey=True)
+
+z = z if not args.ground else lambda s: s
 # Generate Trajectories with ground initset
-for _ in range(N_TRAJS):
-    traj = sample_real_trajectory(env, z, q_func, lambda s : torch.from_numpy(action_mask(s).astype(np.float32)), greedy=GREEDY)
+for i in range(N_TRAJS):
+    traj = sample_real_trajectory(env, z, q_func, lambda s : torch.from_numpy(action_mask(s).astype(np.float32)), greedy=GREEDY, s0=start_states[i])
     s, a, next_s = zip(*traj)
     s = np.array(s + (next_s[-1],))
     printarr(s)
@@ -310,10 +323,11 @@ for _ in range(N_TRAJS):
     ax = axes.flat[0]
     plot_trajectory(s, ax)
     plot_obstacles(ax)
+    ax.set_title('w/Ground Initset')
     
 # Generate Trajectories with learned initset
-for _ in range(N_TRAJS):
-    traj = sample_real_trajectory(env, z, q_func, lambda s: action_mask_learned(z(torch.from_numpy(s))), greedy=GREEDY)
+for i in range(N_TRAJS):
+    traj = sample_real_trajectory(env, z, q_func, lambda s: action_mask_learned(z(torch.from_numpy(s))), greedy=GREEDY, s0=start_states[i])
     s, a, next_s = zip(*traj)
     s = np.array(s + (next_s[-1],))
     printarr(s)
@@ -321,10 +335,11 @@ for _ in range(N_TRAJS):
     ax = axes.flat[1]
     plot_trajectory(s, ax)
     plot_obstacles(ax)
+    ax.set_title('w/Learned initset')
 
 # Generate Trajectories no mask
-for _ in range(N_TRAJS):
-    traj = sample_real_trajectory(env, z, q_func, lambda s: torch.ones(n_actions), greedy=GREEDY)
+for i in range(N_TRAJS):
+    traj = sample_real_trajectory(env, z, q_func, lambda s: torch.ones(n_actions), greedy=GREEDY, s0=start_states[i])
     s, a, next_s = zip(*traj)
     s = np.array(s + (next_s[-1],))
     printarr(s)
@@ -332,7 +347,42 @@ for _ in range(N_TRAJS):
     ax = axes.flat[2]
     plot_trajectory(s, ax)
     plot_obstacles(ax)
+    ax.set_title('No initset')
+    
 
 plt.savefig(f'{args.save_path}/trajs-greedy.pdf')
 
+# f, axes = plt.subplots(1, 3, sharex=True, sharey=True)
+# GREEDY = False
+# # Generate Trajectories with ground initset
+# for i in range(N_TRAJS):
+#     traj = sample_real_trajectory(env, z, q_func, lambda s : torch.from_numpy(action_mask(s).astype(np.float32)), greedy=GREEDY, s0=start_states[i])
+#     s, a, next_s = zip(*traj)
+#     s = np.array(s + (next_s[-1],))
+#     printarr(s)
 
+#     ax = axes.flat[0]
+#     plot_trajectory(s, ax)
+    
+# # Generate Trajectories with learned initset
+# for i in range(N_TRAJS):
+#     traj = sample_real_trajectory(env, z, q_func, lambda s: action_mask_learned(z(torch.from_numpy(s))), greedy=GREEDY, s0=start_states[i])
+#     s, a, next_s = zip(*traj)
+#     s = np.array(s + (next_s[-1],))
+#     printarr(s)
+
+#     ax = axes.flat[1]
+#     plot_trajectory(s, ax)
+    
+
+# # Generate Trajectories no mask
+# for i in range(N_TRAJS):
+#     traj = sample_real_trajectory(env, z, q_func, lambda s: torch.ones(n_actions), greedy=GREEDY, s0=start_states[i])
+#     s, a, next_s = zip(*traj)
+#     s = np.array(s + (next_s[-1],))
+#     printarr(s)
+
+#     ax = axes.flat[2]
+#     plot_trajectory(s, ax)
+
+# plt.savefig(f'{args.save_path}/trajs-softmax.pdf')
