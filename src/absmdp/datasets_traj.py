@@ -149,8 +149,6 @@ class PinballDatasetTrajectory_(torch.utils.data.Dataset):
         with zipfile.ZipFile(self.zfile_name, 'r') as zfile:
             print('Loading trajectories...')
             self.trajectories = torch.load(zfile.open('transitions.pt'))
-            print('Loading rewards...')
-            self.rewards = torch.load(zfile.open('rewards.pt'))
             nl = list(filter(lambda n: '.png' in n, zfile.namelist()))
         if self.obs_type == 'pixels':
             print(self.num_workers)
@@ -179,7 +177,7 @@ class PinballDatasetTrajectory_(torch.utils.data.Dataset):
         trajectory = [self.__transform_transition(datum) for datum in trajectory]
         length = len(trajectory)
         padding = self.length - length
-        assert padding >= 0 and length > 0
+        assert padding >= 0 and length > 0, f'Padding {padding}, Traj Length {length}, Buffer Length {self.length}'
 
         s, a, next_s, rewards, done, executed, duration, initsets, _, p0 = zip(*trajectory)
         s = torch.stack(list(s) + [torch.zeros_like(s[0]) for _ in range(padding)])

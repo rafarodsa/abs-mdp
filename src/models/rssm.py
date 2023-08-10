@@ -22,7 +22,7 @@ class RSSM(nn.Module):
             batch_size = 1
 
         if hidden is None:
-            if self.training:
+            if self.training or batched:
                 hidden = self._init_state(batch_size=batch_size, batched=batched)
                 hidden = hidden.to(input.get_device())
             else:
@@ -31,6 +31,7 @@ class RSSM(nn.Module):
         else:
             assert len(hidden.shape) == 2
             assert hidden.shape[-1] == self.hidden_dim
+        print(f"training {self.training}")
         h, last_hidden = self.gru(input, hidden)
         self.last_hidden = last_hidden
         z = self.transition(F.relu(h))
@@ -45,7 +46,7 @@ class RSSM(nn.Module):
             batch_size = 1
 
         if hidden is None:
-            if self.training:
+            if self.training or batched:
                 hidden = self._init_state(batch_size=batch_size, batched=batched)
                 hidden = hidden.to(input.get_device())
             else:

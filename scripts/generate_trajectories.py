@@ -126,6 +126,7 @@ if __name__== "__main__":
     s = np.array(list(map(lambda x: x['state'], info)))
     next_s = np.array(list(map(lambda x: x['next_state'], info)))
 
+    __errors = []
     
     for i in range(len(options)):
         idx = np.array(option_n) == i
@@ -155,18 +156,26 @@ if __name__== "__main__":
         }
         
         #### PLOT TEST
+        _effects = [np.array([[0, -1/args.grid_size]]),
+                    np.array([[0, 1/args.grid_size]]),
+                    np.array([[-1/args.grid_size, 0]]),
+                    np.array([[1/args.grid_size, 0]])]
 
         s_not_executed = s[idx][_executed==0]
         next_s_not_executed = next_s[idx][_executed==0]
+        predicted_next_s = s_not_executed[:, :2] + _effects[i]
         lines = np.vstack([s_not_executed[None], next_s_not_executed[None]])
+
+        __errors.append((s_not_executed, predicted_next_s, next_s_not_executed))
+
         print(s_not_executed)
-        # import ipdb
-        # ipdb.set_trace()
+        print(predicted_next_s)
         plt.scatter(s_not_executed[:, 0], s_not_executed[:, 1], s=5, c='r')
-        plt.scatter(next_s_not_executed[:, 0], next_s_not_executed[:, 1], s=5, c='g')
-        line_type = ['-', '--', ':', '-.']
-        for j in range(s_not_executed.shape[0]):
-            plt.plot(lines[:, j, 0], lines[:, j, 1], c='k', linestyle=line_type[i])
+        # plt.scatter(predicted_next_s[:, 0], predicted_next_s[:, 1], s=5, c='b')
+        # plt.scatter(next_s_not_executed[:, 0], next_s_not_executed[:, 1], s=5, c='g')
+        # line_type = ['-', '--', ':', '-.']
+        # for j in range(s_not_executed.shape[0]):
+            # plt.plot(lines[:, j, 0], lines[:, j, 1], c='k', linestyle=line_type[i])
 
         print(f'--------Option-{i}: {options_desc[i]}---------')
         print(f"Executed {n_executions}/{_executed.shape[0]} times ({n_executions/_executed.shape[0]})")
@@ -180,7 +189,7 @@ if __name__== "__main__":
         'options': options_desc,
         'stats': stats
     }
-
+    torch.save(__errors, 'errors.pt')
     obstacles = [np.array(o.points + [o.points[0]]) for o in env.get_obstacles()]
     def plot_obstacles(ax=None):
         ax = ax if ax is not None else plt

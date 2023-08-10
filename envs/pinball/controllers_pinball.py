@@ -11,6 +11,8 @@ from scipy.special import erf, softmax
 from src.options.option import Option
 from functools import partial
 from gym import spaces
+
+from src.utils.printarr import printarr
 ### Control Position
 
 ### Initiation Sets and Terminations
@@ -24,63 +26,24 @@ def ball_collides(pinball_env, initial_position, final_position):
     """ 
         Detects collision at position
     """
-    ball_radius = pinball_env.pinball.ball.radius * 1.5
-    # ball_radius = 0.01
-    # print(ball_radius)
-    for obstacle in pinball_env.get_obstacles():
-        if _intersect_obstable(obstacle, initial_position, final_position, ball_radius=ball_radius):
-            # print(f'Obstacle intersected: {initial_position}->{final_position}')
+    # add batch dim
+    if len(initial_position.shape) == 1:
+        initial_position = initial_position[None]
+    if len(final_position.shape) == 1:
+        final_position = final_position[None]
+    ball_radius = pinball_env.pinball.ball.radius
+    for obstacle, expansion in zip(pinball_env.vertices, pinball_env.expanded_obs):
+        inside_expansion = False #pinball_env._inside_polygon(expansion, final_position) 
+        if np.any(_intersect_obstable(obstacle, initial_position, final_position, ball_radius=ball_radius)) or inside_expansion:
             return True
     return False
 
-def _intersect_obstable(obstacle, initial_position, final_position, ball_radius=0.02):
-    points = obstacle.points
-    
-    a, b = tee(np.vstack([np.array(points), points[0]]))
-    next(b, None)
-
-    import matplotlib.pyplot as plt
-    def plot_polygon(points):
-        points = np.vstack([np.array(points), points[0]])
-        plt.plot(points[:, 0], points[:, 1], 'k-')
-        
-    
-    for edge in zip(a, b):
-        alpha, beta = _intersect(edge, initial_position, final_position, ball_rad=ball_radius)
-        if alpha <= 1 and alpha >= 0 and beta >= 0 and beta <= 1:
-            return True
-    return False
-
-def _intersect(edge, initial_position, final_position, ball_rad=0.02, overshoot=0.06):
-    final_position = np.array(final_position)
-    initial_position = np.array(initial_position)
-    displacement = final_position - initial_position
-    d = np.linalg.norm(displacement) + 1e-12
-    # final_position += displacement/d * overshoot
-    final_position += displacement / d * ball_rad * 1.5
-    # initial_position -= displacement/d * ball_rad * 1.5
-    displacement = final_position-initial_position
-
-
-    # displacement = 0.2 * displacement + displacement
-    edge = np.array(edge)
-    edge_segment = edge[1]-edge[0]
-    edge_vector = edge_segment/np.linalg.norm(edge_segment)
-    edge[1] += edge_vector * ball_rad
-    edge[0] -= edge_vector * ball_rad
-    edge_segment = edge[1]-edge[0]
-
-    b = edge[0] - initial_position
-    # print(displacement, edge_segment, b)
-    A = np.vstack([displacement, -edge_segment]).T
-    try:
-        coeff = np.linalg.solve(A, b)
-        alpha, beta = coeff[0], coeff[1]
-        # print(f'alpha = {alpha}, beta = {beta}')
-        # print(f'intersection point = {initial_position + alpha*displacement}, {edge[0] + beta*edge_segment}')
-    except np.linalg.LinAlgError:
-        alpha, beta = np.float('inf'), np.float('inf')
-    return alpha, beta
+def _intersect_obstable(obstacle, initial_position, final_position, ball_radius=0.02, eps=1e-1):
+    edges = np.stack([obstacle[:-1], obstacle[1:]], axis=-1)
+    alpha, beta = _intersect_batch(edges, initial_position, final_position, ball_rad=ball_radius)
+    _intersections = np.logical_and(np.logical_and(alpha <= 1+eps, alpha >= -eps), np.logical_and(beta >= -eps, beta <= 1+eps)) # [M, N]
+    theres_collision = np.any(_intersections, axis=0).reshape(-1, 3) # N
+    return np.any(theres_collision, -1)
 
 def _intersect_batch(edges, initial_positions, final_positions, ball_rad=0.02):
     '''
@@ -90,22 +53,52 @@ def _intersect_batch(edges, initial_positions, final_positions, ball_rad=0.02):
     '''
     N, M = initial_positions.shape[0], edges.shape[0]
     displacement = final_positions - initial_positions # [N, 2]
-    d = np.linalg.norm(displacement, axis=1) + 1e-12
-    displacement = ball_rad * displacement/d[:, None] + displacement # [N, 2]
-    edge_segment = edges[:, 1] - edges[:, 0] # [M, 2]
-    b = edges[:, np.newaxis, 0] - initial_positions[np.newaxis] # [M, N, 2]
+    d = np.linalg.norm(displacement, axis=1, keepdims=True) # + 1e-12
+    displacement = displacement / d
+    # displacement = ball_rad * displacement/d[:, None] + displacement # [N, 2]
+    # final_positions += displacement / d[:, None] * ball_rad
+    
+    # printarr(displacement)
+    normal_d = np.zeros_like(displacement)
+    normal_d[:, 0] = -displacement[:, 1]
+    normal_d[:, 1] = displacement[:, 0]
+    # normal_d = normal_d/d
+
+    overshoot = 1.
+    final_positions = np.concatenate([final_positions + displacement * ball_rad * overshoot, final_positions + normal_d * ball_rad + displacement * ball_rad*overshoot, final_positions - normal_d * ball_rad + displacement * ball_rad * overshoot], axis=0)
+    initial_positions = np.concatenate([initial_positions, initial_positions + normal_d * ball_rad, initial_positions - normal_d * ball_rad], axis=0)
+    displacement = final_positions - initial_positions # [N, 2]
+    N, M = initial_positions.shape[0], edges.shape[0]
+
+    edge_segment = edges[..., 1] - edges[..., 0] # [M, 2]
+    # edge_vector = edge_segment / np.linalg.norm(edge_segment, axis=-1, keepdims=True)
+    # edges[..., 1] += edge_vector * ball_rad
+    # edges[..., 0] -=  edge_vector * ball_rad   
+    # edge_segment = edges[..., 1] - edges[..., 0] # [M, 2]
+
+    # assert np.allclose(new_edge_segment, edge_segment)
+
+    b = edges[..., 0][:, None] - initial_positions[None] # [M, N, 2]
     
     # repeat displacement and edge_segment to match batch size
-    displacement = np.tile(displacement[np.newaxis], reps=(M, 1, 1)) # [M, N, 2]
-    edge_segment = np.repeat(edge_segment[:, np.newaxis], N, axis=1) # [M, N, 2]
-
-    A = np.concatenate([displacement[:, :, np.newaxis], -edge_segment[:, :, np.newaxis]], axis=2) + 1e-12 # [M, N, 2, 2]
-    A = np.transpose(A, axes=(0, 1, 3, 2)) # [M, N, 2, 2]
-    # invert batch of matrices
-    A_inv = np.linalg.inv(A) # [M, N, 2, 2]
-    # compute coefficients
-    coeff = np.einsum('mnij, mnj -> mni', A_inv, b) # [M, N, 2]
+    displacement = np.tile(displacement[np.newaxis], reps=(M, 1, 1)) + 1e-8 # [M, N, 2]
+    edge_segment = np.repeat(edge_segment[:, np.newaxis], N, axis=1) + 1e-8 # [M, N, 2]
+    A = np.stack([-edge_segment, displacement], axis=-1)
+    coeff = np.linalg.solve(A, b)
     alpha, beta = coeff[:, :, 0], coeff[:, :, 1] # [M, N]
+    
+    # printarr(initial_positions, displacement, edges, edge_segment, A, coeff)
+    _i = initial_positions[None].repeat(M, axis=0)
+    intersects_0 = _i + beta[..., None] * displacement
+    _e = edges[..., 0][:, None].repeat(N, axis=1)
+    intersects_1 = _e + alpha[..., None] * edge_segment
+
+    # import ipdb
+    # ipdb.set_trace()
+
+    # print(intersects_0)
+    assert np.allclose(intersects_0, intersects_1)  
+    # print(coeff)
     return alpha, beta
 
 

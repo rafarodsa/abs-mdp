@@ -24,6 +24,7 @@ class GoalPinballModel(PinballModel):
         self.target_pos = target_pos
 
     def set_initial_pos(self, start_pos):
+        print(self.ball.radius)
         self._ball_rad = self.ball.radius
         self.ball = BallModel(start_position=start_pos, radius=self._ball_rad)
     
@@ -60,14 +61,14 @@ class PinballEnv(gym.Env):
             vertices = np.array(vertices)
             self.vertices.append(vertices)
 
-        self.expanded_obs = self._expand_obstacles(ball_rad=self.pinball.ball.radius)
+        self.expanded_obs = self._expand_obstacles(ball_rad=self.pinball.ball.radius * 1.25)
 
-        # # plot obstacles
-        # f, ax = plt.subplots()
-        # for n_obs, obs in zip(new_obs, self.vertices[4:]):
-        #     ax.plot(obs[:, 0], obs[:, 1], c='k')
-        #     ax.plot(n_obs[:, 0], n_obs[:, 1], c='r')
-        # plt.savefig('obstacles.png')
+        # plot obstacles
+        f, ax = plt.subplots()
+        for n_obs, obs in zip(self.expanded_obs, self.vertices):
+            ax.plot(obs[:, 0], obs[:, 1], c='k')
+            ax.plot(n_obs[:, 0], n_obs[:, 1], c='r')
+        plt.savefig('obstacles.png')
         
         if start_pos:
             self.pinball.set_initial_pos(start_pos)
@@ -128,12 +129,12 @@ class PinballEnv(gym.Env):
         pos = np.vstack(all_points)[:N]
         return np.concatenate([pos, vels], axis=-1)
     
-    def _expand_obstacles(self, ball_rad=0.02):
+    def _expand_obstacles(self, ball_rad=0.04):
         '''
             Assume that vertices are given in CW order.
         '''
         new_obs = []
-        for obs in self.vertices[4:]:
+        for obs in self.vertices:
             vtx = np.array(obs)
             edges = vtx[1:] - vtx[:-1]
             normals = np.zeros_like(edges)
@@ -144,23 +145,30 @@ class PinballEnv(gym.Env):
             assert np.allclose(np.diag(edges @ normals.T), np.zeros(edges.shape[0]))
             assert np.allclose(np.linalg.norm(normals, axis=-1), np.ones(normals.shape[0]))
 
-            vtxs = vtx[:-1] + 0.5 * ball_rad * normals + 0.5 * ball_rad * np.roll(normals, 1, axis=0)
-            vtxs = np.vstack([vtxs, vtxs[0]])
-            new_vtxs = vtxs
+            # vtxs = vtx[:-1] + ball_rad * normals + ball_rad * np.roll(normals, 1, axis=0)
+            # vtxs = np.vstack([vtxs, vtxs[0]])
+            # new_vtxs = vtxs
+            
+            # printarr(vtx)
+            vtxs = np.stack([vtx[:-1], vtx[1:]], axis=-1) + normals[..., None] * ball_rad # (N, 2, 2)
+            new_edges = vtxs[..., 1] - vtxs[..., 0] # (N, 2)
+            assert np.allclose(edges, new_edges)
+            pivots = np.concatenate([vtxs, vtxs[0:1]], axis=0)
+            b = pivots[:-1, :, 0] - pivots[1:, :, 0]
+            line_vectors = np.vstack([edges, edges[0]]) # (N+1, 2)
+            A = np.stack([-line_vectors[:-1], line_vectors[1:]], axis=-1) # (N, 2, 2)
+            coeffs = np.linalg.solve(A, b) # (N, 2)
+            new_vtxs = pivots[:-1, :, 0] + coeffs[:, 0:1] * line_vectors[:-1]
+            _new_vtxs = pivots[1:, :, 0] + coeffs[:, 1:] * line_vectors[1:]
+            assert np.allclose(new_vtxs, _new_vtxs)
 
-            # b = -edges # (2, N)
-            # line_vectors = np.vstack([edges, edges[0]]) # N+1
-            # A = np.stack([-line_vectors[:-1], line_vectors[1:]], axis=-1) # (N, 2, 2)
-            # printarr(b, A, line_vectors, vtxs, edges, vtx)
-            # coeffs = np.linalg.solve(A, b) # (N, 2)
-            # new_vtxs = vtxs[:-1] + coeffs[:, 0:1] * edges
-            # new_vtxs = np.vstack([new_vtxs, new_vtxs[0]])
+            new_vtxs = np.vstack([new_vtxs, new_vtxs[0]])
 
             new_obs.append(new_vtxs)
         return new_obs
 
 
-    def _inside_polygon(self,vertices, points, eps=1e-7):
+    def _inside_polygon(self, vertices, points, eps=1e-7):
         '''
             vertices: array (N, 2)
             points: array (M, 2)
@@ -191,29 +199,12 @@ class PinballEnv(gym.Env):
 
         on_segment_line = np.logical_and(on_segment[..., 0], on_segment[..., 1])
         on_boundary = np.logical_and(on_segment_line, np.abs(alpha[..., 0]-alpha[..., 1]) < tol).sum(-1) != 0
-
-        # printarr(x, betas, dirs, sign_x, sign_y, crossings, n_crossings)
-        # print(sign_y)
-        # print("beta", betas)
-        # print("x", x)
-        # print(y_sign)
-        # print(v[..., 1])
-        # print(vertices)
         on_boundary = np.logical_or(on_boundary, np.logical_or(on_segment_hor, on_segment_ver))
         crossings = np.mod(crossings, 2) != 0
         return np.logical_or(crossings, on_boundary)
 
     def _get_points_outside_obstacles(self, points):
         points_mask = np.zeros(points.shape[0], dtype=np.bool8)
-        # for obstacle in self._obstacles_cw[4:]:
-        #     in_obstacle = obstacle.contains_points(points, radius=self.pinball.ball.radius+1e-9)
-        #     # in_obstacle = obstacle.contains_points(points, radius=-1e-9)
-        #     points_mask = np.logical_or(in_obstacle, points_mask)
-        # for obstacle in self._obstacles_ccw:
-        #     in_obstacle = obstacle.contains_points(points, radius=self.pinball.ball.radius-1e-9)
-        #     # in_obstacle = obstacle.contains_points(points, radius=1e-9)
-        #     points_mask = np.logical_or(in_obstacle, points_mask)
-        # for i, vtx in enumerate(self.vertices[4:]):
         for i, vtx in enumerate(self.expanded_obs):
             in_obstacle = self._inside_polygon(vtx, points)
             points_mask = np.logical_or(in_obstacle, points_mask)

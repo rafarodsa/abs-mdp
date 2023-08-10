@@ -73,9 +73,21 @@ class RSSMAbstraction(pl.LightningModule):
         tpc_loss = self.tpc_loss(z, next_z, next_z_dist, min_length=lengths.min())
         # tpc_loss = torch.zeros(10)
         # initsets
-        initset_pred = self.initsets(z[_mask])
-        initset_loss = F.binary_cross_entropy_with_logits(initset_pred, initset_s[_mask], reduction='none').mean(-1)
+        # initset_pred = self.initsets(z[_mask])
+        # initset_loss = F.binary_cross_entropy_with_logits(initset_pred, initset_s[_mask], reduction='none').mean(-1)
+        initset_loss = self.initset_loss(z[_mask], initset_s[_mask])
         return grounding_loss.mean(), transition_loss.mean(), tpc_loss.mean(), initset_loss.mean(), reward_loss.mean(), tau_loss.mean()
+
+
+    def initset_loss(self, z, initset_target):
+        pos_samples = initset_target[initset_target==1].float()
+        n_pos = pos_samples.sum(0)
+        n_neg = initset_target.shape[0] - n_pos
+        pos_weight = torch.where(n_pos > 0, n_pos / n_neg, 1.)
+
+        initset_pred = self.initsets(z)
+        initset_loss = F.binary_cross_entropy_with_logits(initset_pred, initset_target, reduction='none', pos_weight=pos_weight).mean(-1)
+        return initset_loss
 
 
     def step(self, batch, batch_idx):
