@@ -61,7 +61,7 @@ class PinballEnv(gym.Env):
             vertices = np.array(vertices)
             self.vertices.append(vertices)
 
-        self.expanded_obs = self._expand_obstacles(ball_rad=self.pinball.ball.radius * 1.25)
+        self.expanded_obs = self._expand_obstacles(ball_rad=self.pinball.ball.radius * 1.10)
 
         # plot obstacles
         f, ax = plt.subplots()

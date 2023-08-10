@@ -24,6 +24,12 @@ from PIL import Image
 from src.absmdp.datasets import ObservationImgFile as ObservationFile
 
 import matplotlib.pyplot as plt
+import yaml
+
+def plot_obstacles(obstacles, ax=None):
+    ax = ax if ax is not None else plt
+    for o in obstacles:
+        ax.plot(o[:, 0], o[:, 1], c='k')
 
 def preprocess_img(img_array):
     img = (img_array * 255).astype(np.uint8)
@@ -84,6 +90,7 @@ if __name__== "__main__":
     args = parser.parse_args()
 
     dir, name = os.path.split(args.save_path)
+    name, ext = os.path.splitext(name)
     os.makedirs(dir, exist_ok=True)
     zfile = zipfile.ZipFile(args.save_path, 'w')
     ######## DATA GENERATION #######
@@ -112,6 +119,15 @@ if __name__== "__main__":
     if args.observation == 'pixel':
         trajectories = save_and_compress(trajectories, zfile)
 
+
+    trajectories_len = np.array(list(map(len, trajectories)))
+    idx = list(map(int, np.nonzero(trajectories_len >= 0)[0]))
+    print(f'Filtering out {len(trajectories) - (trajectories_len >= 0).sum()} trajectories that have length 0')
+    trajectories = [trajectories[i] for i in idx]
+
+    print(f'Trajectories mean length {trajectories_len.mean()}')
+    print(f'Trajectories max length {trajectories_len.max()}')
+    print(f'Trajectories min length {trajectories_len.min()}')
 
     ##### Print dataset statistics
     transition_samples = reduce(lambda x, acc: x + acc, trajectories, [])
@@ -144,15 +160,16 @@ if __name__== "__main__":
         state_change_mean, state_change_std = state_change.mean(0), state_change.std(0)
 
         stats[i] = {
-            'prob_executions': n_executions,
-            'avg_duration': avg_duration,
-            'avg_reward': option_rewards.mean(),
-            'min_reward': option_rewards.min(),
-            'max_reward': option_rewards.max(),
-            'state_change_min': state_change_min,
-            'state_change_max': state_change_max,
-            'state_change_mean': state_change_mean,
-            'state_change_std': state_change_std
+            'prob_executions': float(n_executions/_executed.shape[0]),
+            'n_executions_tries': int(_executed.shape[0]),
+            'avg_duration': float(avg_duration),
+            'avg_reward': option_rewards.mean().item(),
+            'min_reward': option_rewards.min().item(),
+            'max_reward': option_rewards.max().item(),
+            'state_change_min': state_change_min.tolist(),
+            'state_change_max': state_change_max.tolist(),
+            'state_change_mean': state_change_mean.tolist(),
+            'state_change_std': state_change_std.tolist(),
         }
         
         #### PLOT TEST
@@ -164,18 +181,28 @@ if __name__== "__main__":
         s_not_executed = s[idx][_executed==0]
         next_s_not_executed = next_s[idx][_executed==0]
         predicted_next_s = s_not_executed[:, :2] + _effects[i]
-        lines = np.vstack([s_not_executed[None], next_s_not_executed[None]])
+        lines = np.vstack([s_not_executed[..., :2][None], predicted_next_s[None]])
 
         __errors.append((s_not_executed, predicted_next_s, next_s_not_executed))
 
-        print(s_not_executed)
+        print(s_not_executed[:, :2])
         print(predicted_next_s)
+        print(next_s_not_executed[:, :2])
+
+        f, ax = plt.subplots()
         plt.scatter(s_not_executed[:, 0], s_not_executed[:, 1], s=5, c='r')
-        # plt.scatter(predicted_next_s[:, 0], predicted_next_s[:, 1], s=5, c='b')
+        plt.scatter(predicted_next_s[:, 0], predicted_next_s[:, 1], s=5, c='b')
+        plt.scatter(next_s_not_executed[:, 0], next_s_not_executed[:, 1], s=5, c='g')
+
+        for j in range(predicted_next_s.shape[0]):
+            circle = plt.Circle(predicted_next_s[j], env.pinball.ball.radius, color='b', fill=False)
+            ax.add_artist(circle)
+
+        plot_obstacles(env.expanded_obs, ax)
         # plt.scatter(next_s_not_executed[:, 0], next_s_not_executed[:, 1], s=5, c='g')
-        # line_type = ['-', '--', ':', '-.']
-        # for j in range(s_not_executed.shape[0]):
-            # plt.plot(lines[:, j, 0], lines[:, j, 1], c='k', linestyle=line_type[i])
+        line_type = ['-', '--', ':', '-.']
+        for j in range(s_not_executed.shape[0]):
+            plt.plot(lines[:, j, 0], lines[:, j, 1], c='k', linestyle=line_type[i])
 
         print(f'--------Option-{i}: {options_desc[i]}---------')
         print(f"Executed {n_executions}/{_executed.shape[0]} times ({n_executions/_executed.shape[0]})")
@@ -189,13 +216,29 @@ if __name__== "__main__":
         'options': options_desc,
         'stats': stats
     }
+
+
+    # stats and debug data
+    options_stats = {}
+    options_stats['Option Stats'] = dict(zip(options_desc.values(), stats.values()))
+    options_stats['Trajectory Stats'] = {
+            'mean_length': trajectories_len.mean().item(),
+            'max_length': trajectories_len.max().item(),
+            'min_length': trajectories_len.min().item(),
+            'max_execution_length': args.max_exec_time,
+            'grid_size': args.grid_size,
+            'max_horizon': args.max_horizon,
+            'option_type': args.option_type,
+    }
+    # dump in yaml
+    
+    with open(f'{dir}/{name}_stats.yaml', 'w') as f:
+        yaml.dump(options_stats, f)
+
     torch.save(__errors, 'errors.pt')
     obstacles = [np.array(o.points + [o.points[0]]) for o in env.get_obstacles()]
-    def plot_obstacles(ax=None):
-        ax = ax if ax is not None else plt
-        for o in obstacles:
-            ax.plot(o[:, 0], o[:, 1], c='k')
-    plot_obstacles()
+    
+    plot_obstacles(env.vertices)
     plt.savefig(f'./failures.png')
 
 

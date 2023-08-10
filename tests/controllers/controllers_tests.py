@@ -81,7 +81,7 @@ def tune_pid():
 
 def tune_pid_continuous():
     n=25
-    s0 = np.array([0.804, 0.233, 0.,    0.   ])
+    s0 = np.array([3.786e-01,  7.676e-01, -5.080e-02, -9.339e-02])
     displacement= {
         '-y': np.array([0,-1/n, 0, 0]),
         '+y': np.array([0, 1/n, 0, 0]),
@@ -89,7 +89,7 @@ def tune_pid_continuous():
         '+x': np.array([1/n, 0, 0, 0]),
     }
     print(s0+displacement['-y'])
-    result = test_run_pid_controller_continuous(displacement['-y'],  kp_vel=8., ki_vel=0., kp_pos=50, kd_pos=0., ki_pos=10, s0=s0)
+    result = test_run_pid_controller_continuous(displacement['+x'],  kp_vel=8., ki_vel=0., kp_pos=50, kd_pos=0., ki_pos=10, s0=s0)
     plot_trajectory(result[0], result[-1])
 
 

@@ -37,17 +37,10 @@ def execute_option(env, initial_state, option, obs_type='simple', max_exec_time=
         if t >= max_exec_time and not done:
             timeout = True # option timed out
 
-    if not timeout:
-        duration = t 
-        next_o = np.array(env.render()) if obs_type == 'pixel' else next_s
-    else:
-        # duration = 0
-        # next_o = o
-        # next_s = s
-        # rewards = []
-        duration = t
-        next_o = next_s
-        can_execute = False
+
+    duration = t
+    next_o = np.array(env.render()) if obs_type == 'pixel' else next_s
+    can_execute = not timeout and can_execute
 
     info = {'state': s, 'next_state': next_s, 'done': done}
     return o, next_o, rewards, can_execute, duration, info
@@ -104,6 +97,9 @@ def collect_trajectory(env, options, obs_type='simple', max_exec_time=200, horiz
             initiation_mask_s[option_n] = 0
 
         if np.sum(initiation_mask_s) == 0 and not with_failures:
+            print(f'No options available in {s} at time {t}, setting as terminal state.')
+            if len(trajectory) > 0:
+                trajectory[-1] = trajectory[-1].modify(done=True)
             break # no options available
         if not with_failures:
             option_n = np.random.choice(len(options), p=initiation_mask_s/np.sum(initiation_mask_s)) # sample option uniformly

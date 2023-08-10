@@ -32,9 +32,14 @@ def ball_collides(pinball_env, initial_position, final_position):
     if len(final_position.shape) == 1:
         final_position = final_position[None]
     ball_radius = pinball_env.pinball.ball.radius
-    for obstacle, expansion in zip(pinball_env.vertices, pinball_env.expanded_obs):
-        inside_expansion = False #pinball_env._inside_polygon(expansion, final_position) 
-        if np.any(_intersect_obstable(obstacle, initial_position, final_position, ball_radius=ball_radius)) or inside_expansion:
+    for obstacle in pinball_env.vertices:
+        displacement = final_position - initial_position # [N, 2]
+        d = np.linalg.norm(displacement, axis=1, keepdims=True) # + 1e-12
+        # inside_expansion = pinball_env._inside_polygon(obstacle, final_position + displacement * ball_radius / d) 
+        close_to_vertex = np.any(distances_path_to_vertices(obstacle, initial_position - displacement * ball_radius / d, final_position + displacement * ball_radius / d)[0] <= ball_radius * 1.1, axis=0) 
+        final_pos_close_to_edge = distances_path_to_vertices(final_position + displacement * ball_radius / d, obstacle[:-1], obstacle[1:])[0] <= ball_radius * 1.1
+        final_pos_close_to_edge = np.any(final_pos_close_to_edge, axis=1)
+        if np.any(_intersect_obstable(obstacle, initial_position, final_position, ball_radius=ball_radius)) or close_to_vertex or final_pos_close_to_edge:
             return True
     return False
 
@@ -42,7 +47,7 @@ def _intersect_obstable(obstacle, initial_position, final_position, ball_radius=
     edges = np.stack([obstacle[:-1], obstacle[1:]], axis=-1)
     alpha, beta = _intersect_batch(edges, initial_position, final_position, ball_rad=ball_radius)
     _intersections = np.logical_and(np.logical_and(alpha <= 1+eps, alpha >= -eps), np.logical_and(beta >= -eps, beta <= 1+eps)) # [M, N]
-    theres_collision = np.any(_intersections, axis=0).reshape(-1, 3) # N
+    theres_collision = np.any(_intersections, axis=0) #.reshape(-1, 3) # N
     return np.any(theres_collision, -1)
 
 def _intersect_batch(edges, initial_positions, final_positions, ball_rad=0.02):
@@ -64,10 +69,10 @@ def _intersect_batch(edges, initial_positions, final_positions, ball_rad=0.02):
     normal_d[:, 1] = displacement[:, 0]
     # normal_d = normal_d/d
 
-    overshoot = 1.
-    final_positions = np.concatenate([final_positions + displacement * ball_rad * overshoot, final_positions + normal_d * ball_rad + displacement * ball_rad*overshoot, final_positions - normal_d * ball_rad + displacement * ball_rad * overshoot], axis=0)
-    initial_positions = np.concatenate([initial_positions, initial_positions + normal_d * ball_rad, initial_positions - normal_d * ball_rad], axis=0)
-    displacement = final_positions - initial_positions # [N, 2]
+    # overshoot = 0.
+    # final_positions = np.concatenate([final_positions + displacement * ball_rad * overshoot, final_positions + normal_d * ball_rad + displacement * ball_rad*overshoot, final_positions - normal_d * ball_rad + displacement * ball_rad * overshoot], axis=0)
+    # initial_positions = np.concatenate([initial_positions, initial_positions + normal_d * ball_rad, initial_positions - normal_d * ball_rad], axis=0)
+    displacement = final_positions + displacement * ball_rad  - initial_positions # [N, 2]
     N, M = initial_positions.shape[0], edges.shape[0]
 
     edge_segment = edges[..., 1] - edges[..., 0] # [M, 2]
@@ -93,13 +98,29 @@ def _intersect_batch(edges, initial_positions, final_positions, ball_rad=0.02):
     _e = edges[..., 0][:, None].repeat(N, axis=1)
     intersects_1 = _e + alpha[..., None] * edge_segment
 
-    # import ipdb
-    # ipdb.set_trace()
-
-    # print(intersects_0)
     assert np.allclose(intersects_0, intersects_1)  
-    # print(coeff)
     return alpha, beta
+
+
+def distances_path_to_vertices(vertices, initial_position, final_position, eps=0.1):
+    n = final_position - initial_position # (M, 2)
+    segment_length = np.linalg.norm(n, axis=-1, keepdims=True)
+    n = n / segment_length
+
+    i_to_vtx = vertices[:, None] - initial_position[None]  # (Vertices, lines, 2)
+    
+    coeff = np.einsum('ijd, ijd -> ij', i_to_vtx, n[None])[..., None] # (Vertices, lines, 1)
+    projection = initial_position[None] + coeff  * n[None] # (Vertices, lines, 2)
+    # print(projection[0])
+    # distance = np.linalg.norm(i_to_vtx - projection, axis=-1) # (Vertices, lines)
+    normal = projection - vertices[:, None]
+    # print(normal[0])
+    distance = np.linalg.norm(normal, axis=-1)
+    # printarr(i_to_vtx, projection, distance, coeff, segment_length, n, normal)
+    coeff = coeff[..., 0] / segment_length[None,..., 0]
+    in_segment = np.logical_and(coeff <= 1+eps, coeff >= -eps)
+    distance[~in_segment] = np.inf
+    return distance, in_segment
 
 
 def initiation_set_batch(pinball_env, distance):
@@ -130,9 +151,6 @@ def ball_collides_batch(edges, initial_positions, final_positions, ball_radius=0
     _intersections = np.logical_and(np.logical_and(alpha <= 1, alpha >= 0), np.logical_and(beta >= 0, beta <= 1)) # [M, N]
     theres_collision = np.any(_intersections, axis=0) # N
     return theres_collision
-
-
-
 
 def termination_position(init_state, distance, std_dev=0.001):
     """
