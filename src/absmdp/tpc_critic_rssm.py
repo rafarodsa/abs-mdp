@@ -23,6 +23,8 @@ import logging
 from src.utils.printarr import printarr
 
 class RSSMAbstraction(pl.LightningModule):
+    INITSET_CLASS_THRESH = 0.65
+
     def __init__(self, cfg: TrainerConfig):
         super().__init__()
         oc.resolve(cfg)
@@ -80,11 +82,12 @@ class RSSMAbstraction(pl.LightningModule):
 
 
     def initset_loss(self, z, initset_target):
-        pos_samples = initset_target[initset_target==1].float()
+        pos_samples = (initset_target==1).float()
         n_pos = pos_samples.sum(0)
         n_neg = initset_target.shape[0] - n_pos
-        pos_weight = torch.where(n_pos > 0, n_pos / n_neg, 1.)
-
+        
+        pos_weight = torch.where(n_pos > 0, n_neg / n_pos, 1.)
+        # printarr(pos_samples, n_pos, n_neg, pos_weight)
         initset_pred = self.initsets(z)
         initset_loss = F.binary_cross_entropy_with_logits(initset_pred, initset_target, reduction='none', pos_weight=pos_weight).mean(-1)
         return initset_loss
@@ -184,7 +187,7 @@ class RSSMAbstraction(pl.LightningModule):
         z = self.encoder(s)
         t_in = torch.cat([z, a], dim=-1)
         next_z = self.transition.distribution(t_in).mean + z
-        initset_pred = (torch.sigmoid(self.initsets(z[_mask])) >= 0.5).float()
+        initset_pred = (torch.sigmoid(self.initsets(z[_mask])) > self.INITSET_CLASS_THRESH).float()
         initset_acc = (initset_pred == initset_s[_mask]).float().mean()
 
         nll_loss = self.grounding_loss(next_z[_mask], next_s[_mask]).mean()
@@ -212,7 +215,7 @@ class RSSMAbstraction(pl.LightningModule):
         z = self.encoder(s)
         t_in = torch.cat([z, a], dim=-1)
         next_z = self.transition.distribution(t_in).mean + z
-        initset_pred = (torch.sigmoid(self.initsets(z[_mask])) >= 0.5).float()
+        initset_pred = (torch.sigmoid(self.initsets(z[_mask])) > self.INITSET_CLASS_THRESH).float()
         initset_acc = (initset_pred == initset_s[_mask]).float().mean()
 
         nll_loss = self.grounding_loss(next_z[_mask], next_s[_mask]).mean()

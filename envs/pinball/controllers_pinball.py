@@ -39,7 +39,8 @@ def ball_collides(pinball_env, initial_position, final_position):
         close_to_vertex = np.any(distances_path_to_vertices(obstacle, initial_position - displacement * ball_radius / d, final_position + displacement * ball_radius / d)[0] <= ball_radius * 1.1, axis=0) 
         final_pos_close_to_edge = distances_path_to_vertices(final_position + displacement * ball_radius / d, obstacle[:-1], obstacle[1:])[0] <= ball_radius * 1.1
         final_pos_close_to_edge = np.any(final_pos_close_to_edge, axis=1)
-        if np.any(_intersect_obstable(obstacle, initial_position, final_position, ball_radius=ball_radius)) or close_to_vertex or final_pos_close_to_edge:
+        intersect = np.any(_intersect_obstable(obstacle, initial_position, final_position, ball_radius=ball_radius)) 
+        if intersect or close_to_vertex or final_pos_close_to_edge:
             return True
     return False
 
@@ -89,16 +90,30 @@ def _intersect_batch(edges, initial_positions, final_positions, ball_rad=0.02):
     displacement = np.tile(displacement[np.newaxis], reps=(M, 1, 1)) + 1e-8 # [M, N, 2]
     edge_segment = np.repeat(edge_segment[:, np.newaxis], N, axis=1) + 1e-8 # [M, N, 2]
     A = np.stack([-edge_segment, displacement], axis=-1)
-    coeff = np.linalg.solve(A, b)
-    alpha, beta = coeff[:, :, 0], coeff[:, :, 1] # [M, N]
+    try:
+        coeff = np.linalg.solve(A, b)
+        alpha, beta = coeff[:, :, 0], coeff[:, :, 1] # [M, N]
     
-    # printarr(initial_positions, displacement, edges, edge_segment, A, coeff)
-    _i = initial_positions[None].repeat(M, axis=0)
-    intersects_0 = _i + beta[..., None] * displacement
-    _e = edges[..., 0][:, None].repeat(N, axis=1)
-    intersects_1 = _e + alpha[..., None] * edge_segment
+        # printarr(initial_positions, displacement, edges, edge_segment, A, coeff)
+        _i = initial_positions[None].repeat(M, axis=0)
+        intersects_0 = _i + beta[..., None] * displacement
+        _e = edges[..., 0][:, None].repeat(N, axis=1)
+        intersects_1 = _e + alpha[..., None] * edge_segment
 
-    assert np.allclose(intersects_0, intersects_1)  
+        assert np.allclose(intersects_0, intersects_1)  
+       
+    except np.linalg.LinAlgError as e:
+        DET_EPS = 1e-8
+        det = np.linalg.det(A)
+        non_sing_matrices = np.abs(det) > DET_EPS
+        coeff = np.linalg.solve(A[non_sing_matrices], b[non_sing_matrices])
+
+        alpha = np.zeros((M, N)) + np.inf 
+        alpha[non_sing_matrices] = coeff[..., 0]
+        beta = np.zeros((M, N)) + np.inf 
+        beta[non_sing_matrices] = coeff[..., 1]
+
+    
     return alpha, beta
 
 
@@ -287,7 +302,7 @@ def create_position_options(env, translation_distance=1/15, std_dev=0.01):
     '''
     position_options = []
     controller_factory = position_controller_factory
-    std_dev_vel = translation_distance/5/4  #0.01
+    std_dev_vel = translation_distance/5/3  #0.01
     for y in [-1., 1.]:
         distance = np.array([0., y*translation_distance, 0., 0.])
         o = Option(initiation_set(env, distance[:2]),

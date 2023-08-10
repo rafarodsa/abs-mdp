@@ -28,7 +28,7 @@ loss:
   initset_const: 1
   n_samples: 1
 data:
-  data_path: ${experiment_cwd}/data/simple-contv1-failures-no-errors.zip
+  data_path: ${experiment_cwd}/data/cont-v1-25-small.zip
   save_path: ${save_path}
   batch_size: ${batch_size}
   num_workers: 4
@@ -36,7 +36,7 @@ data:
   val_split: 0.1
   test_split: 0.1
   shuffle: True  
-  length: 32
+  length: 64
   n_reward_samples: 5
   n_options: ${model.n_options}
   n_out_feats: 4

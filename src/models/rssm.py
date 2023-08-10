@@ -26,12 +26,11 @@ class RSSM(nn.Module):
                 hidden = self._init_state(batch_size=batch_size, batched=batched)
                 hidden = hidden.to(input.get_device())
             else:
-                # print('using last_hidden state')
                 hidden = self.last_hidden
         else:
             assert len(hidden.shape) == 2
             assert hidden.shape[-1] == self.hidden_dim
-        print(f"training {self.training}")
+
         h, last_hidden = self.gru(input, hidden)
         self.last_hidden = last_hidden
         z = self.transition(F.relu(h))
@@ -50,7 +49,6 @@ class RSSM(nn.Module):
                 hidden = self._init_state(batch_size=batch_size, batched=batched)
                 hidden = hidden.to(input.get_device())
             else:
-                # print('using last_hidden state')
                 hidden = self.last_hidden
         else:
             assert len(hidden.shape) == 2

@@ -23,6 +23,8 @@ import logging
 from src.utils.printarr import printarr
 
 class InfoNCEAbstraction(pl.LightningModule):
+    INITSET_CLASS_THRESH = 0.65
+
     def __init__(self, cfg: TrainerConfig):
         super().__init__()
         oc.resolve(cfg)
@@ -70,8 +72,7 @@ class InfoNCEAbstraction(pl.LightningModule):
         tau_loss = self.duration_loss(duration, z_c, a)
 
         # initsets
-        initset_pred = self.initsets(z)
-        initset_loss = F.binary_cross_entropy_with_logits(initset_pred, initset_s, reduction='none').mean(-1)
+        initset_loss = self.initset_loss(z, initset_s)
         # printarr(info_loss_z, infomax_loss, transition_loss, z_norm, initset_loss)
         return grounding_loss.mean(), transition_loss.mean(), tpc_loss.mean(), initset_loss.mean(), reward_loss.mean(), tau_loss.mean()
 
@@ -102,6 +103,18 @@ class InfoNCEAbstraction(pl.LightningModule):
         # logger.debug(f'Losses: {logs}')
         return loss, logs
 	
+
+    def initset_loss(self, z, initset_target):
+        pos_samples = (initset_target==1).float()
+        n_pos = pos_samples.sum(0)
+        n_neg = initset_target.shape[0] - n_pos
+        
+        pos_weight = torch.where(n_pos > 0, n_neg / n_pos, 1.)
+        # printarr(pos_samples, n_pos, n_neg, pos_weight)
+        initset_pred = self.initsets(z)
+        initset_loss = F.binary_cross_entropy_with_logits(initset_pred, initset_target, reduction='none', pos_weight=pos_weight).mean(-1)
+        return initset_loss
+
     def consistency_loss(self, z, next_z, action):
         '''
             -log T(z'|z, a) 
@@ -166,7 +179,7 @@ class InfoNCEAbstraction(pl.LightningModule):
         z = self.encoder(s)
         t_in = torch.cat([z, a], dim=-1)
         next_z = self.transition.distribution(t_in).mean + z
-        initset_pred = (torch.sigmoid(self.initsets(z)) >= 0.5).float()
+        initset_pred = (torch.sigmoid(self.initsets(z)) > self.INITSET_CLASS_THRESH).float()
         initset_acc = (initset_pred == initset_s).float().mean()
 
         nll_loss = self.grounding_loss(next_z, next_s).mean()
@@ -192,7 +205,7 @@ class InfoNCEAbstraction(pl.LightningModule):
         t_in = torch.cat([z, a], dim=-1)
         next_z = self.transition.distribution(t_in).mean + z
         nll_loss = self.grounding_loss(next_z, next_s).mean()
-        initset_pred = torch.sigmoid(self.initsets(z)) >= 0.5
+        initset_pred = torch.sigmoid(self.initsets(z)) >= self.INITSET_CLASS_THRESH
         initset_acc = (initset_pred == initset_s).float().mean()
 
         self.log_dict({

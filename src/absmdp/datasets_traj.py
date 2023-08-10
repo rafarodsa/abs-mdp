@@ -149,6 +149,7 @@ class PinballDatasetTrajectory_(torch.utils.data.Dataset):
         with zipfile.ZipFile(self.zfile_name, 'r') as zfile:
             print('Loading trajectories...')
             self.trajectories = torch.load(zfile.open('transitions.pt'))
+            self.trajectories = list(filter(lambda t: len(t) > 0, self.trajectories))
             nl = list(filter(lambda n: '.png' in n, zfile.namelist()))
         if self.obs_type == 'pixels':
             print(self.num_workers)

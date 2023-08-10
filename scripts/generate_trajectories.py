@@ -121,8 +121,8 @@ if __name__== "__main__":
 
 
     trajectories_len = np.array(list(map(len, trajectories)))
-    idx = list(map(int, np.nonzero(trajectories_len >= 0)[0]))
-    print(f'Filtering out {len(trajectories) - (trajectories_len >= 0).sum()} trajectories that have length 0')
+    idx = list(map(int, np.nonzero(trajectories_len > 0)[0]))
+    print(f'Filtering out {len(trajectories) - (trajectories_len > 0).sum()} trajectories that have length 0')
     trajectories = [trajectories[i] for i in idx]
 
     print(f'Trajectories mean length {trajectories_len.mean()}')
