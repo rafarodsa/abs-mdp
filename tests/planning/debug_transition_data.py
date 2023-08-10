@@ -76,6 +76,7 @@ def action_mask_learned(encoded_s):
 ##################
 
 N_SAMPLES = args.n_samples
+STEP_SIZE = 1/25
 n_actions = 4
 latent_dim = 2
 goal = [0.55, 0.06, 0., 0.]
@@ -91,7 +92,7 @@ goal_reward = 1
 
 # create ground env
 env_p = PinballEnvContinuous(config='envs/pinball/configs/pinball_simple_single.cfg')
-options = create_position_options(env_p)
+options = create_position_options(env_p, translation_distance=STEP_SIZE)
 env = EnvOptionWrapper(options, env_p)
 # env = EnvGoalWrapper(env, goal_fn=_grounding_goal_fn(env_sim.env.grounding, env_sim.env.encode), goal_reward=goal_reward)
 
@@ -118,7 +119,11 @@ for i in tqdm(range(states.shape[0])):
     traj = [s]
     env.reset(s) 
     for j in range(length):
-        a = np.random.randint(n_actions)
+        initset = action_mask(s)
+        avail_actions = initset.sum(-1)
+        if avail_actions > 0:
+            a = np.random.choice(a, p=initset/avail_actions)
+
         next_s, _, _, _, _ = env.step(a)
         traj.append(next_s)
     traj = np.array(traj)
