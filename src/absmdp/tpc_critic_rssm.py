@@ -52,7 +52,10 @@ class RSSMAbstraction(pl.LightningModule):
         # printarr(z)
         next_z = self.transition.distribution(t_in).mean + z
         return next_z
-
+    
+    def _get_device(self, x):
+        d = x.get_device()
+        return 'cpu' if d < 0 else f'cuda:{d}'
     def _run_step(self, s, a, next_s, initset_s, reward, duration, lengths):
         
         # sample encoding of (s, s') and add noise
@@ -64,7 +67,7 @@ class RSSMAbstraction(pl.LightningModule):
         next_z  =  next_z_c + torch.randn_like(z) * noise_std 
         
         batch_size, length = s.shape[0], s.shape[1]
-        _mask = torch.arange(length).to(s.get_device()).repeat(batch_size, 1) < lengths.unsqueeze(1)
+        _mask = torch.arange(length).to(self._get_device(s)).repeat(batch_size, 1) < lengths.unsqueeze(1)
         grounding_loss = self.grounding_loss(next_z[_mask], next_s[_mask])
         reward_loss = self.reward_loss(reward[_mask], z_c[_mask], a[_mask], next_z_c[_mask])
         tau_loss = self.duration_loss(duration[_mask], z_c[_mask], a[_mask])

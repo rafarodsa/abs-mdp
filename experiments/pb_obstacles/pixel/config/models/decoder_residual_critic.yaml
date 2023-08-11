@@ -1,8 +1,8 @@
 
 type: conv_residual_critic
 cnn:
-  in_width: 25
-  in_height: 25
+  in_width: 40
+  in_height: 40
   color_channels: 1
   feat_maps: 64
   kernel_size: 4

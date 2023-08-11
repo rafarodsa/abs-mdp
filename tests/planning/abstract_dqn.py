@@ -448,16 +448,10 @@ def main():
         eval_env = make_ground_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args, device=device)
         state_dim = 4
         
-
     n_actions = eval_env.action_space.n
     q_func = parse_arch(args.arch, n_actions, state_dim=state_dim)
-
-
-
     
-    
-    if not args.absgroundmdp and not args.finetune and not args.demo:
-        
+    if not args.absgroundmdp and not args.finetune and not args.demo:    
         if not args.use_ground_init:
             init = env.env.init_classifier.to(f'cuda:{args.gpu}') if args.gpu >= 0 else env.env.initiation_set
             def action_mask(s):
@@ -531,7 +525,6 @@ def main():
         phi=lambda x: x,
         minibatch_size=32
     )
-    
 
     if args.load:
         agent.load(args.load)

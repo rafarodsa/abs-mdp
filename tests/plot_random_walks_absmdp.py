@@ -45,7 +45,7 @@ for traj in range(10):
     next_s = s
     for i in range(25):
         s = next_s
-        initset = torch.sigmoid(mdp.initiation_set(torch.from_numpy(s))).numpy() > 0.85
+        initset = torch.sigmoid(mdp.initiation_set(torch.from_numpy(s))).numpy() > 0.5
         actions_avail = np.nonzero(initset)[0]
         n_actions = len(actions_avail)
         if n_actions <= 0:
@@ -53,7 +53,7 @@ for traj in range(10):
         sample = np.random.choice(n_actions)
         a = actions_avail[sample]
         # a = 2
-        next_s, r, d, info = mdp.step(a)
+        next_s, r, d, info = mdp.step(a.item())
 
         t.append((s, a, r, next_s, d, info))
     trajs.append(t)
@@ -63,6 +63,7 @@ goals = np.random.randn(100, 2) * 0.1/3 + goal[np.newaxis]
 
 
 # plt.scatter(goals[:, 0], goals[:, 1], c='g', s=100)
+trajs = [traj for traj in trajs if len(traj) > 0] # filter trajectories with 0
 for t in trajs:
     s, a, r, next_s, d, info = list(zip(*t))
     s = np.array(s)

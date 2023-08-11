@@ -69,6 +69,7 @@ if __name__== "__main__":
     configuration_file = "envs/pinball/configs/pinball_simple_single.cfg"
     num_traj = 100
     observation_type = 'simple'
+    DEBUG = False
 
     ###### CMDLINE ARGUMENTS
 
@@ -182,27 +183,27 @@ if __name__== "__main__":
         next_s_not_executed = next_s[idx][_executed==0]
         predicted_next_s = s_not_executed[:, :2] + _effects[i]
         lines = np.vstack([s_not_executed[..., :2][None], predicted_next_s[None]])
+        if DEBUG:
+            __errors.append((s_not_executed, predicted_next_s, next_s_not_executed))
 
-        __errors.append((s_not_executed, predicted_next_s, next_s_not_executed))
+            print(s_not_executed[:, :2])
+            print(predicted_next_s)
+            print(next_s_not_executed[:, :2])
 
-        print(s_not_executed[:, :2])
-        print(predicted_next_s)
-        print(next_s_not_executed[:, :2])
+            f, ax = plt.subplots()
+            plt.scatter(s_not_executed[:, 0], s_not_executed[:, 1], s=5, c='r')
+            plt.scatter(predicted_next_s[:, 0], predicted_next_s[:, 1], s=5, c='b')
+            plt.scatter(next_s_not_executed[:, 0], next_s_not_executed[:, 1], s=5, c='g')
 
-        f, ax = plt.subplots()
-        plt.scatter(s_not_executed[:, 0], s_not_executed[:, 1], s=5, c='r')
-        plt.scatter(predicted_next_s[:, 0], predicted_next_s[:, 1], s=5, c='b')
-        plt.scatter(next_s_not_executed[:, 0], next_s_not_executed[:, 1], s=5, c='g')
+            for j in range(predicted_next_s.shape[0]):
+                circle = plt.Circle(predicted_next_s[j], env.pinball.ball.radius, color='b', fill=False)
+                ax.add_artist(circle)
 
-        for j in range(predicted_next_s.shape[0]):
-            circle = plt.Circle(predicted_next_s[j], env.pinball.ball.radius, color='b', fill=False)
-            ax.add_artist(circle)
-
-        plot_obstacles(env.expanded_obs, ax)
-        # plt.scatter(next_s_not_executed[:, 0], next_s_not_executed[:, 1], s=5, c='g')
-        line_type = ['-', '--', ':', '-.']
-        for j in range(s_not_executed.shape[0]):
-            plt.plot(lines[:, j, 0], lines[:, j, 1], c='k', linestyle=line_type[i])
+            plot_obstacles(env.expanded_obs, ax)
+            # plt.scatter(next_s_not_executed[:, 0], next_s_not_executed[:, 1], s=5, c='g')
+            line_type = ['-', '--', ':', '-.']
+            for j in range(s_not_executed.shape[0]):
+                plt.plot(lines[:, j, 0], lines[:, j, 1], c='k', linestyle=line_type[i])
 
         print(f'--------Option-{i}: {options_desc[i]}---------')
         print(f"Executed {n_executions}/{_executed.shape[0]} times ({n_executions/_executed.shape[0]})")
@@ -234,12 +235,11 @@ if __name__== "__main__":
     
     with open(f'{dir}/{name}_stats.yaml', 'w') as f:
         yaml.dump(options_stats, f)
-
-    torch.save(__errors, 'errors.pt')
-    obstacles = [np.array(o.points + [o.points[0]]) for o in env.get_obstacles()]
-    
-    plot_obstacles(env.vertices)
-    plt.savefig(f'./failures.png')
+    if DEBUG:
+        torch.save(__errors, 'errors.pt')
+        obstacles = [np.array(o.points + [o.points[0]]) for o in env.get_obstacles()]
+        plot_obstacles(env.vertices)
+        plt.savefig(f'./failures.png')
 
 
     ########### SAVE DATASET ###########

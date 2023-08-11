@@ -234,7 +234,7 @@ class AbstractMDPCritic(gym.Env):
         pass
 
     def step(self, action):
-        action = action.to(self.device)
+        # action = action.to(self.device)
         next_s = self.transition(self.state, action)
         r = self.reward(self.state, action, next_s).item()
         done = False
