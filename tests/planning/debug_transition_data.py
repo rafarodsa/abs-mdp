@@ -122,8 +122,10 @@ for i in tqdm(range(states.shape[0])):
         initset = action_mask(s)
         avail_actions = initset.sum(-1)
         if avail_actions > 0:
-            a = np.random.choice(a, p=initset/avail_actions)
-
+            a = np.random.choice(n_actions, p=initset/avail_actions)
+        else:
+            # terminate episode
+            break
         next_s, _, _, _, _ = env.step(a)
         traj.append(next_s)
     traj = np.array(traj)

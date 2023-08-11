@@ -434,24 +434,16 @@ class PinballViewDistractor(PinballView):
 if __name__=="__main__":
     from matplotlib import pyplot as plt
     import torchvision, torch
-    
-    # load MNIST from torchvision
-    transforms = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])
-    trainset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transforms)
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=1, shuffle=True, num_workers=2)
-    dataiter = [d.expand(3,-1,-1,-1).squeeze().permute(2,1,0).numpy() for d, l in iter(trainloader)]
 
     dataiter =None
-    size = 50
+    size = 45
 
     pinball = PinballDistractors(
                                     config="/Users/rrs/Desktop/abs-mdp/envs/pinball/configs/pinball_simple_single.cfg", 
                                     width=size, 
                                     height=size, 
                                     render_mode="rgb_array",
-                                    distractors=dataiter
                                 )
-    pixel_pinball = PinballPixelWrapper(pinball, n_frames=5)
     pinball.reset()
     imgs = []
     for _  in range(10):

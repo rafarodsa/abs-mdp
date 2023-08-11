@@ -146,7 +146,9 @@ def ground_action_mask(state, device):
 
 
 # goal = [0.9, 0.1, 0., 0.]
-goal = [0.6, 0.5, 0., 0.]
+GOAL = [0.6, 0.5, 0., 0.]
+STEP_SIZE = 1/25
+GOAL_TOL = 0.05
 
 
 def make_env(test=False, test_seed=127, train_seed=255, args=None, device='cpu'):
@@ -158,13 +160,13 @@ def make_env(test=False, test_seed=127, train_seed=255, args=None, device='cpu')
             env = torch.load(args.absmdp)
             env.to(device)
             # env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
-            env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder, goal=goal, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(goal))
+            env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder, goal=GOAL, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(GOAL))
             env.seed(train_seed)
         else:
             env = torch.load(args.absmdp)
             env.to(device)
             # env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
-            env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder, goal=goal, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(goal))
+            env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder, goal=GOAL, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(GOAL))
             env.seed(test_seed)
         if args.monitor:
             env = pfrl.wrappers.Monitor(
@@ -198,11 +200,14 @@ def make_ground_env(test=False, test_seed=0, train_seed=1, args=None, device='cp
         env = PinballEnvContinuous(config='envs/pinball/configs/pinball_simple_single.cfg')
         if args.render:
             env.render_mode = 'human'
-        options = create_position_options(env)
-        env_sim = torch.load(args.absmdp)
-        env_sim.to(device)
+        options = create_position_options(env, translation_distance=STEP_SIZE)
+        
         env = EnvOptionWrapper(options, env)
-        env = EnvGoalWrapper(env, goal_fn=_grounding_goal_fn(env_sim.grounding, env_sim.encoder, goal=goal, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(goal))
+        # env_sim = torch.load(args.absmdp)
+        # env_sim.to(device)
+        # env = EnvGoalWrapper(env, goal_fn=_grounding_goal_fn(env_sim.grounding, env_sim.encoder, goal=goal, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(goal))
+        env = EnvGoalWrapper(env, goal_fn=goal_fn(lambda s: s[..., :2], goal=GOAL, goal_tol=GOAL_TOL), goal_reward=goal_reward, init_state_sampler=init_state_sampler(GOAL))
+       
         env.seed(train_seed)
     else:
         # evaluation in real env
@@ -210,11 +215,12 @@ def make_ground_env(test=False, test_seed=0, train_seed=1, args=None, device='cp
         if args.render:
             env.render_mode = 'human'
         print('cont options')
-        options = create_position_options(env)
+        options = create_position_options(env, translation_distance=STEP_SIZE)
         env = EnvOptionWrapper(options, env)
-        env_sim = torch.load(args.absmdp)
-        env_sim.to(device)
-        env = EnvGoalWrapper(env, goal_fn=_grounding_goal_fn(env_sim.grounding, env_sim.encoder, goal=goal, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(goal))
+        # env_sim = torch.load(args.absmdp)
+        # env_sim.to(device)
+        # env = EnvGoalWrapper(env, goal_fn=_grounding_goal_fn(env_sim.grounding, env_sim.encoder, goal=goal, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(goal))
+        env = EnvGoalWrapper(env, goal_fn=goal_fn(lambda s: s[..., :2], goal=GOAL, goal_tol=GOAL_TOL), goal_reward=goal_reward, init_state_sampler=init_state_sampler(GOAL))
         env.seed(test_seed)
     if args.monitor:
         env = pfrl.wrappers.Monitor(
@@ -415,7 +421,7 @@ def main():
     # Set different random seeds for train and test envs.
     train_seed = args.seed
     test_seed = 2**31 - 1 - args.seed
-    args.goal = tuple(goal)
+    args.goal = tuple(GOAL)
 
     args.outdir = experiments.prepare_output_dir(args, args.outdir, exp_id=args.exp_id, make_backup=False)
     print("Output files are saved in {}".format(args.outdir))

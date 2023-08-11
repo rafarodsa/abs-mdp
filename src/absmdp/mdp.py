@@ -313,7 +313,7 @@ class AbstractMDPCritic(gym.Env):
     @staticmethod
     def load(model, data, rssm=False):
         mdp_elems = AbstractMDPCritic._prepare_models(model)
-        initial_states = torch.stack([d.obs for d in data if d.p0 == 1])
+        initial_states = torch.stack([d.obs for d in data if d.p0 == 1]) if not rssm else torch.stack([d.obs[0] for d in data])
         mdp_elems['initial_states'] = initial_states
         return AbstractMDPCritic(**mdp_elems, rssm=rssm)
     

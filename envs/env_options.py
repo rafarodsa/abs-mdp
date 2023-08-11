@@ -12,7 +12,13 @@ class EnvOptionWrapper(gym.Env):
     def step(self, action):
         option = self.options[action]
         next_s, r, done, truncated, info = self._execute_option(option)
+        done = done or self.action_mask(next_s).sum() == 0
         return next_s.astype(np.float32), r, done, truncated, info
+    
+
+    def action_mask(self, state):
+        initiation = np.array([int(o.initiation(state)) for o in self.options])
+        return initiation
 
     def _execute_option(self, option):
         s = np.array(self.env.state)

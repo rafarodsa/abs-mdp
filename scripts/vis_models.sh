@@ -21,17 +21,21 @@ do
     esac
 done
 
+if [[ -z $BASEDIR ]]; then
+    echo 'ERROR: Missing Experiment dir'
+    exit -1
+fi
+
 
 for i in $(echo "${BASEDIR}*"); do
     echo "$i"
+    if [[ -n $MAKE_MDP ]]; then
+        python scripts/make_absmdp_experiments.py --experiment $i $RSSM
+    fi
+
     if [[ -n $VIS ]]; then
         python scripts/visualize_experiment.py --experiment $i --device $DEVICE $RSSM 
     fi
-
-    if [[ -n $MAKE_MDP ]]; then
-        echo 'MAKEMDP'
-    fi
-
 done
 
 

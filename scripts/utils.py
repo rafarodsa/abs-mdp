@@ -146,6 +146,8 @@ def get_experiment_info(experiment_dir):
         versions = [int(dir.split('_')[-1])  for dir in first_level[1] if 'version' in dir]
         last_version = max(versions)
         config_file = f'{config_path}/version_{last_version}/hparams.yaml'
+    else:
+        raise ValueError(f'Path does not exist {config_file}')
     
     # ckpt
     ckpt_path = f'{experiment_dir}/{MODEL_SUBDIR}/{CKPT_SUBDIR}'
@@ -158,6 +160,10 @@ def get_experiment_info(experiment_dir):
 
         ckpt_name, _ = max(zip(last_versions, version_numbers), key=lambda t: t[-1])
         ckpt_file = f'{ckpt_path}/{ckpt_name}'
+    else:
+        raise ValueError(f'Path does not exist {ckpt_path}')
+
+
     return config_file, ckpt_file
 
 

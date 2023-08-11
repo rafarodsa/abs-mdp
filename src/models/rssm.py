@@ -24,7 +24,8 @@ class RSSM(nn.Module):
         if hidden is None:
             if self.training or batched:
                 hidden = self._init_state(batch_size=batch_size, batched=batched)
-                hidden = hidden.to(input.get_device())
+                device = input.get_device()
+                hidden = hidden.to('cpu' if device < 0 else f'cuda:{device}')
             else:
                 hidden = self.last_hidden
         else:
