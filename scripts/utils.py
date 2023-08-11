@@ -11,6 +11,9 @@ import numpy as np
 
 from src.absmdp.datasets import Transition
 
+import os
+import re
+
 ####### Auxiliary Functions
 
 def execute_option(env, initial_state, option, obs_type='simple', max_exec_time=1000):
@@ -124,3 +127,39 @@ def collect_trajectory(env, options, obs_type='simple', max_exec_time=200, horiz
         
 
     return trajectory
+
+
+
+### File and directory manipulation
+
+CONFIG_SUBDIR = '/logs/infomax-pb'
+CKPT_SUBDIR = 'ckpts'
+MODEL_SUBDIR = 'phi_train'
+LAST_CKPT_REGEX = r'last(-v([0-9])+)?.ckpt'
+def get_experiment_info(experiment_dir):
+    # config file
+    config_file = ''
+    ckpt_file = ''
+    config_path = f'{experiment_dir}/{MODEL_SUBDIR}/{CONFIG_SUBDIR}'
+    if os.path.exists(config_path):
+        first_level = next(os.walk(config_path))
+        versions = [int(dir.split('_')[-1])  for dir in first_level[1] if 'version' in dir]
+        last_version = max(versions)
+        config_file = f'{config_path}/version_{last_version}/hparams.yaml'
+    
+    # ckpt
+    ckpt_path = f'{experiment_dir}/{MODEL_SUBDIR}/{CKPT_SUBDIR}'
+    if os.path.exists(ckpt_path):
+        first_level = next(os.walk(ckpt_path))
+        versions = []
+        last_versions = [file for file in first_level[-1] if 'last' in file]
+        version_numbers = [re.search(LAST_CKPT_REGEX, f)[2] for f in last_versions]
+        version_numbers = list(map(lambda s: 0 if s is None else int(s), version_numbers))
+
+        ckpt_name, _ = max(zip(last_versions, version_numbers), key=lambda t: t[-1])
+        ckpt_file = f'{ckpt_path}/{ckpt_name}'
+    return config_file, ckpt_file
+
+
+def prepare_outdir(outdir):
+    pass
