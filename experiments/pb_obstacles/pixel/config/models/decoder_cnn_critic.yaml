@@ -1,0 +1,18 @@
+
+type: cnn_critic
+cnn:
+  type: doubling_residual
+  in_width: 40
+  in_height: 40
+  color_channels: 1
+  depth: 24
+  cnn_blocks: 2
+  min_resolution: 4
+  mlp_layers: []
+  outdim: 128
+  mlp_activation: silu
+  cnn_activation: silu
+mlp:
+  latent_dim: ${model.latent_dim}
+  hidden_dims: [128,]
+  activation: silu

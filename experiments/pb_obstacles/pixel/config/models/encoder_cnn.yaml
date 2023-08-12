@@ -1,0 +1,13 @@
+
+features:
+  type: doubling_residual
+  in_width: 40
+  in_height: 40
+  color_channels: 1
+  depth: 24
+  cnn_blocks: 2
+  min_resolution: 4
+  mlp_layers: [256, ]
+  outdim: ${model.latent_dim}
+  mlp_activation: silu
+  cnn_activation: silu
