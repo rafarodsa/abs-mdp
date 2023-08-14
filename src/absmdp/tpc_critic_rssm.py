@@ -66,9 +66,9 @@ class RSSMAbstraction(pl.LightningModule):
         z = z + torch.randn_like(z) * noise_std
         next_z  =  next_z_c + torch.randn_like(z) * noise_std 
         
-        batch_size, length = s.shape[0], s.shape[1]
+        batch_size, length, s_shape = s.shape[0], s.shape[1], s.shape[2:]
         _mask = torch.arange(length).to(self._get_device(s)).repeat(batch_size, 1) < lengths.unsqueeze(1)
-        grounding_loss = self.grounding_loss(next_z[_mask], next_s[_mask])
+        grounding_loss = self.grounding_loss(next_z[_mask], next_s[_mask].reshape(-1, *s_shape))
         reward_loss = self.reward_loss(reward[_mask], z_c[_mask], a[_mask], next_z_c[_mask])
         tau_loss = self.duration_loss(duration[_mask], z_c[_mask], a[_mask])
 
@@ -133,7 +133,8 @@ class RSSMAbstraction(pl.LightningModule):
         '''
         b = next_z.shape[:-1]
         b_size = np.prod(b)
-        next_z, next_s = next_z.reshape(b_size, -1), next_s.reshape(b_size, -1)
+        s_shape = next_s.shape[1:]
+        next_z, next_s = next_z.reshape(b_size, -1), next_s.reshape(b_size, *s_shape)
         _next_s = next_s.repeat(b_size, *[1 for _ in range(len(next_s.shape)-1)])
         _next_z = torch.repeat_interleave(next_z, b_size, dim=0)
         _log_t = torch.tanh(self.grounding(_next_s, _next_z).reshape(b_size, b_size)) * 100 #* np.log(b) * 0.5

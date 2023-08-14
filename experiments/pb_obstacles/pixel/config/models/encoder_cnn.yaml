@@ -1,8 +1,8 @@
 
 features:
   type: doubling_residual
-  in_width: 40
-  in_height: 40
+  in_width: 50
+  in_height: 50
   color_channels: 1
   depth: 24
   cnn_blocks: 2

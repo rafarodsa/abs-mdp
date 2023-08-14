@@ -13,7 +13,7 @@ scheduler:
     start_factor: 1.
     end_factor: 1.
     total_iters: 1.
-batch_size: 16 
+batch_size: 2
 epochs: 500
 accelerator: gpu
 devices: 1
