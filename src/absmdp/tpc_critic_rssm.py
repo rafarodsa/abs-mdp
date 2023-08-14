@@ -67,8 +67,11 @@ class RSSMAbstraction(pl.LightningModule):
         next_z  =  next_z_c + torch.randn_like(z) * noise_std 
         
         batch_size, length = s.shape[0], s.shape[1]
+
+
         _mask = torch.arange(length).to(self._get_device(s)).repeat(batch_size, 1) < lengths.unsqueeze(1)
-        grounding_loss = self.grounding_loss(next_z[_mask], next_s[_mask])
+        # grounding_loss = self.grounding_loss(next_z[_mask], next_s[_mask])
+        grounding_loss = self.grounding_loss_normal(next_z[_mask])
         reward_loss = self.reward_loss(reward[_mask], z_c[_mask], a[_mask], next_z_c[_mask])
         tau_loss = self.duration_loss(duration[_mask], z_c[_mask], a[_mask])
 
@@ -76,10 +79,8 @@ class RSSMAbstraction(pl.LightningModule):
         next_z_dist = self.transition.distribution(torch.cat([z, a], dim=-1))
         transition_loss = self.consistency_loss(z, next_z, next_z_dist, mask=_mask)
         tpc_loss = self.tpc_loss(z, next_z, next_z_dist, min_length=lengths.min())
-        # tpc_loss = torch.zeros(10)
+
         # initsets
-        # initset_pred = self.initsets(z[_mask])
-        # initset_loss = F.binary_cross_entropy_with_logits(initset_pred, initset_s[_mask], reduction='none').mean(-1)
         initset_loss = self.initset_loss(z[_mask], initset_s[_mask])
         return grounding_loss.mean(), transition_loss.mean(), tpc_loss.mean(), initset_loss.mean(), reward_loss.mean(), tau_loss.mean()
 
@@ -142,6 +143,20 @@ class RSSMAbstraction(pl.LightningModule):
         return -_loss.reshape(*b)
     
 
+    def grounding_loss_normal(self, next_z, std=0.1):
+        '''
+            critic f(s', z') = exp(||\phi(s')-z'||^2/std^2)
+        '''
+        b = next_z.shape[:-1]
+        b_size = np.prod(b)
+        next_z = next_z.reshape(b_size, -1)
+
+        _norm = ((next_z[:, None, :] - next_z[None, :, :]) / std) ** 2 
+        _norm = -_norm.sum(-1) # b_size x b_size
+        _loss =  torch.diag(_norm) - (torch.logsumexp(_norm, dim=-1) - np.log(b_size))
+        return -_loss.reshape(*b)
+    
+
     def tpc_loss(self, z, next_z, next_z_dist, min_length):
         '''
             -MI(z'; z, a)
@@ -178,6 +193,9 @@ class RSSMAbstraction(pl.LightningModule):
         self.log_dict({f"train_{k}": v for k, v in logs.items()}, on_step=True, on_epoch=False, logger=True)
         return loss
 
+    def get_device(self, s):
+        return s.get_device() if s.get_device() >= 0 else 'cpu'
+
     def validation_step(self, batch, batch_idx):
         s, a, next_s, executed, initset_s, reward, duration, lengths = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets, batch.rewards, batch.duration.float(), batch.length
         # assert torch.all(executed) # check all samples are successful executions.
@@ -185,7 +203,7 @@ class RSSMAbstraction(pl.LightningModule):
         grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths)    
 
         batch_size, length = s.shape[0], s.shape[1]
-        _mask = torch.arange(length).to(s.get_device()).repeat(batch_size, 1) < lengths.unsqueeze(1)
+        _mask = torch.arange(length).to(self.get_device(s)).repeat(batch_size, 1) < lengths.unsqueeze(1)
 
         z = self.encoder(s)
         t_in = torch.cat([z, a], dim=-1)
@@ -193,7 +211,8 @@ class RSSMAbstraction(pl.LightningModule):
         initset_pred = (torch.sigmoid(self.initsets(z[_mask])) > self.INITSET_CLASS_THRESH).float()
         initset_acc = (initset_pred == initset_s[_mask]).float().mean()
 
-        nll_loss = self.grounding_loss(next_z[_mask], next_s[_mask]).mean()
+        # nll_loss = self.grounding_loss(next_z[_mask], next_s[_mask]).mean()
+        nll_loss = self.grounding_loss_normal(next_z[_mask])
 
         logs = {
                 'val_infomax': grounding_loss.mean(),
@@ -213,7 +232,7 @@ class RSSMAbstraction(pl.LightningModule):
         grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths)    
 
         batch_size, length = s.shape[0], s.shape[1]
-        _mask = torch.arange(length).to(s.get_device()).repeat(batch_size, 1) < lengths.unsqueeze(1)
+        _mask = torch.arange(length).to(self._get_device(s)).repeat(batch_size, 1) < lengths.unsqueeze(1)
 
         z = self.encoder(s)
         t_in = torch.cat([z, a], dim=-1)
@@ -221,8 +240,8 @@ class RSSMAbstraction(pl.LightningModule):
         initset_pred = (torch.sigmoid(self.initsets(z[_mask])) > self.INITSET_CLASS_THRESH).float()
         initset_acc = (initset_pred == initset_s[_mask]).float().mean()
 
-        nll_loss = self.grounding_loss(next_z[_mask], next_s[_mask]).mean()
-
+        # nll_loss = self.grounding_loss(next_z[_mask], next_s[_mask]).mean()
+        nll_loss = self.grounding_loss_normal(next_z[_mask])
         self.log_dict({
                        'nll_loss': nll_loss,
                        'initset_acc': initset_acc,

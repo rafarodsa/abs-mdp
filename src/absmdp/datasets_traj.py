@@ -153,7 +153,7 @@ class PinballDatasetTrajectory_(torch.utils.data.Dataset):
             nl = list(filter(lambda n: '.png' in n, zfile.namelist()))
         if self.obs_type == 'pixels':
             print(self.num_workers)
-            batch_size = len(nl) // self.num_workers
+            batch_size = len(nl) // self.num_workers if self.num_workers > 1 else len(nl)
             images_loaded = Parallel(n_jobs=self.num_workers)(delayed(load_images)(self.zfile_name, imgs) for imgs in split(nl, batch_size))
             images_loaded = reduce(lambda x,acc: x+acc, images_loaded, [])
             print(f'{len(images_loaded)} images loaded! ')

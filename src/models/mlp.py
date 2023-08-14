@@ -34,6 +34,8 @@ def _MLP(input_dim: int, hidden_dim: List[int], output_dim: int = None, activati
             layers.append(nn.GELU())
         elif activation == 'glu':
             layers.append(nn.GLU())
+        elif activation == 'silu':
+            layers.append(nn.SiLU())
         elif activation == 'none':
             pass
         else:
