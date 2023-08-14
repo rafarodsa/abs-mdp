@@ -134,7 +134,8 @@ class RSSMAbstraction(pl.LightningModule):
         '''
         b = next_z.shape[:-1]
         b_size = np.prod(b)
-        next_z, next_s = next_z.reshape(b_size, -1), next_s.reshape(b_size, -1)
+        s_shape = next_s.shape[1:]
+        next_z, next_s = next_z.reshape(b_size, -1), next_s.reshape(b_size, *s_shape)
         _next_s = next_s.repeat(b_size, *[1 for _ in range(len(next_s.shape)-1)])
         _next_z = torch.repeat_interleave(next_z, b_size, dim=0)
         _log_t = torch.tanh(self.grounding(_next_s, _next_z).reshape(b_size, b_size)) * 100 #* np.log(b) * 0.5
