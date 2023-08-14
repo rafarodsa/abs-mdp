@@ -150,7 +150,8 @@ class RSSMAbstraction(pl.LightningModule):
         '''
         b = next_z.shape[:-1]
         b_size = np.prod(b)
-        next_z = next_z.reshape(b_size, -1)
+        # print(b_size)
+        next_z = next_z.reshape(int(b_size), -1)
 
         _norm = ((next_z[:, None, :] - next_z[None, :, :]) / std) ** 2 
         _norm = -_norm.sum(-1) # b_size x b_size

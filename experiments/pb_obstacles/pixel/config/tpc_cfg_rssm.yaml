@@ -6,14 +6,14 @@ seed: 0
 optimizer:
   type: adam
   params:
-    lr: 2e-4
+    lr: 1e-5
 scheduler:
   type: 'linear_scheduler'
   params:
     start_factor: 1.
     end_factor: 1.
     total_iters: 1.
-batch_size: 2
+batch_size: 16
 epochs: 500
 accelerator: gpu
 devices: 1

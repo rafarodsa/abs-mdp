@@ -1,4 +1,4 @@
-import argparse
+import argparse, os
 
 import numpy as np
 import torch
@@ -120,6 +120,20 @@ def grounding_goal_fn(grounding, phi, goal=[0.2, 0.9, 0., 0.], device='cpu'):
     return _goal
 
 
+def gaussian_goal_grounding(grounding, phi, goal=[0.2, 0.9, 0., 0.], goal_tol=1/25, device='cpu', n_samples=100):
+    goal = torch.Tensor(goal).unsqueeze(0).to(device)
+    samples = torch.randn(n_samples, 4).to(device) * goal_tol
+    encoded_samples = phi(samples + goal)
+    encoded_goal = phi(goal)
+    encoded_tol = torch.sqrt(((encoded_goal-encoded_samples) ** 2).sum(-1).mean()).cpu().numpy()
+    encoded_goal = encoded_goal.cpu().numpy()
+    def __goal(z):
+        _d = (((z-encoded_goal)/encoded_tol) ** 2).sum(-1)
+        return np.exp(-_d) > 0.3
+    return __goal
+
+
+
 def ground_state_sampler(g_sampler, grounding_function, n_samples=1000, device='cpu'):
     g_samples = torch.from_numpy(g_sampler(n_samples).astype(np.float32)).to(device)
     printarr(g_samples)
@@ -160,13 +174,15 @@ def make_env(test=False, test_seed=127, train_seed=255, args=None, device='cpu')
             env = torch.load(args.absmdp)
             env.to(device)
             # env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
-            env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder, goal=GOAL, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(GOAL))
+            # env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder, goal=GOAL, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(GOAL))
+            env = EnvGoalWrapper(env, goal_fn=gaussian_goal_grounding(env.grounding, env.encoder, goal=GOAL, goal_tol=GOAL_TOL, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(GOAL))
             env.seed(train_seed)
         else:
             env = torch.load(args.absmdp)
             env.to(device)
             # env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
-            env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder, goal=GOAL, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(GOAL))
+            # env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder, goal=GOAL, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(GOAL))
+            env = EnvGoalWrapper(env, goal_fn=gaussian_goal_grounding(env.grounding, env.encoder, goal=GOAL, goal_tol=GOAL_TOL, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(GOAL))
             env.seed(test_seed)
         if args.monitor:
             env = pfrl.wrappers.Monitor(
@@ -390,7 +406,7 @@ def main():
     parser.add_argument(
         '--init-thresh',
         type=float,
-        default=0.5
+        default=0.65
     )
 
     parser.add_argument(
@@ -423,7 +439,10 @@ def main():
     test_seed = 2**31 - 1 - args.seed
     args.goal = tuple(GOAL)
 
-    args.outdir = experiments.prepare_output_dir(args, args.outdir, exp_id=args.exp_id, make_backup=False)
+
+    path = os.path.dirname(args.absmdp)
+    outdir = f'{path}/{args.outdir}'
+    args.outdir = experiments.prepare_output_dir(args, outdir, exp_id=args.exp_id, make_backup=False)
     print("Output files are saved in {}".format(args.outdir))
     device = f'cuda:{args.gpu}' if args.gpu >= 0 else 'cpu'    
     if args.finetune:
@@ -568,7 +587,6 @@ def main():
             use_tensorboard=True,
             train_max_episode_len=args.max_steps,
             eval_max_episode_len=50,
-
         )
 
 

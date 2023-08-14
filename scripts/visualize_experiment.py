@@ -60,6 +60,7 @@ if __name__ == '__main__':
     print(f'Loading ckpt from {ckpt_path}')
     
     save_path = f'{args.experiment}/visualization'
+    print(f'Saving at {save_path}')
 
     # Load config
     cfg = oc.load(config_file).cfg

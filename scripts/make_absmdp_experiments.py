@@ -21,14 +21,20 @@ parser.add_argument('--discrete', action='store_true')
 parser.add_argument('--rssm', action='store_true')
 args = parser.parse_args()
 
-_, phi_ckpt_path = get_experiment_info(args.experiment)
+config_file, phi_ckpt_path = get_experiment_info(args.experiment)
 
 outdir = f'{args.experiment}'
 
-print(f'Loading ckpt from {phi_ckpt_path}')
 
+print(f'Loading ckpt from {phi_ckpt_path}')
+print(f'Loading config from {config_file}')
+
+cfg = oc.load(config_file).cfg
 model = Abstraction.load_from_checkpoint(phi_ckpt_path) if not args.discrete else DiscreteTPCAbstraction.load_from_checkpoint(phi_ckpt_path)
-data = PinballDataset(model.cfg.data) if not args.rssm else PinballDatasetTrajectory(model.cfg.data)
+
+
+
+data = PinballDataset(cfg.data) if not args.rssm else PinballDatasetTrajectory(cfg.data)
 data.setup()
 
 mdp = AbstractMDP.load(model, data.dataset, rssm=args.rssm) if not args.discrete else DiscreteAbstractMDP.load(model, data.dataset)

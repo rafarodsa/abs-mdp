@@ -252,6 +252,7 @@ class PinballDatasetTrajectory(pl.LightningDataModule):
 
 
     def setup(self, stage=None):
+        print(f'Loading dataset at {self.path_to_file}')
         self.dataset = PinballDatasetTrajectory_(self.path_to_file, self.transforms, obs_type=self.obs_type, noise_level=self.cfg.noise_level, num_workers=self.num_workers, length=self.length)
         self.train, self.val, self.test = torch.utils.data.random_split(self.dataset, [self.train_split, self.val_split, self.test_split])
 

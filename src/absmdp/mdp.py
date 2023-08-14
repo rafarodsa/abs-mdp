@@ -38,7 +38,7 @@ class AbstractMDP(gym.Env):
         
         self.encoder = encoder
         self.transition_fn = transition
-        self.grounding = grounding
+        self.grounding_fn = grounding
         self.reward_fn = reward
         self.tau_fn = tau
         self.initial_states = initial_states
@@ -70,6 +70,9 @@ class AbstractMDP(gym.Env):
         info = {'expected_length': tau.item()}
         self._state = next_s
         return next_s.numpy(), r, done, info
+    
+    # def grounding(self, s, z):
+        
 
     @property
     def state(self):
@@ -125,7 +128,7 @@ class AbstractMDP(gym.Env):
         if len(state.size()) == 1:
             state = state.unsqueeze(0)
         _in = torch.cat([state, torch.zeros(state.shape[0], self._n_options)], dim=-1)
-        return self.grounding.distribution(_in)
+        return self.grounding_fn.distribution(_in)
         
     def gamma(self, state, action):
         return self._gamma ** self.tau(state, action)
@@ -197,7 +200,7 @@ class AbstractMDPCritic(gym.Env):
         
         self.encoder = encoder
         self.transition_fn = transition
-        self.grounding = grounding
+        self.grounding_fn = grounding
         self.reward_fn = reward
         self.tau_fn = tau
         self.initial_states = initial_states
@@ -234,7 +237,7 @@ class AbstractMDPCritic(gym.Env):
         pass
 
     def step(self, action):
-        # action = action.to(self.device)
+        action = action.to(self.device)
         next_s = self.transition(self.state, action)
         r = self.reward(self.state, action, next_s).item()
         done = False
@@ -246,6 +249,15 @@ class AbstractMDPCritic(gym.Env):
     @property
     def state(self):
         return self._state
+    
+    def grounding(self, s, z, std=0.5):
+        if isinstance(s, np.ndarray):
+            s = torch.from_numpy(s)
+        if isinstance(z, np.ndarray):
+            z = torch.from_numpy(z)
+        
+        _z = self.encoder(s)
+        return torch.exp(-(((z - _z)/std) ** 2).sum(-1))
 
     def get_actions(self):
         return list(range(self.n_options)) 

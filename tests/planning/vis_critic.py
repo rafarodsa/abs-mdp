@@ -82,19 +82,29 @@ if __name__ == '__main__':
         z_q = model.encoder(batch.obs)
         z_q = z_q.reshape(-1, z_q.shape[-1])
         encoded_goals = model.encoder(goals)
-        energy_goals = torch.tanh(model.grounding(goals, encoded_goals))
-        energy = torch.tanh(model.grounding(goals.repeat(z_q.shape[0], 1), z_q.repeat_interleave(n_samples, dim=0))).reshape(z_q.shape[0], n_samples).max(-1).values
-        energy = energy.reshape(n_samples, -1)
-        for i in range(n_samples):
-            energy[i, energy[i] < energy_goals[i] - 0.01] = 0
+        # energy_goals = torch.tanh(model.grounding(goals, encoded_goals))
+        # energy = torch.tanh(model.grounding(goals.repeat(z_q.shape[0], 1), z_q.repeat_interleave(n_samples, dim=0))).reshape(z_q.shape[0], n_samples)#.max(-1).values
+        # energy = energy.reshape(n_samples, -1)
+
+        ### 
+        energy_goals = torch.ones(n_samples)
+        distance = ((encoded_goals[None] - z_q[:, None])) ** 2
+        energy = torch.exp(-distance.sum(-1))
+        energy = energy.T
+        printarr(energy, z_q, encoded_goals)
+        ####
+        
+        # for i in range(n_samples):
+            # energy[i, energy[i] < energy_goals[i] - 0.01] = 0
         printarr(energy, z_q, goals)
-        energy = energy.sum(0)
+        print(energy_goals)
+        energy = energy.max(0).values
    
     # Plot heatmap
     # fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
     plt.scatter(obs[:, 0], obs[:, 1], c=energy, cmap=cm.coolwarm, s=5)
     plt.colorbar()
-    plt.scatter(goals[:, 0], goals[:, 1], c='k', s=1)
+    plt.scatter(goals[:, 0], goals[:, 1], c='k', s=5)
     # ax.plot_surface(z_q[:, 0], z_q[:, 1], energy.unsqueeze(-1), antialiased=False, linewidth=0)
     
     plt.savefig(os.path.join(args.save_path, 'heatmap.png'))
