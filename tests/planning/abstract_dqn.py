@@ -140,6 +140,7 @@ def ground_state_sampler(g_sampler, grounding_function, n_samples=1000, device='
 pinball_env = PinballEnvContinuous(config='envs/pinball/configs/pinball_simple_single.cfg')
 options = create_position_options(pinball_env)
 def ground_action_mask(state, device):
+    print('Computing ground action mask')
     state = state.cpu()
     mask = torch.from_numpy(np.array([o.initiation(state[0].numpy()) for o in options]).T).float().unsqueeze(0).to(device)
     return mask
@@ -477,9 +478,11 @@ def main():
         return torch.tensor(selection)
     
     def random_selection_initset(initset_s):
-        avail_action = torch.nonzero(initset_s)
+        # TODO this works only with single samples.
+        avail_action = torch.nonzero(initset_s.squeeze())
         selection = torch.randint(0, avail_action.shape[0], (1,))
-        return avail_action[selection].squeeze()
+        a =  avail_action[selection].squeeze()
+        return a
 
     if args.noisy_net_sigma is not None:
         pnn.to_factorized_noisy(q_func, sigma_scale=args.noisy_net_sigma)

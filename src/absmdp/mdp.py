@@ -279,7 +279,6 @@ class AbstractMDPCritic(gym.Env):
 
     def transition(self, state, action):
         batch = state.shape[0] if len(state.size()) > 1 else 1
-        # printarr(state, action)
         if len(state.size()) == 1:
             input = torch.cat([state, self._action_to_one_hot(action)], dim=-1)
         else: 

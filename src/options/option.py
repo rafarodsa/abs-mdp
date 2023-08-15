@@ -1,87 +1,43 @@
+"""
+    Option Class
+    author: Rafael Rodriguez-Sanchez
+    date: November 2022
+"""
 
-import gym 
 import numpy as np
 
-class EnvOptionWrapper(gym.Env):
-    def __init__(self, options, env):
-        self.env = env
-        self.options = options
-        self.action_space = gym.spaces.Discrete(len(options))
-        self.observation_space = env.observation_space
+
+class Option:
+    def __init__(self, initiation_classifier, policy_func_factory, termination_prob, max_executing_time=100, name='', check_can_execute=True):
+        self.initiation = initiation_classifier
+        self.policy_factory = policy_func_factory
+        self.executing = False
+        self.termination_prob_factory = termination_prob
+        self.termination_prob = None
+        self.name = name
+        self.policy = None
+        self._step = 0.
+        self.max_executing_time = max_executing_time
+        self.check_can_execute = check_can_execute
+
+    def execute(self, state):
+        self.executing = self.initiation(state) if self.check_can_execute else True
+        self.policy = self.policy_factory(state)
+        self.termination_prob = self.termination_prob_factory(state)
+        self._step = 0.
+        return self.executing
+
+    def is_executing(self):
+        return self.executing
+
+    def act(self, state):
+        # self.executing = np.random.binomial(1, self.termination_prob(state)) == 1
+        if self._step != 0: # skip first state termination
+            self.executing = not(np.random.random(1) < self.termination_prob(state))
+        self._step += 1
+        return self.policy(state) if self.executing else None
     
-    def step(self, action):
-        option = self.options[action]
-        next_s, r, done, truncated, info = self._execute_option(option)
-        
-        initset_next_s = self.action_mask(next_s)
-        info['initset_next_s'] = initset_next_s
-        info['initset_s'] = self.prev_initset_s
-        self.prev_initset_s = initset_next_s
-
-        done = done or initset_next_s.sum() == 0
-        return next_s.astype(np.float32), r, done, truncated, info
-    
-
-    def action_mask(self, state):
-        initiation = np.array([int(o.initiation(state)) for o in self.options])
-        return initiation
-
-    def _execute_option(self, option):
-        s = np.array(self.env.state)
-        execute = option.execute(s)
-       
-        done = False
-        t = 0
-        r = 0
-        info = {}
-        if execute: 
-            next_s = s
-            while option.is_executing() and not done and t < option.max_executing_time:
-                action = option.act(next_s)
-                if action is None:
-                    break
-                next_s, _r, done, truncated, info = self.env.step(action)
-                r += self.env.gamma ** t * _r # accumulate discounted reward
-                t += 1
-            if t >= option.max_executing_time and not done:
-                truncated = True
-            else:
-                truncated = False
-        else:
-            next_s = self.env.state
-            truncated = False
-
-        info['tau'] = t  # add execution length to info dict
-        return next_s, r, done, truncated, info
-
-    def reset(self, state=None):
-        s = self.env.reset(state).astype(np.float32)
-        initset_s = self.action_mask(s)
-        self.prev_initset_s = initset_s
-        return s
-    
-    def render(self, *args, **kwargs):
-        return self.env.render(*args, **kwargs)
-
-        
-if __name__=='__main__':
-    from envs.pinball.pinball_gym import PinballEnvContinuous
-    from envs.pinball.controllers_pinball import create_position_options, PinballGridOptions
-
-    env = PinballEnvContinuous(config='envs/pinball/configs/pinball_simple_single.cfg', render_mode='human')
-    options = PinballGridOptions(env, tol=1/20/5)
-    env = EnvOptionWrapper(options, env)
-    for j in range(5):
-        s = env.reset()
-        next_s = s
-        for i in range(50):
-            # random action
-            initiation = np.array([int(o.initiation(next_s)) for o in options])
-            actions_avail = np.nonzero(initiation == 1)[0]
-            action = np.random.choice(actions_avail)
-            next_s, r, done, truncated, info = env.step(action)
-            print(s, next_s, r, action, info, initiation)
-            env.render()
-        
+    def __repr__(self) -> str:
+        return self.name
 
 

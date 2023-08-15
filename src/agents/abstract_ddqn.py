@@ -149,13 +149,13 @@ class AbstractDoubleDQN(DoubleDQN):
     def batch_act(self, batch_obs: Sequence[Any], batch_initset_s: Sequence[Any] = None) -> Sequence[Any]:
         batch_s = self.batch_states(batch_obs, self.device, self.phi)
         if batch_initset_s is not None:
-            batch_initset_s = torch.as_tensor(batch_initset_s, device=self.device)
+            batch_initset_s = torch.as_tensor(np.array(batch_initset_s), device=self.device)
         else:
+            print('here batch_act')
             batch_initset_s = self.action_mask(batch_s)
 
         action_mask = (1-batch_initset_s) * -1e12
-       
-       
+    
         with torch.no_grad(), evaluating(self.model):
             batch_av = self._evaluate_model_and_update_recurrent_states(batch_obs)
             batch_argmax = (batch_av.q_values + action_mask).argmax(-1)

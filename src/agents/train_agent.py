@@ -58,9 +58,6 @@ def train_agent(
     eval_stats_history = []  # List of evaluation episode stats dict
     episode_len = 0
 
-
-
-
     try:
         # eval at 0
         if evaluator is not None:
@@ -73,7 +70,8 @@ def train_agent(
         while t < steps:
 
             # a_t
-            action = agent.act(obs)
+            iniset_s = env.last_initset
+            action = agent.act(obs, iniset_s)
             # o_{t+1}, r_{t+1}
             obs, r, done, info = env.step(action.cpu())
             t += 1

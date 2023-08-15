@@ -38,6 +38,9 @@ class EnvGoalWrapper(gym.Env):
     
     def render(self, *args, **kwargs):
         return self.env.render(*args, **kwargs)
+    
+    def __getattr__(self, name):
+        return getattr(self.env, name)
 
 
 class EnvGoalOptionsWrapper(EnvGoalWrapper):

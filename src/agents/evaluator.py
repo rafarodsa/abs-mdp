@@ -36,8 +36,9 @@ def _run_episodes(
             episode_len = 0
             info = {}
             tau_total = 0
-            
-        a = agent.act(obs)
+        
+        initset = env.last_initset
+        a = agent.act(obs, initset)
         obs, r, done, info = env.step(a.cpu())
         
         episode_len += 1

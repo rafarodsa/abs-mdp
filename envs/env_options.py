@@ -8,17 +8,24 @@ class EnvOptionWrapper(gym.Env):
         self.options = options
         self.action_space = gym.spaces.Discrete(len(options))
         self.observation_space = env.observation_space
+        self._last_initset = None
     
     def step(self, action):
         option = self.options[action]
         next_s, r, done, truncated, info = self._execute_option(option)
-        next_initset = self.action_mask(next_s)
+        next_initset = self.initset(next_s)
         done = done or next_initset.sum() == 0
-        info['next_initset'] = next_initset
+        info['initset_next_s'] = next_initset
+        info['initset_s'] = self.last_initset
+        self._last_initset = next_initset
+
         return next_s.astype(np.float32), r, done, truncated, info
     
+    @property
+    def last_initset(self):
+        return self._last_initset
 
-    def action_mask(self, state):
+    def initset(self, state):
         initiation = np.array([int(o.initiation(state)) for o in self.options])
         return initiation
 
@@ -51,11 +58,48 @@ class EnvOptionWrapper(gym.Env):
         return next_s, r, done, truncated, info
 
     def reset(self, state=None):
-        return self.env.reset(state).astype(np.float32)
+        done = True
+        s = self.env.reset(state).astype(np.float32)
+        while done:
+            initset_s = self.initset(s)
+            done = initset_s.sum() == 0
+            self._last_initset = initset_s
+            s = self.env.reset(state).astype(np.float32)
+        return s
     
     def render(self, *args, **kwargs):
         return self.env.render(*args, **kwargs)
 
+class EnvInitsetWrapper(gym.Env):
+    def __init__(self, env, iniset_fn):
+        self.env = env
+        self.initset_fn = iniset_fn
+        self.last_initset = None
+
+    def __getattr__(self, name):
+        return getattr(self.env, name)
+    
+    def initset(self, obs):
+        return self.iniset_fn(obs)
+    
+    def step(self, action):
+        next_obs, r, done, info = self.env.step(action)
+        iniset = self.initset(next_obs)
+        done = iniset.sum() == 0 or done
+        
+        info['initset_next_s'] = iniset
+        info['initset_s'] = self.last_initset
+        self.last_initset = iniset
+        return next_obs, r, done, info
+    
+    def reset(self, state=None):
+        obs = self.env.reset(state)
+        iniset = self.initset(obs)
+        while iniset.sum() == 0:
+            obs = self.env.reset(state)
+            iniset = self.initset(obs)
+        self.last_initset = iniset
+        return obs
         
 if __name__=='__main__':
     from envs.pinball.pinball_gym import PinballEnvContinuous
