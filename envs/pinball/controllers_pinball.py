@@ -295,7 +295,7 @@ def create_position_controllers_v0(env, translation_distance=1/10):
     
     return position_options
 
-def create_position_options(env, translation_distance=1/15, std_dev=0.01):
+def create_position_options(env, translation_distance=1/15, std_dev=0.01, check_can_execute=True):
     '''
         Creates options for moving the agent in the four directions by a fixed distance.
         Velocity is zero.
@@ -308,7 +308,8 @@ def create_position_options(env, translation_distance=1/15, std_dev=0.01):
         o = Option(initiation_set(env, distance[:2]),
                partial(controller_factory, distance=distance, continuous=isinstance(env.action_space, spaces.Box)),
                partial(termination_position, distance=distance, std_dev=std_dev_vel),
-               name=f"{'+' if y > 0 else '-'}Y"
+               name=f"{'+' if y > 0 else '-'}Y", 
+               check_can_execute=check_can_execute
         )
         position_options.append(o)
     for x in [-1., 1.]:
@@ -316,7 +317,8 @@ def create_position_options(env, translation_distance=1/15, std_dev=0.01):
         o = Option(initiation_set(env, distance[:2]),
                partial(controller_factory, distance=distance, continuous=isinstance(env.action_space, spaces.Box)),
                partial(termination_position, distance=distance, std_dev=std_dev_vel),
-               name=f"{'+' if x > 0 else '-'}X"
+               name=f"{'+' if x > 0 else '-'}X",
+               check_can_execute=check_can_execute
         )
         position_options.append(o)
     
