@@ -64,7 +64,8 @@ class InfoNCEAbstraction(pl.LightningModule):
         next_z  =  next_z_c + torch.randn_like(z) * noise_std 
 
         # printarr(t_in, actions, z )
-        grounding_loss = self.grounding_loss(next_z, next_s)
+        # grounding_loss = self.grounding_loss(next_z, next_s)
+        grounding_loss = self.grounding_loss_normal(next_z)
         transition_loss = self.consistency_loss(z, next_z, a)
         tpc_loss = self.tpc_loss(z, next_z, a)
         _, _, rews = reward
@@ -135,6 +136,22 @@ class InfoNCEAbstraction(pl.LightningModule):
         return -_loss
     
 
+    def grounding_loss_normal(self, next_z, std=0.2):
+        '''
+            critic f(s', z') = exp(-||\phi(s')-z'||^2/std^2)
+        '''
+        b = next_z.shape[:-1]
+        b_size = np.prod(b)
+        # print(b_size)
+        next_z = next_z.reshape(int(b_size), -1)
+
+        _norm = ((next_z[:, None, :] - next_z[None, :, :]) / std) ** 2 
+        _norm = -_norm.sum(-1) # b_size x b_size
+        _loss =  torch.diag(_norm) - (torch.logsumexp(_norm, dim=-1) - np.log(b_size))
+        return -_loss.reshape(*b)
+    
+    
+
     def tpc_loss(self, z, next_z, a):
         '''
             -MI(z'; z, a)
@@ -149,6 +166,8 @@ class InfoNCEAbstraction(pl.LightningModule):
 
         return -_loss
     
+
+
     def reward_loss(self, r_target, z, a, next_z):
         '''
             MSE(R, R_pred)
@@ -182,7 +201,8 @@ class InfoNCEAbstraction(pl.LightningModule):
         initset_pred = (torch.sigmoid(self.initsets(z)) > self.INITSET_CLASS_THRESH).float()
         initset_acc = (initset_pred == initset_s).float().mean()
 
-        nll_loss = self.grounding_loss(next_z, next_s).mean()
+        # nll_loss = self.grounding_loss(next_z, next_s).mean()
+        nll_loss = self.grounding_loss_normal(next_z).mean()
 
         logs = {
                 'val_infomax': grounding_loss.mean(),
@@ -204,7 +224,8 @@ class InfoNCEAbstraction(pl.LightningModule):
         z = self.encoder(s)
         t_in = torch.cat([z, a], dim=-1)
         next_z = self.transition.distribution(t_in).mean + z
-        nll_loss = self.grounding_loss(next_z, next_s).mean()
+        # nll_loss = self.grounding_loss(next_z, next_s).mean()
+        nll_loss = self.grounding_loss_normal(next_z).mean()
         initset_pred = torch.sigmoid(self.initsets(z)) >= self.INITSET_CLASS_THRESH
         initset_acc = (initset_pred == initset_s).float().mean()
 

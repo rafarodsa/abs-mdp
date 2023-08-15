@@ -134,7 +134,7 @@ class AbstractDoubleDQN(DoubleDQN):
         return batch_rewards + discount * (1.0 - batch_terminal) * next_q_max
 
 
-    def batch_act(self, batch_obs: Sequence[Any]) -> Sequence[Any]:
+    def batch_act(self, batch_obs: Sequence[Any], batch_info: Sequence[Dict] = None) -> Sequence[Any]:
         batch_s = self.batch_states(batch_obs, self.device, self.phi)
         action_mask = (1-self.action_mask(batch_s)) * -1e12
         with torch.no_grad(), evaluating(self.model):
@@ -158,7 +158,7 @@ class AbstractDoubleDQN(DoubleDQN):
         return batch_action
     
 
-    def batch_observe(self, batch_obs: Sequence[Any], batch_reward: Sequence[float], batch_done: Sequence[bool], batch_reset: Sequence[bool]) -> None:
+    def batch_observe(self, batch_obs: Sequence[Any], batch_reward: Sequence[float], batch_done: Sequence[bool], batch_reset: Sequence[bool], batch_info: Sequence[Dict] = None) -> None:
         batch_reset, batch_tau = list(zip(*batch_reset))
         if self.training:
             return self._batch_observe_train(
@@ -169,7 +169,7 @@ class AbstractDoubleDQN(DoubleDQN):
                 batch_obs, batch_reward, batch_done, batch_reset, batch_tau
             )
     
-    def _batch_observe_train(self, batch_obs: Sequence[Any], batch_reward: Sequence[float], batch_done: Sequence[bool], batch_reset: Sequence[bool], batch_tau: Sequence[float] = None) -> None:
+    def _batch_observe_train(self, batch_obs: Sequence[Any], batch_reward: Sequence[float], batch_done: Sequence[bool], batch_reset: Sequence[bool], batch_info: Sequence[Dict] = None) -> None:
         for i in range(len(batch_obs)):
             self.t += 1
             self._cumulative_steps += 1
@@ -179,6 +179,9 @@ class AbstractDoubleDQN(DoubleDQN):
             if self.batch_last_obs[i] is not None:
                 assert self.batch_last_action[i] is not None
                 # Add a transition to the replay buffer
+
+                batc
+
                 transition = {
                     "state": self.batch_last_obs[i],
                     "action": self.batch_last_action[i],
@@ -206,7 +209,7 @@ class AbstractDoubleDQN(DoubleDQN):
                     self.replay_buffer.stop_current_episode(env_id=i)
             self.replay_updater.update_if_necessary(self.t)
     
-    def _batch_observe_eval(self, batch_obs: Sequence[Any], batch_reward: Sequence[float], batch_done: Sequence[bool], batch_reset: Sequence[bool], batch_tau: Sequence[float] = None) -> None:
+    def _batch_observe_eval(self, batch_obs: Sequence[Any], batch_reward: Sequence[float], batch_done: Sequence[bool], batch_reset: Sequence[bool], batch_info: Sequence[Dict] = None) -> None:
         if self.recurrent:
             # Reset recurrent states when episodes end
             self.test_recurrent_states = (
@@ -280,8 +283,6 @@ class AbstractDoubleDQN(DoubleDQN):
             print('replay buffer not loaded.')
 
 
-
-
 def select_action_epsilon_greedily(batch_obs, epsilon, random_action_func, greedy_action_func):
     if np.random.rand() < epsilon:
         return random_action_func(batch_obs), False
@@ -321,7 +322,6 @@ class AbstractDDQNGrounded(pfrl.agent.Agent):
         action = (q_values.q_values + mask).argmax(-1)
         self.agent.batch_act(z)
         return action
-
     
     def load(self, dirname):
         self.agent.load(dirname)
@@ -333,7 +333,6 @@ class AbstractDDQNGrounded(pfrl.agent.Agent):
     def save(self, dirname):
         self.agent.save(dirname)
         
-    
     def get_statistics(self):
         return self.agent.get_statistics()
         
