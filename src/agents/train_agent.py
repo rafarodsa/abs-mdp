@@ -80,8 +80,11 @@ def train_agent(
             episode_r += r
             episode_len += 1
             reset = episode_len == max_episode_len or info.get("needs_reset", False)
-            tau = 1 if 'tau' not in info  else info['tau']
-            agent.observe(obs, r, done, (reset, tau))
+           
+            if 'tau' not in info:
+                info['tau'] = 1
+
+            agent.observe(obs, r, done, reset, info)
 
             for hook in step_hooks:
                 hook(env, agent, t)

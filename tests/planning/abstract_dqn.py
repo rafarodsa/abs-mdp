@@ -1,4 +1,4 @@
-import argparse, os
+import argparse
 
 import numpy as np
 import torch
@@ -120,20 +120,6 @@ def grounding_goal_fn(grounding, phi, goal=[0.2, 0.9, 0., 0.], device='cpu'):
     return _goal
 
 
-def gaussian_goal_grounding(grounding, phi, goal=[0.2, 0.9, 0., 0.], goal_tol=1/25, device='cpu', n_samples=100):
-    goal = torch.Tensor(goal).unsqueeze(0).to(device)
-    samples = torch.randn(n_samples, 4).to(device) * goal_tol
-    encoded_samples = phi(samples + goal)
-    encoded_goal = phi(goal)
-    encoded_tol = torch.sqrt(((encoded_goal-encoded_samples) ** 2).sum(-1).mean()).cpu().numpy()
-    encoded_goal = encoded_goal.cpu().numpy()
-    def __goal(z):
-        _d = (((z-encoded_goal)/encoded_tol) ** 2).sum(-1)
-        return np.exp(-_d) > 0.3
-    return __goal
-
-
-
 def ground_state_sampler(g_sampler, grounding_function, n_samples=1000, device='cpu'):
     g_samples = torch.from_numpy(g_sampler(n_samples).astype(np.float32)).to(device)
     printarr(g_samples)
@@ -174,15 +160,13 @@ def make_env(test=False, test_seed=127, train_seed=255, args=None, device='cpu')
             env = torch.load(args.absmdp)
             env.to(device)
             # env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
-            # env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder, goal=GOAL, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(GOAL))
-            env = EnvGoalWrapper(env, goal_fn=gaussian_goal_grounding(env.grounding, env.encoder, goal=GOAL, goal_tol=GOAL_TOL, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(GOAL))
+            env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder, goal=GOAL, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(GOAL))
             env.seed(train_seed)
         else:
             env = torch.load(args.absmdp)
             env.to(device)
             # env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
-            # env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder, goal=GOAL, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(GOAL))
-            env = EnvGoalWrapper(env, goal_fn=gaussian_goal_grounding(env.grounding, env.encoder, goal=GOAL, goal_tol=GOAL_TOL, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(GOAL))
+            env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder, goal=GOAL, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(GOAL))
             env.seed(test_seed)
         if args.monitor:
             env = pfrl.wrappers.Monitor(
@@ -406,7 +390,7 @@ def main():
     parser.add_argument(
         '--init-thresh',
         type=float,
-        default=0.65
+        default=0.5
     )
 
     parser.add_argument(
@@ -439,10 +423,7 @@ def main():
     test_seed = 2**31 - 1 - args.seed
     args.goal = tuple(GOAL)
 
-
-    path = os.path.dirname(args.absmdp)
-    outdir = f'{path}/{args.outdir}'
-    args.outdir = experiments.prepare_output_dir(args, outdir, exp_id=args.exp_id, make_backup=False)
+    args.outdir = experiments.prepare_output_dir(args, args.outdir, exp_id=args.exp_id, make_backup=False)
     print("Output files are saved in {}".format(args.outdir))
     device = f'cuda:{args.gpu}' if args.gpu >= 0 else 'cpu'    
     if args.finetune:
@@ -494,6 +475,11 @@ def main():
         selection =  np.random.choice(n_actions, p=_mask.squeeze().cpu().numpy())
         # printarr(selection)
         return torch.tensor(selection)
+    
+    def random_selection_initset(initset_s):
+        avail_action = torch.nonzero(initset_s)
+        selection = torch.randint(0, avail_action.shape[0], (1,))
+        return avail_action[selection].squeeze()
 
     if args.noisy_net_sigma is not None:
         pnn.to_factorized_noisy(q_func, sigma_scale=args.noisy_net_sigma)
@@ -505,7 +491,7 @@ def main():
             1.0,
             args.final_epsilon,
             args.final_exploration_frames,
-            lambda obs: random_selection(obs),
+            random_selection_initset,
         )
 
     opt = torch.optim.Adam(q_func.parameters(), lr=args.lr, eps=1.5e-4)
@@ -587,6 +573,7 @@ def main():
             use_tensorboard=True,
             train_max_episode_len=args.max_steps,
             eval_max_episode_len=50,
+
         )
 
 
