@@ -8,7 +8,7 @@ import numpy as np
 
 
 class Option:
-    def __init__(self, initiation_classifier, policy_func_factory, termination_prob, max_executing_time=100, name=''):
+    def __init__(self, initiation_classifier, policy_func_factory, termination_prob, max_executing_time=100, check_can_execute=True, name=''):
         self.initiation = initiation_classifier
         self.policy_factory = policy_func_factory
         self.executing = False
@@ -18,9 +18,10 @@ class Option:
         self.policy = None
         self._step = 0.
         self.max_executing_time = max_executing_time
+        self.check_can_execute = check_can_execute
 
     def execute(self, state):
-        self.executing = self.initiation(state)
+        self.executing = self.initiation(state) if self.check_can_execute else True
         self.policy = self.policy_factory(state)
         self.termination_prob = self.termination_prob_factory(state)
         self._step = 0.
