@@ -14,7 +14,7 @@ from pfrl.wrappers import atari_wrappers
 
 from envs.pinball.pinball_gym import PinballEnvContinuous, PinballEnv
 from envs.pinball.controllers_pinball import PinballGridOptions, create_position_options
-from envs.env_options import EnvOptionWrapper
+from envs.env_options import EnvOptionWrapper, EnvInitsetWrapper
 from envs.env_goal import EnvGoalWrapper
 from src.agents.abstract_ddqn import AbstractDoubleDQN as AbstractDDQN, AbstractLinearDecayEpsilonGreedy
 from src.agents.abstract_ddqn import AbstractDDQNGrounded
@@ -24,23 +24,6 @@ from src.agents.evaluator import eval_performance
 from src.utils.printarr import printarr
 
 from functools import partial
-
-class SingleSharedBias(nn.Module):
-    """Single shared bias used in the Double DQN paper.
-
-    You can add this link after a Linear layer with nobias=True to implement a
-    Linear layer with a single shared bias parameter.
-
-    See http://arxiv.org/abs/1509.06461.
-    """
-
-    def __init__(self):
-        super().__init__()
-        self.bias = nn.Parameter(torch.zeros([1], dtype=torch.float32))
-
-    def __call__(self, x):
-        return x + self.bias.expand_as(x)
-
 
 def parse_arch(arch, n_actions, state_dim):
     if arch == 'mlp':
@@ -85,7 +68,6 @@ def check_init_state(state, goal, step_size, tol):
 def init_state_sampler(goal, step_size=1/15, tol=0.015):
     config = 'envs/pinball/configs/pinball_simple_single.cfg'
     pinball_env = PinballEnvContinuous(config)
-    
     def __sampler():
         accepted = False
         while not accepted:
@@ -100,7 +82,6 @@ def goal_fn(phi, goal=[0.2, 0.9, 0., 0.], goal_tol=0.01):
     # goal = compute_nearest_pos(goal)
     def _goal(state):
         distance =  np.linalg.norm(state[:2] - goal)
-        # print(distance, state[:2], goal)
         return distance <= goal_tol
     return _goal
 
@@ -112,8 +93,7 @@ def grounding_goal_fn(grounding, phi, goal=[0.2, 0.9, 0., 0.], device='cpu'):
     print(f'Goal energy: {energy_goal}')
     def _goal(state):
         _goal = torch.Tensor(goal)
-        # printarr(_goal, state)
-        s = torch.from_numpy(state).unsqueeze(0).to(device)
+        s = state.unsqueeze(0).to(device)
         v = torch.tanh(grounding(_goal, s))
         return v > energy_goal-eps
 
@@ -137,100 +117,83 @@ def ground_state_sampler(g_sampler, grounding_function, n_samples=1000, device='
         return s
     return __sample
 
-pinball_env = PinballEnvContinuous(config='envs/pinball/configs/pinball_simple_single.cfg')
-options = create_position_options(pinball_env)
-def ground_action_mask(state, device):
-    print('Computing ground action mask')
-    state = state.cpu()
-    mask = torch.from_numpy(np.array([o.initiation(state[0].numpy()) for o in options]).T).float().unsqueeze(0).to(device)
-    return mask
+
 
 
 # goal = [0.9, 0.1, 0., 0.]
 GOAL = [0.6, 0.5, 0., 0.]
 STEP_SIZE = 1/25
 GOAL_TOL = 0.05
+GOAL_REWARD = 1.
+INITSET_THRESH = 0.65
+ENV_CONFIG_FILE = 'envs/pinball/configs/pinball_simple_single.cfg'
 
 
-def make_env(test=False, test_seed=127, train_seed=255, args=None, device='cpu'):
-        goal_reward = 1
-        goal_tol = 5
-        
-        print('================ CREATE ENVIRONMENT ================', goal_reward)
-        if not test:
-            env = torch.load(args.absmdp)
-            env.to(device)
-            # env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
-            env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder, goal=GOAL, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(GOAL))
-            env.seed(train_seed)
-        else:
-            env = torch.load(args.absmdp)
-            env.to(device)
-            # env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
-            env = EnvGoalWrapper(env, goal_fn=grounding_goal_fn(env.grounding, env.encoder, goal=GOAL, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(GOAL))
-            env.seed(test_seed)
-        if args.monitor:
-            env = pfrl.wrappers.Monitor(
-                env, args.outdir, mode="evaluation" if test else "training"
-            )
-        if args.render:
-            env = pfrl.wrappers.Render(env)
-        return env
+CreateContinuousOptions = lambda env: create_position_options(env, translation_distance=STEP_SIZE, check_can_execute=False)
+
+pinball_env = PinballEnvContinuous(config=ENV_CONFIG_FILE)
+options = CreateContinuousOptions(pinball_env)
+def ground_action_mask(state, device):
+    print('Warning: Computing ground action mask')
+    state = state.cpu()
+    mask = torch.from_numpy(np.array([o.initiation(state[0].numpy()) for o in options]).T).float().unsqueeze(0).to(device)
+    return mask
+
+
+def make_ground_init_from_latent(grounding, device):
+    g_sampler = ground_state_sampler(pinball_env.sample_init_states, grounding, n_samples=1000, device=device)
+    def __ground_initset(z):
+        s = g_sampler(z)
+        return ground_action_mask(s, device=device)
+    return __ground_initset
+
+def make_initset_from_classifier(initset_classifier, threshold, device='cpu'):
+    def __initset(z):
+        logits = initset_classifier(z).to(device)
+        return( torch.sigmoid(logits) > threshold).float()
+    return __initset
+
+
+def make_abstract_env(test=False, test_seed=127, train_seed=255, args=None, device='cpu', use_ground_init=False):
+    print('================ CREATE ENVIRONMENT ================', GOAL_REWARD)
+    env_sim = torch.load(args.absmdp)
+    env_sim.to(device)
+    # env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
+    env = EnvGoalWrapper(env_sim, goal_fn=grounding_goal_fn(env_sim.grounding, env_sim.encoder, goal=GOAL, device=device), goal_reward=GOAL_REWARD, init_state_sampler=init_state_sampler(GOAL))
+
+    ### MAKE INITSET FUNCTION
+    if use_ground_init:
+        initset_fn = make_ground_init_from_latent(env_sim.grounding, device=device)
+    else:
+        initset_fn = make_initset_from_classifier(env_sim.init_classifier, device=device, threshold=INITSET_THRESH)
+    env = EnvInitsetWrapper(env, initset_fn)
+    env.seed(test_seed if test else train_seed)
+    return env
 
 def make_ground_env(test=False, test_seed=0, train_seed=1, args=None, device='cpu'):
-    goal_reward = 1
-    goal_tol = 1/10
-    enc = lambda x: x[..., :2]
-    print('================ CREATE GROUND ENVIRONMENT ================', goal_reward)
-    
-    def _grounding_goal_fn(grounding, phi, goal=[0.55, 0.06, 0., 0.], device='cpu'):
-        goal = torch.Tensor(goal).unsqueeze(0).to(device)
-        print(goal)
-        energy_goal = torch.tanh(grounding(goal, phi(goal)))
-        eps = 0.01
-        print(f'Goal energy: {energy_goal}')
-        def _goal(state):
-            _goal = torch.Tensor(goal).to(device)
-            s = phi(torch.from_numpy(state).unsqueeze(0).to(device))
-            v = torch.tanh(grounding(_goal, s))
-            return v > energy_goal-eps
-
-        return _goal
-
-    if not test:
-        env = PinballEnvContinuous(config='envs/pinball/configs/pinball_simple_single.cfg')
-        if args.render:
-            env.render_mode = 'human'
-        options = create_position_options(env, translation_distance=STEP_SIZE)
-        
-        env = EnvOptionWrapper(options, env)
-        # env_sim = torch.load(args.absmdp)
-        # env_sim.to(device)
-        # env = EnvGoalWrapper(env, goal_fn=_grounding_goal_fn(env_sim.grounding, env_sim.encoder, goal=goal, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(goal))
-        env = EnvGoalWrapper(env, goal_fn=goal_fn(lambda s: s[..., :2], goal=GOAL, goal_tol=GOAL_TOL), goal_reward=goal_reward, init_state_sampler=init_state_sampler(GOAL))
-       
-        env.seed(train_seed)
-    else:
-        # evaluation in real env
-        env = PinballEnvContinuous(config='envs/pinball/configs/pinball_simple_single.cfg')
-        if args.render:
-            env.render_mode = 'human'
-        print('cont options')
-        options = create_position_options(env, translation_distance=STEP_SIZE)
-        env = EnvOptionWrapper(options, env)
-        # env_sim = torch.load(args.absmdp)
-        # env_sim.to(device)
-        # env = EnvGoalWrapper(env, goal_fn=_grounding_goal_fn(env_sim.grounding, env_sim.encoder, goal=goal, device=device), goal_reward=goal_reward, init_state_sampler=init_state_sampler(goal))
-        env = EnvGoalWrapper(env, goal_fn=goal_fn(lambda s: s[..., :2], goal=GOAL, goal_tol=GOAL_TOL), goal_reward=goal_reward, init_state_sampler=init_state_sampler(GOAL))
-        env.seed(test_seed)
-    if args.monitor:
-        env = pfrl.wrappers.Monitor(
-            env, args.outdir, mode="evaluation" if test else "training"
-        )
+    print('================ CREATE GROUND ENVIRONMENT ================', GOAL_REWARD)
+   
+    # evaluation in real env
+    env = PinballEnvContinuous(config=ENV_CONFIG_FILE)
+    options = CreateContinuousOptions(env)
+    if args.render:
+        env.render_mode = 'human'
+    env = EnvOptionWrapper(options, env)
+    env = EnvGoalWrapper(env, goal_fn=goal_fn(lambda s: s[..., :2], goal=GOAL, goal_tol=GOAL_TOL), goal_reward=GOAL_REWARD, init_state_sampler=init_state_sampler(GOAL))
+    env.seed(test_seed if test else train_seed)
     if args.render:
         env = pfrl.wrappers.Render(env)
     return env
 
+def random_selection_initset(initset_s):
+    # TODO this works only with single samples.
+    avail_action = torch.nonzero(initset_s.squeeze())
+    selection = torch.randint(0, avail_action.shape[0], (1,))
+    a =  avail_action[selection].squeeze()
+    return a
+
+def random_selection_from_obs(obs, iniset_fn):
+    return random_selection_initset(iniset_fn(obs))
 
 class RandomAgent(pfrl.agent.Agent):
     def __init__(self, action_selection, encoder):
@@ -248,7 +211,6 @@ class RandomAgent(pfrl.agent.Agent):
         pass
     def save(self, dirname):
         pass
-
 
 def main():
     parser = argparse.ArgumentParser()
@@ -280,7 +242,7 @@ def main():
     parser.add_argument("--demo", action="store_true", default=False)
     parser.add_argument("--load", type=str, default=None)
     parser.add_argument(
-        "--final-exploration-frames",
+        "--final-exploration-steps",
         type=int,
         default=4*10**5,
         help="Timesteps after which we stop " + "annealing exploration rate",
@@ -297,7 +259,6 @@ def main():
         default=0.001,
         help="Exploration epsilon used during eval episodes.",
     )
-    parser.add_argument("--noisy-net-sigma", type=float, default=None)
 
     parser.add_argument(
         "--steps",
@@ -338,10 +299,9 @@ def main():
     parser.add_argument("--eval-n-runs", type=int, default=20)
     parser.add_argument("--no-clip-delta", dest="clip_delta", action="store_false")
     parser.add_argument("--num-step-return", type=int, default=1)
+
     parser.set_defaults(clip_delta=True)
-    parser.add_argument(
-        "--agent", type=str, default="DoubleDQN", choices=["DQN", "DoubleDQN", "PAL"]
-    )
+ 
     parser.add_argument(
         "--log-level",
         type=int,
@@ -354,34 +314,14 @@ def main():
         default=False,
         help="Render env states in a GUI window.",
     )
-    parser.add_argument(
-        "--monitor",
-        action="store_true",
-        default=False,
-        help=(
-            "Monitor env. Videos and additional information are saved as output files."
-        ),
-    )
+
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate.")
-    parser.add_argument(
-        "--prioritized",
-        action="store_true",
-        default=False,
-        help="Use prioritized experience replay.",
-    )
+
     parser.add_argument(
         "--checkpoint-frequency",
         type=int,
         default=None,
         help="Frequency at which agents are stored.",
-    )
-
-    parser.add_argument(
-        "--arch",
-        type=str,
-        default="mlp",
-        choices=["nature", "nips", "dueling", "doubledqn", "mlp"],
-        help="Network architecture to use.",
     )
     
     parser.add_argument(
@@ -391,14 +331,13 @@ def main():
     parser.add_argument(
         '--init-thresh',
         type=float,
-        default=0.5
+        default=0.65
     )
 
     parser.add_argument(
         '--use-ground-init',
         action='store_true'
     )
-
     
     parser.add_argument(
         '--finetune',
@@ -430,16 +369,16 @@ def main():
     if args.finetune:
         env = make_ground_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args, device=device)
         eval_env = make_ground_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args, device=device)
-        env_sim = make_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args, device=device)
+        env_sim = make_abstract_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args, device=device, use_ground_init=args.use_ground_init)
         state_dim = env_sim.env.latent_dim
         encoder = env_sim.env.encode
     elif (not args.absgroundmdp and not args.demo):
-        env = make_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args, device=device)
-        eval_env = make_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args, device=device)
+        env = make_abstract_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args, device=device, use_ground_init=args.use_ground_init)
+        eval_env = make_abstract_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args, device=device, use_ground_init=args.use_ground_init)
         state_dim = env.env.latent_dim
         encoder = env.env.encode
     elif args.demo and not args.absgroundmdp:
-        env = make_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args, device=device)
+        env = make_abstract_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args, device=device, use_ground_init=args.use_ground_init)
         eval_env = make_ground_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args, device=device)
         state_dim = env.env.latent_dim
         encoder = env.env.encode
@@ -450,75 +389,32 @@ def main():
         state_dim = 4
         
     n_actions = eval_env.action_space.n
-    q_func = parse_arch(args.arch, n_actions, state_dim=state_dim)
-    
-    if not args.absgroundmdp and not args.finetune and not args.demo:    
-        if not args.use_ground_init:
-            init = env.env.init_classifier.to(f'cuda:{args.gpu}') if args.gpu >= 0 else env.env.initiation_set
-            def action_mask(s):
-                probs = torch.sigmoid(init(s.float()))
-                return (probs > args.init_thresh).float()
-        else:
-            print(device)
-            g_sampler = ground_state_sampler(pinball_env.sample_init_states, env.env.grounding, n_samples=1000, device=device)
-            def action_mask(z):
-                s = g_sampler(z)
-                return ground_action_mask(s, device=device)
-    else:
-        action_mask = partial(ground_action_mask, device=device)
+    q_func = parse_arch('mlp', n_actions, state_dim=state_dim)
 
-
-    def random_selection(obs):
-        _mask = action_mask(obs) + 1e-12
-        _mask = _mask / _mask.sum(-1, keepdim=True)
-        n_actions = _mask.shape[-1]
-        # printarr(_mask, n_actions)
-        selection =  np.random.choice(n_actions, p=_mask.squeeze().cpu().numpy())
-        # printarr(selection)
-        return torch.tensor(selection)
-    
-    def random_selection_initset(initset_s):
-        # TODO this works only with single samples.
-        avail_action = torch.nonzero(initset_s.squeeze())
-        selection = torch.randint(0, avail_action.shape[0], (1,))
-        a =  avail_action[selection].squeeze()
-        return a
-
-    if args.noisy_net_sigma is not None:
-        pnn.to_factorized_noisy(q_func, sigma_scale=args.noisy_net_sigma)
-        # Turn off explorer
-        explorer = explorers.Greedy()
-    else:
-
-        explorer = AbstractLinearDecayEpsilonGreedy(
-            1.0,
-            args.final_epsilon,
-            args.final_exploration_frames,
-            random_selection_initset,
-        )
+    explorer = AbstractLinearDecayEpsilonGreedy(
+        1.0,
+        args.final_epsilon,
+        args.final_exploration_steps,
+        random_selection_initset,
+    )
 
     opt = torch.optim.Adam(q_func.parameters(), lr=args.lr, eps=1.5e-4)
-    # Select a replay buffer to use
-    if args.prioritized:
-        # Anneal beta from beta0 to 1 throughout training
-        betasteps = args.steps / args.update_interval
-        rbuf = replay_buffers.PrioritizedReplayBuffer(
-            5*10**5,
-            alpha=0.6,
-            beta0=0.4,
-            betasteps=betasteps,
-            num_steps=args.num_step_return,
-        )
-    else:
-        rbuf = replay_buffers.ReplayBuffer(10**6, args.num_step_return)
 
-    def phi(x):
-        # Feature extractor
-        return np.asarray(x, dtype=np.float32) / 255
+    ### REPLAY BUFFER
+    betasteps = args.steps / args.update_interval
+    rbuf = replay_buffers.PrioritizedReplayBuffer(
+        5*10**5,
+        alpha=0.6,
+        beta0=0.4,
+        betasteps=betasteps,
+        num_steps=args.num_step_return,
+    )
 
-    Agent = AbstractDDQN #parse_agent(args.agent)
+    ###### LOAD AGENT
+
+    Agent = AbstractDDQN 
     agent = Agent(
-        action_mask,
+        env.initset,
         q_func,
         opt,
         rbuf,
@@ -538,11 +434,10 @@ def main():
         agent.load(args.load)
     
     if args.demo:
-        
         if args.eval_random_agent:
-            agent = RandomAgent(random_selection, encoder)
+            agent = RandomAgent(random_selection_from_obs, encoder)
         elif not args.absgroundmdp:
-            agent = AbstractDDQNGrounded(encoder, agent, action_mask, device)
+            agent = AbstractDDQNGrounded(encoder, agent, env.initset, device)
         eval_stats = eval_performance(
             env=eval_env, 
             agent=agent, 
@@ -561,7 +456,7 @@ def main():
         )
     else:
         if args.finetune:   
-            agent = AbstractDDQNGrounded(encoder, agent, action_mask=action_mask, device=device)
+            agent = AbstractDDQNGrounded(encoder, agent, action_mask=env.initset, device=device)
         train_agent_with_evaluation(
             agent=agent,
             env=env,

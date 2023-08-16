@@ -1,4 +1,3 @@
-
 import gym 
 import numpy as np
 
@@ -58,13 +57,12 @@ class EnvOptionWrapper(gym.Env):
         return next_s, r, done, truncated, info
 
     def reset(self, state=None):
-        done = True
         s = self.env.reset(state).astype(np.float32)
-        while done:
+        initset_s = self.initset(s)
+        while initset_s.sum() == 0:
+            s = self.env.reset().astype(np.float32)
             initset_s = self.initset(s)
-            done = initset_s.sum() == 0
-            self._last_initset = initset_s
-            s = self.env.reset(state).astype(np.float32)
+        self._last_initset = initset_s
         return s
     
     def render(self, *args, **kwargs):
@@ -80,7 +78,7 @@ class EnvInitsetWrapper(gym.Env):
         return getattr(self.env, name)
     
     def initset(self, obs):
-        return self.iniset_fn(obs)
+        return self.initset_fn(obs)
     
     def step(self, action):
         next_obs, r, done, info = self.env.step(action)
@@ -94,12 +92,13 @@ class EnvInitsetWrapper(gym.Env):
     
     def reset(self, state=None):
         obs = self.env.reset(state)
-        iniset = self.initset(obs)
-        while iniset.sum() == 0:
-            obs = self.env.reset(state)
-            iniset = self.initset(obs)
-        self.last_initset = iniset
+        initset_next_s = self.initset(obs)
+        while initset_next_s.sum() == 0:
+            obs = self.env.reset()
+            initset_next_s = self.initset(obs)
+        self.last_initset = initset_next_s
         return obs
+    
         
 if __name__=='__main__':
     from envs.pinball.pinball_gym import PinballEnvContinuous

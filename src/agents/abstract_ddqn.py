@@ -33,6 +33,11 @@ from pfrl.replay_buffers import PrioritizedReplayBuffer
 
 from pfrl.utils.batch_states import batch_states
 
+def batch_initset(batch_initset, device='cpu'):
+    if isinstance(batch_initset[0], np.ndarray):
+        return torch.from_numpy(np.stack(batch_initset, axis=0)).to(device)
+    return torch.stack(batch_initset).to(device)
+
 def batch_experiences(experiences, device, phi, gamma, batch_states=batch_states):
     """Takes a batch of k experiences each of which contains j
 
@@ -83,12 +88,12 @@ def batch_experiences(experiences, device, phi, gamma, batch_states=batch_states
             dtype=torch.float32,
             device=device,
         ),
-        "initset_s": torch.as_tensor(
+        "initset_s": batch_initset(
             [elem[0]["initset_s"] for elem in experiences], device=device
         ),
-        "initset_next_s": torch.as_tensor(
+        "initset_next_s": batch_initset(
             [elem[0]["initset_next_s"] for elem in experiences], device=device
-        ),
+        )
 
     }
     if all(elem[-1]["next_action"] is not None for elem in experiences):
@@ -151,7 +156,7 @@ class AbstractDoubleDQN(DoubleDQN):
         if batch_initset_s is not None:
             batch_initset_s = torch.as_tensor(np.array(batch_initset_s), device=self.device)
         else:
-            print('here batch_act')
+            print('Warning: Executing Initset function')
             batch_initset_s = self.action_mask(batch_s)
 
         action_mask = (1-batch_initset_s) * -1e12

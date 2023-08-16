@@ -231,7 +231,7 @@ class AbstractMDPCritic(gym.Env):
             self.transition_fn.feats.reset(self.device) # reset hidden state.
         self._state = self.get_initial_states() if state is None else self.encode(torch.from_numpy(state).to(self.device)).squeeze(0)
         self._state = self._state.to(self.device)
-        return self._state.cpu().numpy()
+        return self._state
 
     def render(self):
         pass
@@ -244,7 +244,7 @@ class AbstractMDPCritic(gym.Env):
         tau =  self.tau(self.state, action)
         info = {'tau': tau.item()}
         self._state = next_s
-        return next_s.cpu().numpy(), r, done, info
+        return next_s, r, done, info
 
     @property
     def state(self):
