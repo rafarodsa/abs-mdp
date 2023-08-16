@@ -14,7 +14,6 @@ from pfrl.wrappers import atari_wrappers
 
 from envs.pinball.pinball_gym import PinballEnvContinuous, PinballEnv
 from envs.pinball.controllers_pinball import PinballGridOptions, create_position_options
-from envs.pinball.initset_pinball import jax_create_position_options
 from envs.env_options import EnvOptionWrapper, EnvInitsetWrapper
 from envs.env_goal import EnvGoalWrapper
 from src.agents.abstract_ddqn import AbstractDoubleDQN as AbstractDDQN, AbstractLinearDecayEpsilonGreedy
