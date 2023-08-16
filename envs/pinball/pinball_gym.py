@@ -38,10 +38,10 @@ class PinballEnv(gym.Env):
         "render_fps": 30,
     }
     
-    def __init__(self, config, start_pos=None, target_pos=None, width=500, height=500, render_mode=None):
+    def __init__(self, config, start_pos=None, target_pos=None, width=500, height=500, render_mode=None, gamma=0.99):
         self.action_space = spaces.Discrete(5)
         self.observation_space = spaces.Box(low=np.zeros(4), high=np.ones(4))
-        self.gamma = 0.99
+        self.gamma = gamma
         self.configuration = config
         self.width = width
         self.height = height
@@ -297,8 +297,8 @@ class PinballModelContinuous(GoalPinballModel):
 class PinballEnvContinuous(PinballEnv):
     MAX_SPEED = 1
     GOAL_REWARD = 10000
-    def __init__(self, config, start_pos=None, target_pos=None, width=500, height=500, render_mode=None):
-        super().__init__(config, start_pos, target_pos, width, height, render_mode)
+    def __init__(self, config, start_pos=None, target_pos=None, width=500, height=500, render_mode=None, gamma=0.99):
+        super().__init__(config, start_pos, target_pos, width, height, render_mode, gamma)
         self.action_space = spaces.Box(low=-self.MAX_SPEED, high=self.MAX_SPEED, shape=(2,), dtype=np.float32)
         self.pinball = PinballModelContinuous(config)
     
