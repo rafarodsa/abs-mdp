@@ -24,6 +24,7 @@ def _run_episodes(
     logger = logger or logging.getLogger(__name__)
     scores = []
     lengths = []
+    exec_time = []
     terminate = False
     timestep = 0
     tau_total = 0
@@ -61,6 +62,7 @@ def _run_episodes(
             # functions, here every score is cast to float.
             scores.append(float(test_r))
             lengths.append(float(episode_len))
+            exec_time.append(float(tau_total))
         if n_steps is None:
             terminate = len(scores) >= n_episodes
         else:
@@ -72,7 +74,7 @@ def _run_episodes(
         logger.info(
             "evaluation episode %s length:%s R:%s", len(scores), episode_len, test_r
         )
-    return scores, lengths
+    return scores, lengths, exec_time
 
 
 def run_evaluation_episodes(
@@ -286,25 +288,17 @@ def eval_performance(
 
     assert (n_steps is None) != (n_episodes is None)
 
-    if isinstance(env, pfrl.env.VectorEnv):
-        scores, lengths = batch_run_evaluation_episodes(
-            env,
-            agent,
-            n_steps,
-            n_episodes,
-            max_episode_len=max_episode_len,
-            logger=logger,
-        )
-    else:
-        scores, lengths = run_evaluation_episodes(
-            env,
-            agent,
-            n_steps,
-            n_episodes,
-            max_episode_len=max_episode_len,
-            logger=logger,
-            discounted=discounted
-        )
+    scores, lengths, exec_times = run_evaluation_episodes(
+        env,
+        agent,
+        n_steps,
+        n_episodes,
+        max_episode_len=max_episode_len,
+        logger=logger,
+        discounted=discounted
+    )
+
+    option_duration_mean = np.array(exec_times)/np.array(lengths)
     stats = dict(
         episodes=len(scores),
         mean=statistics.mean(scores),
@@ -317,6 +311,10 @@ def eval_performance(
         length_stdev=statistics.stdev(lengths) if len(lengths) >= 2 else 0,
         length_max=np.max(lengths),
         length_min=np.min(lengths),
+        option_len_mean = statistics.mean(option_duration_mean),
+        option_len_median = statistics.median(option_duration_mean),
+        option_len_min = option_duration_mean.min(),
+        option_len_max = option_duration_mean.max()
     )
     return stats
 
@@ -443,6 +441,7 @@ class Evaluator(object):
         save_best_so_far_agent=True,
         logger=None,
         use_tensorboard=False,
+        discounted=False
     ):
         assert (n_steps is None) != (n_episodes is None), (
             "One of n_steps or n_episodes must be None. "
@@ -466,6 +465,7 @@ class Evaluator(object):
         self.logger = logger or logging.getLogger(__name__)
         self.env_get_stats = getattr(self.env, "get_statistics", lambda: [])
         self.env_clear_stats = getattr(self.env, "clear_statistics", lambda: None)
+        self.discounted = discounted
         assert callable(self.env_get_stats)
         assert callable(self.env_clear_stats)
 
@@ -484,6 +484,7 @@ class Evaluator(object):
             self.n_episodes,
             max_episode_len=self.max_episode_len,
             logger=self.logger,
+            discounted=self.discounted
         )
         elapsed = time.time() - self.start_time
         agent_stats = self.agent.get_statistics()
@@ -565,6 +566,7 @@ class AsyncEvaluator(object):
         evaluation_hooks=(),
         save_best_so_far_agent=True,
         logger=None,
+        discounted=False
     ):
         assert (n_steps is None) != (n_episodes is None), (
             "One of n_steps or n_episodes must be None. "
@@ -581,6 +583,7 @@ class AsyncEvaluator(object):
         self.evaluation_hooks = evaluation_hooks
         self.save_best_so_far_agent = save_best_so_far_agent
         self.logger = logger or logging.getLogger(__name__)
+        self.discounted = discounted
 
         # Values below are shared among processes
         self.prev_eval_t = mp.Value(
@@ -615,6 +618,7 @@ class AsyncEvaluator(object):
             self.n_episodes,
             max_episode_len=self.max_episode_len,
             logger=self.logger,
+            discounted=self.discounted
         )
         elapsed = time.time() - self.start_time
         agent_stats = agent.get_statistics()

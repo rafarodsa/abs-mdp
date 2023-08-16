@@ -31,7 +31,10 @@ def ball_collides(pinball_env, initial_position, final_position):
         initial_position = initial_position[None]
     if len(final_position.shape) == 1:
         final_position = final_position[None]
+    batch = initial_position.shape[0]
+
     ball_radius = pinball_env.pinball.ball.radius
+    collisions = []
     for obstacle in pinball_env.vertices:
         displacement = final_position - initial_position # [N, 2]
         d = np.linalg.norm(displacement, axis=1, keepdims=True) # + 1e-12
@@ -39,17 +42,23 @@ def ball_collides(pinball_env, initial_position, final_position):
         close_to_vertex = np.any(distances_path_to_vertices(obstacle, initial_position - displacement * ball_radius / d, final_position + displacement * ball_radius / d)[0] <= ball_radius * 1.1, axis=0) 
         final_pos_close_to_edge = distances_path_to_vertices(final_position + displacement * ball_radius / d, obstacle[:-1], obstacle[1:])[0] <= ball_radius * 1.1
         final_pos_close_to_edge = np.any(final_pos_close_to_edge, axis=1)
-        intersect = np.any(_intersect_obstable(obstacle, initial_position, final_position, ball_radius=ball_radius)) 
-        if intersect or close_to_vertex or final_pos_close_to_edge:
-            return True
-    return False
+        intersect = _intersect_obstable(obstacle, initial_position, final_position, ball_radius=ball_radius)
+
+        collision = np.logical_or(np.logical_or(intersect, final_pos_close_to_edge), close_to_vertex)
+        collisions.append(collision)
+        if batch == 1:
+            if np.any(collision):
+                return True
+        
+    collisions = np.stack(collisions, axis=0)
+    return np.any(collisions, axis=0) if batch > 1 else False
 
 def _intersect_obstable(obstacle, initial_position, final_position, ball_radius=0.02, eps=1e-1):
     edges = np.stack([obstacle[:-1], obstacle[1:]], axis=-1)
     alpha, beta = _intersect_batch(edges, initial_position, final_position, ball_rad=ball_radius)
     _intersections = np.logical_and(np.logical_and(alpha <= 1+eps, alpha >= -eps), np.logical_and(beta >= -eps, beta <= 1+eps)) # [M, N]
     theres_collision = np.any(_intersections, axis=0) #.reshape(-1, 3) # N
-    return np.any(theres_collision, -1)
+    return theres_collision
 
 def _intersect_batch(edges, initial_positions, final_positions, ball_rad=0.02):
     '''
@@ -93,14 +102,12 @@ def _intersect_batch(edges, initial_positions, final_positions, ball_rad=0.02):
     try:
         coeff = np.linalg.solve(A, b)
         alpha, beta = coeff[:, :, 0], coeff[:, :, 1] # [M, N]
-    
-        # printarr(initial_positions, displacement, edges, edge_segment, A, coeff)
-        _i = initial_positions[None].repeat(M, axis=0)
-        intersects_0 = _i + beta[..., None] * displacement
-        _e = edges[..., 0][:, None].repeat(N, axis=1)
-        intersects_1 = _e + alpha[..., None] * edge_segment
+        # _i = initial_positions[None].repeat(M, axis=0)
+        # intersects_0 = _i + beta[..., None] * displacement
+        # _e = edges[..., 0][:, None].repeat(N, axis=1)
+        # intersects_1 = _e + alpha[..., None] * edge_segment
 
-        assert np.allclose(intersects_0, intersects_1)  
+        # assert np.allclose(intersects_0, intersects_1)  
        
     except np.linalg.LinAlgError as e:
         DET_EPS = 1e-8

@@ -154,6 +154,7 @@ def train_agent_with_evaluation(
     use_tensorboard=False,
     eval_during_episode=False,
     logger=None,
+    discounted=False
 ):
     """Train an agent while periodically evaluating it.
 
@@ -224,6 +225,7 @@ def train_agent_with_evaluation(
         save_best_so_far_agent=save_best_so_far_agent,
         use_tensorboard=use_tensorboard,
         logger=logger,
+        discounted=discounted
     )
 
     eval_stats_history = train_agent(

@@ -43,6 +43,8 @@ def printarr(*arrs, float_width=6):
             return 'int'
         if isinstance(a, float):
             return 'float'
+        if isinstance(a, (tuple, list)):
+            return '--'
         return str(a.dtype)
     def shape_str(a):
         if a is None:
@@ -51,6 +53,8 @@ def printarr(*arrs, float_width=6):
             return 'scalar'
         if isinstance(a, float):
             return 'scalar'
+        if isinstance(a, (tuple, list)):
+            return f'len: {len(a)}'
         return str(list(a.shape))
     def type_str(a):
         return str(type(a))[8:-2] # TODO this is is weird... what's the better way?

@@ -14,6 +14,7 @@ from pfrl.wrappers import atari_wrappers
 
 from envs.pinball.pinball_gym import PinballEnvContinuous, PinballEnv
 from envs.pinball.controllers_pinball import PinballGridOptions, create_position_options
+from envs.pinball.initset_pinball import jax_create_position_options
 from envs.env_options import EnvOptionWrapper, EnvInitsetWrapper
 from envs.env_goal import EnvGoalWrapper
 from src.agents.abstract_ddqn import AbstractDoubleDQN as AbstractDDQN, AbstractLinearDecayEpsilonGreedy
@@ -117,11 +118,33 @@ def ground_state_sampler(g_sampler, grounding_function, n_samples=1000, device='
         return s
     return __sample
 
+def gaussian_ball_goal_fn(phi, goal, goal_tol, n_samples=100):
+    goal = torch.Tensor(goal).unsqueeze(0)
+    samples = torch.randn(n_samples, 4) * goal_tol
+    encoded_samples = phi(samples + goal)
+    encoded_goal = phi(goal)
+    printarr(encoded_goal, encoded_samples)
+    encoded_tol = torch.sqrt(((encoded_goal-encoded_samples) ** 2).sum(-1).mean())
+    def __goal(z):
+        _d = (((z-encoded_goal)/encoded_tol) ** 2).sum(-1)
+        return torch.exp(-_d) > 0.3
+    return __goal
 
 
+GOALS = [
+    [0.6, 0.5, 0., 0.],
+    [0.1, 0.1, 0., 0.],
+    [0.1, 0.8, 0., 0.],
+    [0.2, 0.9, 0., 0.],
+    [0.9, 0.9, 0., 0.],
+    [0.5, 0.1, 0., 0.],
+    [0.3, 0.3, 0., 0.],
+    [0.4, 0.6, 0., 0.],
+    [0.9, 0.45, 0., 0.], # hard goal
+    [0.9, 0.1, 0., 0.] # hard goal
+]
 
-# goal = [0.9, 0.1, 0., 0.]
-GOAL = [0.6, 0.5, 0., 0.]
+GOAL = GOALS[0]
 STEP_SIZE = 1/25
 GOAL_TOL = 0.05
 GOAL_REWARD = 1.
@@ -154,12 +177,18 @@ def make_initset_from_classifier(initset_classifier, threshold, device='cpu'):
     return __initset
 
 
-def make_abstract_env(test=False, test_seed=127, train_seed=255, args=None, device='cpu', use_ground_init=False):
+def make_abstract_env(test=False, test_seed=127, train_seed=255, args=None, reward_scale=0., device='cpu', use_ground_init=False):
     print('================ CREATE ENVIRONMENT ================', GOAL_REWARD)
     env_sim = torch.load(args.absmdp)
     env_sim.to(device)
     # env = EnvGoalWrapper(env, goal_fn=goal_fn(env.encoder, goal_tol=goal_tol), goal_reward=goal_reward)
-    env = EnvGoalWrapper(env_sim, goal_fn=grounding_goal_fn(env_sim.grounding, env_sim.encoder, goal=GOAL, device=device), goal_reward=GOAL_REWARD, init_state_sampler=init_state_sampler(GOAL))
+    discounted = not test
+    env = EnvGoalWrapper(env_sim, 
+                         goal_fn=gaussian_ball_goal_fn(env_sim.encoder, goal=GOAL, goal_tol=GOAL_TOL), 
+                         goal_reward=GOAL_REWARD, 
+                         init_state_sampler=init_state_sampler(GOAL), 
+                         discounted=discounted, 
+                         reward_scale=0.)
 
     ### MAKE INITSET FUNCTION
     if use_ground_init:
@@ -170,16 +199,22 @@ def make_abstract_env(test=False, test_seed=127, train_seed=255, args=None, devi
     env.seed(test_seed if test else train_seed)
     return env
 
-def make_ground_env(test=False, test_seed=0, train_seed=1, args=None, device='cpu'):
+def make_ground_env(test=False, test_seed=0, train_seed=1, args=None, reward_scale=0., device='cpu'):
     print('================ CREATE GROUND ENVIRONMENT ================', GOAL_REWARD)
-   
+    print(f'{GOAL[:2]} ± {GOAL_TOL}')
     # evaluation in real env
+    discounted = not test
     env = PinballEnvContinuous(config=ENV_CONFIG_FILE)
     options = CreateContinuousOptions(env)
     if args.render:
         env.render_mode = 'human'
-    env = EnvOptionWrapper(options, env)
-    env = EnvGoalWrapper(env, goal_fn=goal_fn(lambda s: s[..., :2], goal=GOAL, goal_tol=GOAL_TOL), goal_reward=GOAL_REWARD, init_state_sampler=init_state_sampler(GOAL))
+    env = EnvOptionWrapper(options, env, discounted=discounted)
+    env = EnvGoalWrapper(env, 
+                         goal_fn=goal_fn(lambda s: s[..., :2], goal=GOAL, goal_tol=GOAL_TOL), 
+                         goal_reward=GOAL_REWARD, 
+                         init_state_sampler=init_state_sampler(GOAL), 
+                         discounted=discounted, 
+                         reward_scale=reward_scale)
     env.seed(test_seed if test else train_seed)
     if args.render:
         env = pfrl.wrappers.Render(env)
@@ -267,9 +302,9 @@ def main():
         help="Total number of timesteps to train the agent.",
     )
     parser.add_argument(
-        "--max-steps",
+        "--max-episode-len",
         type=int,
-        default=50,  
+        default=100,  
         help="Maximum number of frames for each episode.",
     )
     parser.add_argument(
@@ -296,7 +331,7 @@ def main():
         default=5,
         help="Frequency (in timesteps) of network updates.",
     )
-    parser.add_argument("--eval-n-runs", type=int, default=20)
+    parser.add_argument("--eval-n-runs", type=int, default=10)
     parser.add_argument("--no-clip-delta", dest="clip_delta", action="store_false")
     parser.add_argument("--num-step-return", type=int, default=1)
 
@@ -349,6 +384,12 @@ def main():
         type=str
     )
 
+    parser.add_argument(
+        '--reward-scale',
+        type=float, 
+        default=1/6e3
+    )
+
     args = parser.parse_args()
 
     import logging
@@ -367,25 +408,25 @@ def main():
     print("Output files are saved in {}".format(args.outdir))
     device = f'cuda:{args.gpu}' if args.gpu >= 0 else 'cpu'    
     if args.finetune:
-        env = make_ground_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args, device=device)
-        eval_env = make_ground_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args, device=device)
-        env_sim = make_abstract_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args, device=device, use_ground_init=args.use_ground_init)
+        env = make_ground_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args, device=device, reward_scale=args.reward_scale)
+        eval_env = make_ground_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args, device=device, reward_scale=args.reward_scale)
+        env_sim = make_abstract_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args, device=device, use_ground_init=args.use_ground_init, reward_scale=args.reward_scale)
         state_dim = env_sim.env.latent_dim
         encoder = env_sim.env.encode
     elif (not args.absgroundmdp and not args.demo):
-        env = make_abstract_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args, device=device, use_ground_init=args.use_ground_init)
-        eval_env = make_abstract_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args, device=device, use_ground_init=args.use_ground_init)
+        env = make_abstract_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args, device=device, use_ground_init=args.use_ground_init, reward_scale=args.reward_scale)
+        eval_env = make_abstract_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args, device=device, use_ground_init=args.use_ground_init, reward_scale=args.reward_scale)
         state_dim = env.env.latent_dim
         encoder = env.env.encode
     elif args.demo and not args.absgroundmdp:
-        env = make_abstract_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args, device=device, use_ground_init=args.use_ground_init)
-        eval_env = make_ground_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args, device=device)
+        env = make_abstract_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args, device=device, use_ground_init=args.use_ground_init, reward_scale=args.reward_scale)
+        eval_env = make_ground_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args, device=device, reward_scale=args.reward_scale)
         state_dim = env.env.latent_dim
         encoder = env.env.encode
     elif args.absgroundmdp:
         print('absgroundmdp')
-        env = make_ground_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args, device=device)
-        eval_env = make_ground_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args, device=device)
+        env = make_ground_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args, device=device, reward_scale=args.reward_scale)
+        eval_env = make_ground_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args, device=device, reward_scale=args.reward_scale)
         state_dim = 4
         
     n_actions = eval_env.action_space.n
@@ -419,7 +460,7 @@ def main():
         opt,
         rbuf,
         gpu=args.gpu,
-        gamma=0.99,
+        gamma=0.9997,
         explorer=explorer,
         replay_start_size=args.replay_start_size,
         target_update_interval=args.target_update_interval,
@@ -443,8 +484,8 @@ def main():
             agent=agent, 
             n_steps=None, 
             n_episodes=args.eval_n_runs, 
-            max_episode_len=50, 
-            discounted=True
+            max_episode_len=args.max_episode_len, 
+            discounted=False
         )
         print(
             "n_runs: {} mean: {} median: {} stdev {}".format(
@@ -466,12 +507,12 @@ def main():
             eval_n_episodes=args.eval_n_runs,
             eval_interval=args.eval_interval,
             outdir=args.outdir,
-            save_best_so_far_agent=False,
+            save_best_so_far_agent=True,
             eval_env=eval_env,
             use_tensorboard=True,
-            train_max_episode_len=args.max_steps,
-            eval_max_episode_len=50,
-
+            train_max_episode_len=args.max_episode_len,
+            eval_max_episode_len=args.max_episode_len,
+            discounted=False
         )
 
 

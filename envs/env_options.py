@@ -2,12 +2,13 @@ import gym
 import numpy as np
 
 class EnvOptionWrapper(gym.Env):
-    def __init__(self, options, env):
+    def __init__(self, options, env, discounted=False):
         self.env = env
         self.options = options
         self.action_space = gym.spaces.Discrete(len(options))
         self.observation_space = env.observation_space
         self._last_initset = None
+        self.discounted = discounted
     
     def step(self, action):
         option = self.options[action]
@@ -43,7 +44,7 @@ class EnvOptionWrapper(gym.Env):
                 if action is None:
                     break
                 next_s, _r, done, truncated, info = self.env.step(action)
-                r += self.env.gamma ** t * _r # accumulate discounted reward
+                r = r + self.env.gamma ** t * _r  if self.discounted else r + _r# accumulate discounted reward
                 t += 1
             if t >= option.max_executing_time and not done:
                 truncated = True
