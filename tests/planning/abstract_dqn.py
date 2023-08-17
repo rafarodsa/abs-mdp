@@ -107,13 +107,12 @@ def ground_state_sampler(g_sampler, grounding_function, n_samples=1000, device='
         '''
             z : torch.Tensor (1,N)
         '''
-        # printarr(z, g_samples)
+        if len(z.shape) == 1:
+            z = z.unsqueeze(0)
         b_size = z.shape[0]
-        # print(b_size)
         energy = grounding_function(g_samples.repeat(b_size, 1), z.repeat_interleave(n_samples, dim=0)).reshape(b_size, n_samples)
         max_energy = energy.max(-1)
         s = g_samples[max_energy.indices]
-        # printarr(s)
         return s
     return __sample
 
@@ -157,9 +156,9 @@ CreateContinuousOptions = lambda env: create_position_options(env, translation_d
 pinball_env = PinballEnvContinuous(config=ENV_CONFIG_FILE)
 options = CreateContinuousOptions(pinball_env)
 def ground_action_mask(state, device):
-    print('Warning: Computing ground action mask')
+    # print('Warning: Computing ground action mask')
     state = state.cpu()
-    mask = torch.from_numpy(np.array([o.initiation(state[0].numpy()) for o in options]).T).float().unsqueeze(0).to(device)
+    mask = torch.from_numpy(np.array([o.initiation(state[0].numpy()) for o in options]).T).float().to(device)
     return mask
 
 
@@ -173,7 +172,7 @@ def make_ground_init_from_latent(grounding, device):
 def make_initset_from_classifier(initset_classifier, threshold, device='cpu'):
     def __initset(z):
         logits = initset_classifier(z).to(device)
-        return( torch.sigmoid(logits) > threshold).float()
+        return (torch.sigmoid(logits) > threshold).float()
     return __initset
 
 
@@ -315,6 +314,15 @@ def main():
         default=1000,
         help="Minimum replay buffer size before " + "performing gradient updates.",
     )
+
+    parser.add_argument(
+        "--replay-buffer-size",
+        type=int,
+        default=100000,
+        help="Minimum replay buffer size before " + "performing gradient updates.",
+    )
+
+
     parser.add_argument(
         "--target-update-interval",
         type=int,
@@ -394,7 +402,7 @@ def main():
 
     parser.add_argument(
         '--gamma',
-        type=str,
+        type=float,
         default=0.9997
     )
     args = parser.parse_args()
@@ -452,7 +460,7 @@ def main():
     ### REPLAY BUFFER
     betasteps = args.steps / args.update_interval
     rbuf = replay_buffers.PrioritizedReplayBuffer(
-        5*10**5,
+        args.replay_buffer_size,
         alpha=0.6,
         beta0=0.4,
         betasteps=betasteps,

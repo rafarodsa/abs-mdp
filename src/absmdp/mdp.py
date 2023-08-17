@@ -68,6 +68,7 @@ class AbstractMDP(gym.Env):
         done = False
         tau =  self.tau(self.state, action)
         info = {'expected_length': tau.item()}
+        printarr(next_s, self.state)
         self._state = next_s
         return next_s.numpy(), r, done, info
     
@@ -194,7 +195,7 @@ class AbstractMDPCritic(gym.Env):
                  latent_dim,
                  obs_dim,
                  init_classifier,
-                 gamma=0.99,
+                 gamma=0.9997,
                  rssm=False
                 ):
         
@@ -230,8 +231,8 @@ class AbstractMDPCritic(gym.Env):
         if self.rssm:
             self.transition_fn.feats.reset(self.device) # reset hidden state.
         self._state = self.get_initial_states() if state is None else self.encode(torch.from_numpy(state).to(self.device)).squeeze(0)
-        self._state = self._state.to(self.device)
-        return self._state
+        self._state = self._state.to(self.device).unsqueeze(0)
+        return self._state[0]
 
     def render(self):
         pass
@@ -244,13 +245,13 @@ class AbstractMDPCritic(gym.Env):
         tau =  self.tau(self.state, action)
         info = {'tau': tau.item()}
         self._state = next_s
-        return next_s, r, done, info
+        return next_s[0], r, done, info
 
     @property
     def state(self):
         return self._state
     
-    def grounding(self, s, z, std=0.5):
+    def grounding(self, s, z, std=0.1):
         if isinstance(s, np.ndarray):
             s = torch.from_numpy(s)
         if isinstance(z, np.ndarray):
@@ -275,14 +276,17 @@ class AbstractMDPCritic(gym.Env):
             action = torch.tensor(action)
         if isinstance(action, np.ndarray):
             action = torch.from_numpy(action)
-        return torch.nn.functional.one_hot(action, self.n_options)
+        a = torch.nn.functional.one_hot(action, self.n_options)
+        if len(a.shape) == 1:
+            a = a.unsqueeze(0)
+        return a
 
     def transition(self, state, action):
         batch = state.shape[0] if len(state.size()) > 1 else 1
         if len(state.size()) == 1:
             input = torch.cat([state, self._action_to_one_hot(action)], dim=-1)
         else: 
-            input = torch.cat([state, self._action_to_one_hot(action)], dim=0)
+            input = torch.cat([state, self._action_to_one_hot(action)], dim=-1)
         
         t = self.transition_fn.distribution(input.unsqueeze(0))
         # delta_s = t.sample()[0]

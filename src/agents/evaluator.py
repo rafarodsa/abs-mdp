@@ -5,7 +5,7 @@ import statistics
 import time
 
 import numpy as np
-
+from src.utils.printarr import printarr
 import pfrl
 
 
@@ -141,6 +141,7 @@ def _batch_run_episodes(
 
     termination_conditions = False
     timestep = 0
+
     while True:
         # a_t
         actions = agent.batch_act(obss)
