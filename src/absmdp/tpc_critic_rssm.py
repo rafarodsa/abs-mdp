@@ -243,7 +243,7 @@ class RSSMAbstraction(pl.LightningModule):
         initset_acc = (initset_pred == initset_s[_mask]).float().mean()
 
         # nll_loss = self.grounding_loss(next_z[_mask], next_s[_mask]).mean()
-        nll_loss = self.grounding_loss_normal(next_z[_mask])
+        nll_loss = self.grounding_loss_normal(next_z[_mask]).mean()
         self.log_dict({
                        'nll_loss': nll_loss,
                        'initset_acc': initset_acc,
