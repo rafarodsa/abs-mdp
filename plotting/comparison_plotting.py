@@ -4,8 +4,8 @@ import glob
 import numpy as np
 import matplotlib.pyplot as plt
 from collections import defaultdict
-from comparison_plotting_utils import *
-from plotting_utils import get_summary_data, extract_exploration_amounts, load_count_dict, get_true_vs_approx
+from .comparison_plotting_utils import *
+from .plotting_utils import get_summary_data, extract_exploration_amounts, load_count_dict, get_true_vs_approx
 
 
 def get_config(acme_id, group_key):
@@ -71,6 +71,7 @@ def plot_comparison_learning_curves(
     truncate_max_frames=-1,
     truncate_min_frames=-1,
     ylabel=False,
+    xlabel=False,
     legend_loc=None,
     linewidth=2,
     min_seeds=1,
@@ -86,6 +87,7 @@ def plot_comparison_learning_curves(
 
 
     ylabel = ylabel or "Average Return"
+    xlabel = xlabel or "Steps"
 
     if log_dir_path_map is None:
         if group_func is not None:
@@ -101,6 +103,8 @@ def plot_comparison_learning_curves(
         for curve in curves:
             print(f"\t{len(curve[0])}")
         truncated_xs, truncated_all_ys = truncate_and_interpolate(curves, max_frames=truncate_max_frames, min_frames=truncate_min_frames)
+        print(truncated_all_ys.max())
+
         if truncated_xs is None or len(truncated_all_ys) < min_seeds:
             continue
 

@@ -59,11 +59,11 @@ def truncate_and_interpolate(scores, max_frames=-1, min_frames=-1):
         return None, None
     assert all(all(frames[i] <= frames[i+1] for i in range(len(frames) - 1)) for (frames, returns) in filtered_scores), "needs to be sorted for what follows"
     min_max_frames = min([max(frames) for (frames, returns) in filtered_scores])
-    min_max_frames = min(min_max_frames, max_frames)
+    min_max_frames = min(min_max_frames, max_frames) if max_frames > 0 else min_max_frames
     shortened_scores = []
     for frames, returns in filtered_scores:
         if min_max_frames > 0:
-            frames = frames[frames <= max_frames]
+            frames = frames[frames <= min_max_frames]
             returns = returns[:len(frames)]
         shortened_scores.append((frames, returns))
     
