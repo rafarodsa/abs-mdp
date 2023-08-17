@@ -28,6 +28,27 @@ def ask_and_save_agent_replay_buffer(agent, t, outdir, suffix=""):
         save_agent_replay_buffer(agent, t, outdir, suffix=suffix)
 
 
+def evaluate(evaluator, t, episode_idx, agent, successful_score=None):
+    '''
+        Evaluate the agent and return the evaluation score.
+        return:
+            eval_stats: dict of evaluation statistics
+            success: bool indicating whether the agent has reached the successful score
+    '''
+    eval_stats = {}
+    eval_score = evaluator.evaluate_if_necessary(t=t, episodes=episode_idx)
+    if eval_score is not None:
+        eval_stats = dict(agent.get_statistics())
+        eval_stats["eval_score"] = eval_score
+    if (
+        successful_score is not None
+        and evaluator.max_score >= successful_score
+    ):
+        return eval_stats, True
+    return eval_stats, False
+
+
+
 def train_agent(
     agent,
     env,
@@ -36,7 +57,7 @@ def train_agent(
     checkpoint_freq=None,
     max_episode_len=None,
     step_offset=0,
-    evaluator=None,
+    evaluators=None,
     successful_score=None,
     step_hooks=(),
     eval_during_episode=False,
@@ -51,6 +72,7 @@ def train_agent(
     # o_0, r_0
     obs = env.reset()
 
+
     t = step_offset
     if hasattr(agent, "t"):
         agent.t = step_offset
@@ -60,18 +82,16 @@ def train_agent(
 
     try:
         # eval at 0
-        if evaluator is not None:
-            eval_score = evaluator.evaluate_and_update_max_score(t=t, episodes=episode_idx)
-            if eval_score is not None:
-                eval_stats = dict(agent.get_statistics())
-                eval_stats["eval_score"] = eval_score
-                eval_stats_history.append(eval_stats)
+        if evaluators is not None:
+            eval_results = [evaluate(evaluator, t, episode_idx, agent, successful_score) for evaluator in evaluators]
+            eval_dicts, _ = list(zip(*eval_results))
+            eval_stats_history.append(eval_dicts)
 
         while t < steps:
 
             # a_t
-            iniset_s = env.last_initset
-            action = agent.act(obs, iniset_s)
+            initset_s = env.last_initset
+            action = agent.act(obs, initset_s)
             # o_{t+1}, r_{t+1}
             obs, r, done, info = env.step(action.cpu())
             t += 1
@@ -101,17 +121,14 @@ def train_agent(
                 logger.info("statistics:%s", stats)
                 episode_idx += 1
 
-            if evaluator is not None and (episode_end or eval_during_episode):
-                eval_score = evaluator.evaluate_if_necessary(t=t, episodes=episode_idx)
-                if eval_score is not None:
-                    eval_stats = dict(agent.get_statistics())
-                    eval_stats["eval_score"] = eval_score
-                    eval_stats_history.append(eval_stats)
-                if (
-                    successful_score is not None
-                    and evaluator.max_score >= successful_score
-                ):
+            if evaluators is not None and (episode_end or eval_during_episode):
+                eval_results = [evaluate(evaluator, t, episode_idx, agent, successful_score) for evaluator in evaluators]
+                eval_dicts, success = list(zip(*eval_results))
+                eval_stats_history.append(eval_dicts)
+                # if any in success is True
+                if any(success):
                     break
+
 
             if episode_end:
                 if t == steps:
@@ -146,7 +163,7 @@ def train_agent_with_evaluation(
     train_max_episode_len=None,
     step_offset=0,
     eval_max_episode_len=None,
-    eval_env=None,
+    eval_envs=None,
     successful_score=None,
     step_hooks=(),
     evaluation_hooks=(),
@@ -202,7 +219,7 @@ def train_agent_with_evaluation(
 
     os.makedirs(outdir, exist_ok=True)
 
-    if eval_env is None:
+    if eval_envs is None:
         assert not eval_during_episode, (
             "To run evaluation during training episodes, you need to specify `eval_env`"
             " that is independent from `env`."
@@ -211,22 +228,28 @@ def train_agent_with_evaluation(
 
     if eval_max_episode_len is None:
         eval_max_episode_len = train_max_episode_len
+    
+    evaluators = []
+    for name, eval_env in eval_envs.items():
+        
+        os.makedirs(f'{outdir}/{name}', exist_ok=True)
 
-    evaluator = Evaluator(
-        agent=agent,
-        n_steps=eval_n_steps,
-        n_episodes=eval_n_episodes,
-        eval_interval=eval_interval,
-        outdir=outdir,
-        max_episode_len=eval_max_episode_len,
-        env=eval_env,
-        step_offset=step_offset,
-        evaluation_hooks=evaluation_hooks,
-        save_best_so_far_agent=save_best_so_far_agent,
-        use_tensorboard=use_tensorboard,
-        logger=logger,
-        discounted=discounted
-    )
+        evaluator = Evaluator(
+            agent=agent,
+            n_steps=eval_n_steps,
+            n_episodes=eval_n_episodes,
+            eval_interval=eval_interval,
+            outdir=f'{outdir}/{name}',
+            max_episode_len=eval_max_episode_len,
+            env=eval_env,
+            step_offset=step_offset,
+            evaluation_hooks=evaluation_hooks,
+            save_best_so_far_agent=save_best_so_far_agent,
+            use_tensorboard=use_tensorboard,
+            logger=logger,
+            discounted=discounted
+        )
+        evaluators.append(evaluator)
 
     eval_stats_history = train_agent(
         agent,
@@ -236,7 +259,7 @@ def train_agent_with_evaluation(
         checkpoint_freq=checkpoint_freq,
         max_episode_len=train_max_episode_len,
         step_offset=step_offset,
-        evaluator=evaluator,
+        evaluators=evaluators,
         successful_score=successful_score,
         step_hooks=step_hooks,
         eval_during_episode=eval_during_episode,

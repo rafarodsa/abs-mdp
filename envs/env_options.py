@@ -1,6 +1,7 @@
 import gym 
 import numpy as np
 
+
 class EnvOptionWrapper(gym.Env):
     def __init__(self, options, env, discounted=False):
         self.env = env

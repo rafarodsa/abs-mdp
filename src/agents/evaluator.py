@@ -48,7 +48,7 @@ def _run_episodes(
         if 'tau' not in info:
             info['tau'] = 1 
 
-        agent.observe(obs, r, done, info)
+        agent.observe(obs, r, done, reset, info)
         if not discounted:
             test_r += r
         else:

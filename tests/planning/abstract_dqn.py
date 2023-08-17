@@ -15,6 +15,7 @@ from pfrl.wrappers import atari_wrappers
 from envs.pinball.pinball_gym import PinballEnvContinuous, PinballEnv
 from envs.pinball.controllers_pinball import PinballGridOptions, create_position_options
 from envs.env_options import EnvOptionWrapper, EnvInitsetWrapper
+from envs.abstract_env_wrapper import AbstractEnvWrapper
 from envs.env_goal import EnvGoalWrapper
 from src.agents.abstract_ddqn import AbstractDoubleDQN as AbstractDDQN, AbstractLinearDecayEpsilonGreedy
 from src.agents.abstract_ddqn import AbstractDDQNGrounded
@@ -422,29 +423,40 @@ def main():
 
     args.outdir = experiments.prepare_output_dir(args, args.outdir, exp_id=args.exp_id, make_backup=False)
     print("Output files are saved in {}".format(args.outdir))
-    device = f'cuda:{args.gpu}' if args.gpu >= 0 else 'cpu'    
+    device = f'cuda:{args.gpu}' if args.gpu >= 0 else 'cpu'  
+
+
+    eval_envs = {}
+
     if args.finetune:
         env = make_ground_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args, device=device, reward_scale=args.reward_scale, gamma=args.gamma)
         eval_env = make_ground_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args, device=device, reward_scale=args.reward_scale, gamma=args.gamma)
-        env_sim = make_abstract_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args, device=device, use_ground_init=args.use_ground_init, reward_scale=args.reward_scale, gamma=args.gamma)
+        env_sim = make_abstract_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args, device=device, use_ground_init=args.use_ground_init, reward_scale=args.reward_scale, gamma=args.gamma)
         state_dim = env_sim.env.latent_dim
         encoder = env_sim.env.encode
+        eval_envs['ground_env'] = eval_env
+        # eval_envs['sim_env'] = env_sim  # TODO interfacing models.
     elif (not args.absgroundmdp and not args.demo):
         env = make_abstract_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args, device=device, use_ground_init=args.use_ground_init, reward_scale=args.reward_scale, gamma=args.gamma)
         eval_env = make_abstract_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args, device=device, use_ground_init=args.use_ground_init, reward_scale=args.reward_scale, gamma=args.gamma)
+        eval_ground = make_ground_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args, device=device, reward_scale=args.reward_scale, gamma=args.gamma)
+        eval_ground = AbstractEnvWrapper(eval_ground, lambda s: env.env.encode(torch.from_numpy(s)))
         state_dim = env.env.latent_dim
         encoder = env.env.encode
+        eval_envs['ground_env'] = eval_ground
+        eval_envs['sim_env'] = eval_env
     elif args.demo and not args.absgroundmdp:
         env = make_abstract_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args, device=device, use_ground_init=args.use_ground_init, reward_scale=args.reward_scale, gamma=args.gamma)
         eval_env = make_ground_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args, device=device, reward_scale=args.reward_scale, gamma=args.gamma)
         state_dim = env.env.latent_dim
         encoder = env.env.encode
+        eval_envs['ground_env'] = eval_env
     elif args.absgroundmdp:
         print('absgroundmdp')
         env = make_ground_env(test=False, train_seed=train_seed, test_seed=test_seed, args=args, device=device, reward_scale=args.reward_scale, gamma=args.gamma)
         eval_env = make_ground_env(test=True, train_seed=train_seed, test_seed=test_seed, args=args, device=device, reward_scale=args.reward_scale, gamma=args.gamma)
         state_dim = 4
-        
+        eval_envs['ground_env'] = eval_env
     n_actions = eval_env.action_space.n
     q_func = parse_arch('mlp', n_actions, state_dim=state_dim)
 
@@ -514,6 +526,8 @@ def main():
     else:
         if args.finetune:   
             agent = AbstractDDQNGrounded(encoder, agent, action_mask=env.initset, device=device)
+
+
         train_agent_with_evaluation(
             agent=agent,
             env=env,
@@ -524,7 +538,7 @@ def main():
             eval_interval=args.eval_interval,
             outdir=args.outdir,
             save_best_so_far_agent=True,
-            eval_env=eval_env,
+            eval_envs=eval_envs,
             use_tensorboard=True,
             train_max_episode_len=args.max_episode_len,
             eval_max_episode_len=args.max_episode_len,

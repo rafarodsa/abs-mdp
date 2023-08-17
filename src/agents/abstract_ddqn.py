@@ -34,9 +34,8 @@ from pfrl.replay_buffers import PrioritizedReplayBuffer
 from pfrl.utils.batch_states import batch_states
 
 def batch_initset(batch_initset, device='cpu'):
-    if isinstance(batch_initset[0], np.ndarray):
-        return torch.from_numpy(np.stack(batch_initset, axis=0)).to(device)
-    return torch.stack(batch_initset).to(device)
+    batch_initset = [t.to(device) if isinstance(t, torch.Tensor) else torch.from_numpy(t).to(device) for t in batch_initset]
+    return torch.stack(batch_initset, dim=0)
 
 def batch_experiences(experiences, device, phi, gamma, batch_states=batch_states):
     """Takes a batch of k experiences each of which contains j
@@ -154,7 +153,10 @@ class AbstractDoubleDQN(DoubleDQN):
     def batch_act(self, batch_obs: Sequence[Any], batch_initset_s: Sequence[Any] = None) -> Sequence[Any]:
         batch_s = self.batch_states(batch_obs, self.device, self.phi)
         if batch_initset_s is not None:
-            batch_initset_s = torch.as_tensor(np.array(batch_initset_s), device=self.device)
+            if isinstance(batch_initset_s[0], np.ndarray):
+                batch_initset_s = torch.from_numpy(np.stack(batch_initset_s, axis=0)).to(device=self.device)
+            else:
+                batch_initset_s = torch.stack(batch_initset_s, dim=0).to(device=self.device)
         else:
             print('Warning: Executing Initset function')
             batch_initset_s = self.action_mask(batch_s)
@@ -309,8 +311,6 @@ class AbstractDoubleDQN(DoubleDQN):
             print('replay buffer not loaded.')
 
 
-
-
 def select_action_epsilon_greedily(batch_obs, epsilon, random_action_func, greedy_action_func):
     if np.random.rand() < epsilon:
         return random_action_func(batch_obs), False
@@ -341,27 +341,27 @@ class AbstractDDQNGrounded(pfrl.agent.Agent):
         self.agent.device = device
         print(self.gamma)
         
-    def act(self, obs):
-        z = self.encoder(torch.from_numpy(obs).to(self.device)).unsqueeze(0)
+    def act(self, obs, initset=None):
+        z = self.encoder(torch.from_numpy(obs).to(self.device))
         # printarr(obs, z)
-        q_values = self.agent._evaluate_model_and_update_recurrent_states(z)
+        # with torch.no_grad():
+        #     q_values = self.agent._evaluate_model_and_update_recurrent_states(z)
         
-        mask = (1-self.action_mask(torch.from_numpy(obs).unsqueeze(0))) * -1e9
-        action = (q_values.q_values + mask).argmax(-1)
-        self.agent.batch_act(z)
+        # mask = (1-self.action_mask(torch.from_numpy(obs).unsqueeze(0))) * -1e9 if initiset is None else (1-initiset) * -1e9
+        # action = (q_values.q_values + mask).argmax(-1)
+        action = self.agent.act(z, initset)
         return action
 
     
     def load(self, dirname):
         self.agent.load(dirname)
     
-    def observe(self, obs, reward, done, reset):
+    def observe(self, obs, reward, done, reset, info):
         z = self.encoder(torch.from_numpy(obs).to(self.device))
-        self.agent.observe(z, reward, done, reset)
+        self.agent.observe(z, reward, done, reset, info)
     
     def save(self, dirname):
         self.agent.save(dirname)
-        
     
     def get_statistics(self):
         return self.agent.get_statistics()

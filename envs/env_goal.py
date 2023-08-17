@@ -1,5 +1,5 @@
 import gym 
-
+from src.utils.printarr import printarr
 
 class EnvGoalWrapper(gym.Env):
     def __init__(self, env, goal_fn, goal_reward=1, gamma=0.99, reward_scale=0., init_state_sampler=None, discounted=True):
