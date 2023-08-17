@@ -10,9 +10,9 @@ from .plotting_utils import get_summary_data, extract_exploration_amounts, load_
 
 def get_config(acme_id, group_key):
     try:
-        return re.search(f".*({group_key}_[^_]*)_.*", acme_id).group(1)
+        return re.search(f".*?([+-]+{group_key}|{group_key}_[^_]*)_.*", acme_id).group(1)
     except: # if its at the end of the id name
-        return re.search(f".*({group_key}_[^_]*)$", acme_id).group(1)
+        return re.search(f".*?([+-]+{group_key}|{group_key}_[^_]*)$", acme_id).group(1)
 
 
 def default_make_key(log_dir_name, group_keys):
