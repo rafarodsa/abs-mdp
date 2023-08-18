@@ -1,7 +1,0 @@
-type: mlp
-input_dim: ${model.latent_dim}
-output_dim: ${model.obs_dims}
-hidden_dims:
-- 128
-- 128
-activation: relu

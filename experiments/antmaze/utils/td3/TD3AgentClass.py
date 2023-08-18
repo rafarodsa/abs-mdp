@@ -2,9 +2,9 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from hrl.agent.td3.replay_buffer import ReplayBuffer
-from hrl.agent.td3.model import Actor, Critic, NormActor
-from hrl.agent.td3.utils import *
+from replay_buffer import ReplayBuffer
+from model import Actor, Critic, NormActor
+from utils import *
 
 
 # Adapted author implementation of Twin Delayed Deep Deterministic Policy Gradients (TD3)

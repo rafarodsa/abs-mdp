@@ -29,19 +29,13 @@ from typing import List
 from joblib import Parallel, delayed
 from functools import reduce
 
+from experiments.antmaze.utils import OptionExecution
+
 GOAL_SIZE = 2
 GOAL_THRESHOLD = 0.5
 N_SAMPLES = 5
 DISTANCE = 1.
 
-@dataclass
-class OptionExecution:
-    s: np.ndarray
-    next_state: np.ndarray
-    goal: np.ndarray
-    success: bool
-    reward: np.ndarray
-    steps: int
 
 def execute_option(agent, env, states, goals, time_limit=100):
     data_points = []
