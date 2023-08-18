@@ -14,10 +14,10 @@ import torch
 import numpy as np
 import pandas as pd
 
-from hrl.agent.td3.utils import load
-from hrl.agent.td3.TD3AgentClass import TD3
-from hrl.agent.td3.train import make_env
-from hrl.wrappers.antmaze_wrapper import D4RLAntMazeWrapper
+from td3.utils import load
+from td3.TD3AgentClass import TD3
+from td3.train import make_env
+from envs.antmaze import D4RLAntMazeWrapper
 
 from dataclasses import dataclass
 import matplotlib.pyplot as plt
