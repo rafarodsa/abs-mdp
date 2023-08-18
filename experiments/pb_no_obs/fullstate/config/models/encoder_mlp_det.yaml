@@ -1,9 +1,0 @@
-features:
-  type: mlp
-  input_dim: ${model.obs_dims}
-  output_dim: ${model.latent_dim}
-  hidden_dims:
-  - 64
-  activation: relu
-dist:
-  type: deterministic

@@ -6,6 +6,7 @@ gym-minigrid
 *.pyc
 *.pt
 *.ckpt
+*.pkl
 *tfevents*
 *mdps/lightning_logs/
 lightning_logs/
