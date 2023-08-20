@@ -1,7 +1,8 @@
 
 import gym
-from antmaze_wrapper import D4RLAntMazeWrapper
+from .antmaze_wrapper import D4RLAntMazeWrapper
 import pfrl
+import d4rl
 
 def make_env(name, start, goal, seed, horizon=1000):
 
@@ -13,7 +14,7 @@ def make_env(name, start, goal, seed, horizon=1000):
               goal_state=goal,
               use_dense_reward=False
             )
-  env = pfrl.wrappers.CastObservationToFloat32(env)
-  env = pfrl.wrappers.ContinuingTimeLimit(env, max_episode_steps=horizon)
+  # env = pfrl.wrappers.CastObservationToFloat32(env)
+  # env = pfrl.wrappers.ContinuingTimeLimit(env, max_episode_steps=horizon)
   env.env.seed(seed)
   return env

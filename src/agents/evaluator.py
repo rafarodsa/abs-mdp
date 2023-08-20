@@ -23,6 +23,7 @@ def _run_episodes(
 
     logger = logger or logging.getLogger(__name__)
     scores = []
+    discounted_scores = []
     lengths = []
     exec_time = []
     terminate = False
@@ -34,6 +35,7 @@ def _run_episodes(
             obs = env.reset()
             done = False
             test_r = 0
+            discounted_test_r = 0
             episode_len = 0
             info = {}
             tau_total = 0
@@ -49,11 +51,9 @@ def _run_episodes(
             info['tau'] = 1 
 
         agent.observe(obs, r, done, reset, info)
-        if not discounted:
-            test_r += r
-        else:
-            test_r += (agent.gamma ** tau_total) * r
-            tau_total += info['tau']
+        test_r += r
+        discounted_test_r += (agent.gamma ** tau_total) * r
+        tau_total += info['tau']
         if reset:
             logger.info(
                 "evaluation episode %s length:%s R:%s", len(scores), episode_len, test_r
@@ -63,6 +63,7 @@ def _run_episodes(
             scores.append(float(test_r))
             lengths.append(float(episode_len))
             exec_time.append(float(tau_total))
+            discounted_scores.append(float(discounted_test_r))
         if n_steps is None:
             terminate = len(scores) >= n_episodes
         else:
@@ -71,10 +72,12 @@ def _run_episodes(
     if len(scores) == 0:
         scores.append(float(test_r))
         lengths.append(float(episode_len))
+        exec_time.append(float(tau_total))
+        discounted_scores.append(float(discounted_test_r))
         logger.info(
             "evaluation episode %s length:%s R:%s", len(scores), episode_len, test_r
         )
-    return scores, lengths, exec_time
+    return scores, lengths, exec_time, discounted_scores
 
 
 def run_evaluation_episodes(
@@ -289,7 +292,7 @@ def eval_performance(
 
     assert (n_steps is None) != (n_episodes is None)
 
-    scores, lengths, exec_times = run_evaluation_episodes(
+    scores, lengths, exec_times, discounted_scores = run_evaluation_episodes(
         env,
         agent,
         n_steps,
@@ -300,6 +303,9 @@ def eval_performance(
     )
 
     option_duration_mean = np.array(exec_times)/np.array(lengths)
+
+
+
     stats = dict(
         episodes=len(scores),
         mean=statistics.mean(scores),
@@ -314,8 +320,14 @@ def eval_performance(
         length_min=np.min(lengths),
         option_len_mean = statistics.mean(option_duration_mean),
         option_len_median = statistics.median(option_duration_mean),
+        option_len_std = statistics.stdev(option_duration_mean) if len(option_duration_mean) >= 2 else 0.0,
         option_len_min = option_duration_mean.min(),
-        option_len_max = option_duration_mean.max()
+        option_len_max = option_duration_mean.max(),
+        discounted_mean = statistics.mean(discounted_scores),
+        discounted_median = statistics.median(discounted_scores),
+        discounted_std = statistics.stdev(discounted_scores) if len(discounted_scores) >= 2 else 0.0,
+        discounted_min = np.min(discounted_scores),
+        discounted_max = np.max(discounted_scores),
     )
     return stats
 

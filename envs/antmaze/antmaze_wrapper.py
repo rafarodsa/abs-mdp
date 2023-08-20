@@ -2,9 +2,8 @@ from copy import deepcopy
 
 import numpy as np
 import torch
-import ipdb
 
-from hrl.wrappers.gc_mdp_wrapper import GoalConditionedMDPWrapper
+from .gc_mdp_wrapper import GoalConditionedMDPWrapper
 
 XY_LIMITS = {
 	'antmaze-umaze-v2': {
@@ -149,7 +148,7 @@ class D4RLAntMazeWrapper(GoalConditionedMDPWrapper):
 		self.ylims = XY_LIMITS[env_name]['ylims']
 
 
-	def reset(self):
+	def reset(self, state=None):
 		super().reset()
 		s0 = self.sample_random_state()
 		self.set_xy(s0)

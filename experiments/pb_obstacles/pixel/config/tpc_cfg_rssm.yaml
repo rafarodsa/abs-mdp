@@ -6,7 +6,7 @@ seed: 0
 optimizer:
   type: adam
   params:
-    lr: 1e-5
+    lr: 3e-4
 scheduler:
   type: 'linear_scheduler'
   params:

@@ -75,7 +75,6 @@ def run(cfg, ckpt=None, args=None):
                         callbacks=[checkpoint_callback], 
                         logger=[logger, csv_logger],
                         detect_anomaly=False,
-                        limit_train_batches=0.2,
                         # overfit_batches=0.2,
                         # profiler="simple"
                     )

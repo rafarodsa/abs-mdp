@@ -11,12 +11,13 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 from src.models import ModuleFactory
 
 import pandas as pd
-from experiments.antmaze.utils import OptionExecution
+from experiments.antmaze.utils import OptionExecution, parse_oc_args
 from typing import List, Dict
 import numpy as np
 
 import argparse
 from omegaconf import OmegaConf as oc
+import yaml
 
 def get_initset_data(data):
     return [(d.s, float(d.success)) for d in data]
@@ -41,9 +42,13 @@ class Initset(pl.LightningModule):
         super().__init__()
         self.cfg = cfg
         self.model = ModuleFactory.build(cfg.initset)
+        self.name_to_idx = {}
+        self.save_hyperparameters()
 
     def forward(self, x, opt_name=None):
-        return self.model(x) if opt_name else self.model(x)[:, self.name_to_idx[opt_name]]
+        if len(x.shape) == 1:
+            return self.model(x) if opt_name is None else self.model(x)[self.name_to_idx[opt_name]]
+        return self.model(x) if opt_name is None else self.model(x)[..., self.name_to_idx[opt_name]]
 
     def pos_weight(self, y):
         return (y.shape[0] - y.sum(0, keepdim=True)) / y.sum(0, keepdim=True)
@@ -70,7 +75,9 @@ class Initset(pl.LightningModule):
         loss = torch.nn.functional.binary_cross_entropy_with_logits(y_hat, y, pos_weight=self.pos_weight(y))
         tpr = (y_hat.sigmoid() > 0.5).eq(y).float().mean()
         fpr = (y_hat.sigmoid() > 0.5).ne(y).float().mean()
-        self.log_dict({"test_loss": loss, "tpr": tpr, "fpr": fpr}, on_epoch=True, prog_bar=True)
+        test_ = {"test_loss": float(loss), "tpr": float(tpr), "fpr": float(fpr)}
+        self.log_dict(test_, on_epoch=True, prog_bar=True)
+        yaml.dump(test_, open(f"{self.cfg.trainer.save_path}/initset_test.yaml", "w"))
         return loss
     
     def configure_optimizers(self):
@@ -86,17 +93,27 @@ class Initset(pl.LightningModule):
         return torch.utils.data.DataLoader(self.train_data, batch_size=self.cfg.data.batch_size, shuffle=self.cfg.data.shuffle, num_workers=self.cfg.data.num_workers)
     
     def val_dataloader(self):
-        return torch.utils.data.DataLoader(self.val_data, batch_size=self.cfg.data.batch_size, shuffle=False, num_workers=self.cfg.data.num_workers)
+        return torch.utils.data.DataLoader(self.val_data, batch_size=self.cfg.data.batch_size, shuffle=self.cfg.data.shuffle, num_workers=self.cfg.data.num_workers)
     
     def test_dataloader(self):
         return torch.utils.data.DataLoader(self.test_data, batch_size=self.cfg.data.batch_size, shuffle=False, num_workers=self.cfg.data.num_workers)
+    
+    def on_save_checkpoint(self, checkpoint) -> None:
+        "Objects to include in checkpoint file"
+        checkpoint["name_to_idx"] = self.name_to_idx
+
+    def on_load_checkpoint(self, checkpoint) -> None:
+        "Objects to retrieve from checkpoint file"
+        self.name_to_idx= checkpoint["name_to_idx"]
     
 
 def train_initset():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cfg", type=str, default="experiments/antmaze/configs/ground_initset.yaml")
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
+    cli_config = parse_oc_args(unknown)
     cfg = oc.load(args.cfg)
+    cfg = oc.merge(cfg, cli_config)
 
     model = Initset(cfg)
     model.load_dataset()
@@ -107,8 +124,9 @@ def train_initset():
         dirpath=f'{cfg.trainer.save_path}/ckpt',
         save_top_k=1,
         save_last=True,
-        monitor='val_loss',
-        mode='min'
+        monitor='fpr',
+        mode='min',
+        filename='best'
     )
 
 
@@ -118,9 +136,10 @@ def train_initset():
                         max_epochs=cfg.trainer.epochs, 
                         default_root_dir=f'{cfg.trainer.save_path}/initset_train',
                         log_every_n_steps=15,
-                        callbacks=[checkpoint_callback]
+                        callbacks=[checkpoint_callback],
                     )
     trainer.fit(model)
+    trainer.test(model)
 
 
 if __name__=='__main__':

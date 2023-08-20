@@ -281,13 +281,13 @@ def main():
     parser.add_argument(
         "--final-exploration-steps",
         type=int,
-        default=4*10**5,
+        default=3.5*10**5,
         help="Timesteps after which we stop " + "annealing exploration rate",
     )
     parser.add_argument(
         "--final-epsilon",
         type=float,
-        default=0.01,
+        default=0.1,
         help="Final value of epsilon during training.",
     )
     parser.add_argument(
@@ -361,7 +361,7 @@ def main():
         help="Render env states in a GUI window.",
     )
 
-    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate.")
+    parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate.")
 
     parser.add_argument(
         "--checkpoint-frequency",

@@ -1,6 +1,6 @@
 from abc import abstractmethod
 from copy import deepcopy
-from hrl.salient_event.SalientEventClass import SalientEvent
+from .SalientEventClass import SalientEvent
 import numpy as np
 from gym import Wrapper
 

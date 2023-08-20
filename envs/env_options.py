@@ -10,6 +10,7 @@ class EnvOptionWrapper(gym.Env):
         self.observation_space = env.observation_space
         self._last_initset = None
         self.discounted = discounted
+        # self.state = None
     
     def step(self, action):
         option = self.options[action]
@@ -59,21 +60,22 @@ class EnvOptionWrapper(gym.Env):
         return next_s, r, done, truncated, info
 
     def reset(self, state=None):
-        s = self.env.reset(state).astype(np.float32)
+        s = self.env.reset(state)
         initset_s = self.initset(s)
         while initset_s.sum() == 0:
             s = self.env.reset().astype(np.float32)
             initset_s = self.initset(s)
         self._last_initset = initset_s
+        # self.env.state = s
         return s
     
     def render(self, *args, **kwargs):
         return self.env.render(*args, **kwargs)
 
 class EnvInitsetWrapper(gym.Env):
-    def __init__(self, env, iniset_fn):
+    def __init__(self, env, initset_fn):
         self.env = env
-        self.initset_fn = iniset_fn
+        self.initset_fn = initset_fn
         self.last_initset = None
 
     def __getattr__(self, name):
@@ -83,7 +85,11 @@ class EnvInitsetWrapper(gym.Env):
         return self.initset_fn(obs)
     
     def step(self, action):
-        next_obs, r, done, info = self.env.step(action)
+        ret  = self.env.step(action)
+        if len(ret) == 4:
+            next_obs, r, done, info = ret
+        elif len(ret) == 5:
+            next_obs, r, done, truncated, info = ret
         iniset = self.initset(next_obs)
         done = iniset.sum() == 0 or done
         

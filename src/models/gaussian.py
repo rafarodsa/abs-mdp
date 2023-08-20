@@ -35,7 +35,7 @@ class DiagonalNormal(torch.distributions.Distribution):
             batch_size = x.shape[0] // self.mean.shape[0]
             _mean = self.mean.repeat(batch_size, 1, 1)
             _var = self.var.repeat(batch_size, 1, 1)
-            _log_prob = -(x - _mean) ** 2 / _var - 0.5 * (torch.log(_var) + np.log(2 * np.pi))
+            _log_prob = -(x - _mean) ** 2 / _var - 0.5 * (torch.log(_var) + float(np.log(2 * np.pi)))
             _log_prob = _log_prob.sum(-1)
         else:
             p_m = MultivariateNormal(self.mean, covariance_matrix=torch.diag_embed(self.var))
