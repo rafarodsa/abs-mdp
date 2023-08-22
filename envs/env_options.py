@@ -2,7 +2,7 @@ import gym
 import numpy as np
 
 
-class EnvOptionWrapper(gym.Env):
+class EnvOptionWrapper(gym.Wrapper):
     def __init__(self, options, env, discounted=False):
         self.env = env
         self.options = options
@@ -20,7 +20,7 @@ class EnvOptionWrapper(gym.Env):
         info['initset_next_s'] = next_initset
         info['initset_s'] = self.last_initset
         self._last_initset = next_initset
-
+        self.state = next_s
         return next_s.astype(np.float32), r, done, truncated, info
     
     @property
@@ -32,7 +32,7 @@ class EnvOptionWrapper(gym.Env):
         return initiation
 
     def _execute_option(self, option):
-        s = np.array(self.env.state)
+        s = np.array(self.state)
         execute = option.execute(s)
         execute = True
         done = False
@@ -66,7 +66,7 @@ class EnvOptionWrapper(gym.Env):
             s = self.env.reset().astype(np.float32)
             initset_s = self.initset(s)
         self._last_initset = initset_s
-        # self.env.state = s
+        self.state = s
         return s
     
     def render(self, *args, **kwargs):
@@ -90,12 +90,15 @@ class EnvInitsetWrapper(gym.Env):
             next_obs, r, done, info = ret
         elif len(ret) == 5:
             next_obs, r, done, truncated, info = ret
-        iniset = self.initset(next_obs)
-        done = iniset.sum() == 0 or done
+        initset = self.initset(next_obs)
+        no_action_avail = initset.sum() == 0
+        done = no_action_avail or done
         
-        info['initset_next_s'] = iniset
+
+
+        info['initset_next_s'] = initset
         info['initset_s'] = self.last_initset
-        self.last_initset = iniset
+        self.last_initset = initset
         return next_obs, r, done, info
     
     def reset(self, state=None):

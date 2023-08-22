@@ -14,4 +14,9 @@ lightning_logs/
 .ipynb_checkpoints
 *.zip
 .onager
-
+exp_results
+*.png
+jupyter.sh
+tensorboard.sh
+vis/
+venv/

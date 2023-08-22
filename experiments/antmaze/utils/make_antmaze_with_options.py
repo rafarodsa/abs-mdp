@@ -17,12 +17,12 @@ DISTANCE = 1.
 N_OPTIONS = 8
 DIRECTIONS = [[1., 0.], [0., 1.], [-1., 0.], [0., -1.], [1., 1.], [-1., -1.], [1., -1.], [-1., 1.]]
 OPTION_NAMES = ['right', 'up', 'left', 'down', 'up-right', 'down-left', 'up-left', 'down-right']
-
+MAX_OPTION_EXECUTING_TIME=30
 INITSET_THRESH = 0.5
 
 ANTMAZE_OPTION_MODELS = {
     'antmaze-umaze-v2': {
-        'initset_path': 'experiments/antmaze/antmaze-umaze-v2/initset/ckpt/last-v4.ckpt',
+        'initset_path': 'experiments/antmaze/antmaze-umaze-v2/initset/ckpt/best-v1.ckpt',
         'policy_path': 'experiments/antmaze/antmaze-umaze-v2/policy/td3',
         'goal_tol': GOAL_TOAL,
         'distance': DISTANCE,
@@ -30,7 +30,7 @@ ANTMAZE_OPTION_MODELS = {
         'names': OPTION_NAMES,
     },
     'antmaze-medium-play-v2': {
-        'initset_path': 'experiments/antmaze/antmaze-medium-play-v2/initset/ckpt/last.ckpt',
+        'initset_path': 'experiments/antmaze/antmaze-medium-play-v2/initset/ckpt/best.ckpt',
         'policy_path': 'experiments/antmaze/antmaze-medium-play-v2/policy/td3',
         'goal_tol': GOAL_TOAL,
         'distance': DISTANCE,
@@ -38,6 +38,34 @@ ANTMAZE_OPTION_MODELS = {
         'names': OPTION_NAMES,
     }
 }
+
+
+class CastObservationToFloat32(gym.ObservationWrapper):
+    """Cast observations to a given type.
+
+    Args:
+        env: Env to wrap.
+        dtype: Data type object.
+
+    Attributes:
+        original_observation: Observation before casting.
+    """
+
+    def observation(self, observation):
+        self.original_observation = observation
+        return observation.astype(np.float32)
+    
+    def reset(self, state=None):
+        observation = self.env.reset(state)
+        return self.observation(observation)
+    
+class TruncatedWrapper(gym.Wrapper):
+    def step(self, action):
+        next_s, r, done, info = self.env.step(action)
+        return next_s, r, done, False, info
+    def reset(self, state=None):
+        return self.env.reset(state)
+
 
 def load_policy(policy_path, device='cpu'):
     GOAL_SIZE = 2
@@ -60,7 +88,7 @@ def make_initiation_set(initset, option_name, device='cpu'):
         '''
         if isinstance(s, np.ndarray):
             s = torch.from_numpy(s).to(device)
-        return torch.sigmoid(initset(s, option_name)) > INITSET_THRESH
+        return (torch.sigmoid(initset(s, option_name)) > INITSET_THRESH).float()
     return initiation_set
 
 def make_termination_probs(direction, distance, goal_tol, device='cpu'):
@@ -111,6 +139,7 @@ def create_antmaze_options(args=None):
             initiation_classifier=make_initiation_set(initset, option_name, device=device),
             termination_prob=make_termination_probs(dir, configs['distance'], configs['goal_tol'], device=device),
             policy_func_factory=make_option_policy(policy, dir, configs['distance'], device=device),
+            max_executing_time=MAX_OPTION_EXECUTING_TIME
         )
         options.append(o)
     
@@ -118,32 +147,33 @@ def create_antmaze_options(args=None):
         torch.save(options, args.save_path)
     return options, initset
 
+def make_antmaze_options(envname, device):
+    configs = ANTMAZE_OPTION_MODELS[envname]
+    initset = Initset.load_from_checkpoint(configs['initset_path'])
+    policy = load_policy(configs['policy_path'])
+    options = []
+    for dir, option_name in zip(configs['directions'], configs['names']):
+        o = Option(
+            initiation_classifier=make_initiation_set(initset, option_name, device=device),
+            termination_prob=make_termination_probs(dir, configs['distance'], configs['goal_tol'], device=device),
+            policy_func_factory=make_option_policy(policy, dir, configs['distance'], device=device),
+            max_executing_time=MAX_OPTION_EXECUTING_TIME
+        )
+        options.append(o)
 
-class CastObservationToFloat32(gym.ObservationWrapper):
-    """Cast observations to a given type.
+    return options, initset
 
-    Args:
-        env: Env to wrap.
-        dtype: Data type object.
 
-    Attributes:
-        original_observation: Observation before casting.
-    """
-
-    def observation(self, observation):
-        self.original_observation = observation
-        return observation.astype(np.float32)
-    
-    def reset(self, state=None):
-        observation = self.env.reset(state)
-        return self.observation(observation)
-    
-class TruncatedWrapper(gym.Wrapper):
-    def step(self, action):
-        next_s, r, done, info = self.env.step(action)
-        return next_s, r, done, False, info
-    def reset(self, state=None):
-        return self.env.reset(state)
+def make_antmaze(envname, seed=0, options=None, initset=None, device='cpu'):
+    env = antmaze.make_env(envname,
+            start=np.array([8., 0.]),
+            goal=np.array([-10., -10.]),
+            seed=seed)
+    env = CastObservationToFloat32(env)
+    env = TruncatedWrapper(env)
+    env = EnvOptionWrapper(options, env)
+    env = EnvInitsetWrapper(env, make_initiation_set(initset, option_name=None, device=device))
+    return env
 
 
 def test_options():

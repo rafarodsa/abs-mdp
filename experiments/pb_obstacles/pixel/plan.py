@@ -135,7 +135,6 @@ def make_initset_from_classifier(initset_classifier, threshold, device='cpu'):
     return __initset
 
 
-
 CreateContinuousOptions = lambda env: create_position_options(env, translation_distance=STEP_SIZE, check_can_execute=False)
 
 
@@ -143,7 +142,6 @@ def make_abstract_env(test=False, test_seed=127, train_seed=255, args=None, rewa
     print('================ CREATE ENVIRONMENT ================', GOAL_REWARD)
     env_sim = torch.load(args.absmdp)
     env_sim.to(device)
-    env_sim._sample_state = False
     discounted = not test
     goal = GOALS[args.goal]
     print(f'GOAL: {goal[:2]} ± {GOAL_TOL}')
@@ -164,7 +162,7 @@ def make_abstract_env(test=False, test_seed=127, train_seed=255, args=None, rewa
     env.seed(test_seed if test else train_seed)
     return env
 
-def make_ground_env(test=False, test_seed=0, train_seed=1, args=None, reward_scale=0., gamma=0.99, use_ground_init=True, initset_fn=None, device='cpu'):
+def make_ground_env(test=False, test_seed=0, train_seed=1, args=None, reward_scale=0., gamma=0.99, device='cpu'):
     print('================ CREATE GROUND ENVIRONMENT ================', GOAL_REWARD)
     # evaluation in real env
     discounted = not test
@@ -182,10 +180,6 @@ def make_ground_env(test=False, test_seed=0, train_seed=1, args=None, reward_sca
                             reward_scale=reward_scale,
                             gamma=gamma
                         )
-    
-    if not use_ground_init: # use initset from abstract agent
-        assert initset_fn is not None, 'Must provide initset function'
-        env = EnvInitsetWrapper(env, initset_fn)
     env.seed(test_seed if test else train_seed)
     return env
 
@@ -194,14 +188,6 @@ def parse_oc_args(oc_args):
     oc_args = ['='.join([oc_args[i].split('--')[-1], oc_args[i+1]]) for i in range(len(oc_args)) if i%2==0]
     cli_config = oc.from_cli(oc_args)
     return cli_config
-
-def numpy_adaptor(function, device='cpu'):
-    def __f(s):
-        if isinstance(s, torch.Tensor):
-            return function(s)
-        else:
-            return function(torch.from_numpy(s).to(device))
-    return __f
 
 def run():
 
@@ -215,14 +201,12 @@ def run():
     args = oc.merge(cfg, cli_cfg)
 
     device = f'cuda:{args.experiment.gpu}' if args.experiment.gpu >= 0 else 'cpu'
-    
-    
     # make envs.
     train_seed = args.experiment.seed
     test_seed = 2**31 - 1 - args.experiment.seed
 
     encoder = lambda s: s
-    initset_fn = None
+
     ## make envs.
     if args.env.absgroundmdp or args.experiment.finetune:
         env = make_ground_env(
@@ -241,62 +225,41 @@ def run():
                                 device = device,
                                 use_ground_init=args.env.use_ground_init
                             )
-        initset_fn = env.initset
-        sim_encoder = env.env.encoder
-
-
     state_dim = env.observation_space.shape[0]
     # make eval envs
     eval_envs = {}
-    if not args.experiment.finetune:
-        ground_eval_env = make_ground_env(
-                                test=True,
-                                test_seed=test_seed, 
-                                args=args.env, 
-                                reward_scale=args.env.reward_scale,
-                                gamma=args.env.gamma,
-                                device = device,
-                                use_ground_init=args.env.use_ground_init or args.env.absgroundmdp,
-                                initset_fn=numpy_adaptor(lambda s: initset_fn(sim_encoder(s)), device=device)
-                            )
+    ground_eval_env = make_ground_env(
+                            test=True,
+                            test_seed=test_seed, 
+                            args=args.env, 
+                            reward_scale=args.env.reward_scale,
+                            gamma=args.env.gamma,
+                            device = device
+                        )
     
-        if not args.env.absgroundmdp: # not training the ground agent.
-            sim_eval_env = make_abstract_env(
-                                        test=True,
-                                        test_seed=test_seed, 
-                                        args=args.env, 
-                                        reward_scale=args.env.reward_scale,
-                                        gamma=args.env.gamma,
-                                        device = device,
-                                        use_ground_init=args.env.use_ground_init
-                                    )
-            ground_eval_env = AbstractEnvWrapper(ground_eval_env, lambda s: sim_eval_env.env.encoder(torch.from_numpy(s))) # abstract agent sees abstract env (AA -> GE)
-            eval_envs['sim'] = sim_eval_env
+    if not args.env.absgroundmdp and not args.experiment.finetune: # not training the ground agent.
+        sim_eval_env = make_abstract_env(
+                                    test=True,
+                                    test_seed=test_seed, 
+                                    args=args.env, 
+                                    reward_scale=args.env.reward_scale,
+                                    gamma=args.env.gamma,
+                                    device = device,
+                                    use_ground_init=args.env.use_ground_init
+                                )
+        
+        ground_eval_env = AbstractEnvWrapper(ground_eval_env, lambda s: sim_eval_env.env.encoder(torch.from_numpy(s)))
+        eval_envs['sim'] = sim_eval_env
+    
+    
+    eval_envs['ground'] = ground_eval_env
+
+    envs = {'train': env, 'eval': eval_envs}
 
     # finetuning
     if args.experiment.finetune:
-        # assert args.agent.load is not None, 'Must provide a model to finetune'
         assert args.env.absmdp is not None, 'Must provide the abstract MDP the agent planned on'
-
-        # look for finished experiment
-        if args.agent.load is None:
-            loading_path = f'{args.experiment_cwd}/{args.experiment_name}/{args.experiment.outdir}/{cli_args.exp_id}'
-            # search for subdir that endsi in _finish
-            found = False
-            for d in os.listdir(loading_path):
-                if d.endswith('_finish'):
-                    loading_path = f'{loading_path}/{d}'
-                    found = True
-                    break
-
-            assert found or args.agent.load is not None, f'Could not find a finished experiment in {loading_path}'
-            print(f'Loading from {loading_path}')
-        
-            args.agent.load = loading_path
-        
-
         sim_eval_env = make_abstract_env(
-                            test=True,
                             test_seed=test_seed, 
                             args=args.env, 
                             reward_scale=args.env.reward_scale,
@@ -304,33 +267,29 @@ def run():
                             device = device,
                             use_ground_init=args.env.use_ground_init
                         )
-        
         # encoder = lambda s: sim_eval_env.env.encoder(s) if isinstance(s, torch.Tensor) else sim_eval_env.env.encoder(torch.from_numpy(s).to(device))  # get encoder
         encoder = sim_eval_env.env.encoder
-        # initset_fn = sim_eval_env.initset
-
-        initset_fn = numpy_adaptor(lambda s: sim_eval_env.initset(encoder(s)), device=device)
-        
-        ground_eval_env = make_ground_env(
-                                test=True,
-                                test_seed=test_seed, 
-                                args=args.env, 
-                                reward_scale=args.env.reward_scale,
-                                gamma=args.env.gamma,
-                                device = device,
-                                use_ground_init=args.env.use_ground_init,
-                                initset_fn=initset_fn
-                            )
-        env = EnvInitsetWrapper(env, initset_fn) # change initset for the ground finetuning environment
         state_dim = sim_eval_env.observation_space.shape[0]
-
-
         
-    eval_envs['ground'] = ground_eval_env
-    envs = {'train': env, 'eval': eval_envs} 
+        
+        loading_path = f'{args.experiment_cwd}/{args.experiment_name}/planning_ddqn/{cli_args.exp_id}'
+        # search for subdir that endsi in _finish
+        found = False
+        for d in os.listdir(loading_path):
+            if d.endswith('_finish'):
+                loading_path = f'{loading_path}/{d}'
+                found = True
+                break
+
+        assert found, f'Could not find a finished experiment in {loading_path}'
+        print(f'Loading from {loading_path}')
+
+        if args.agent.load is None or os.path.isdir(args.agent.load):
+            args.agent.load = loading_path
+
 
     # prepare outdir
-    outdir = f'{args.experiment_cwd}/{args.experiment_name}/{args.experiment.outdir}' if not args.experiment.finetune else f'{args.experiment_cwd}/{args.experiment_name}/{args.experiment.outdir}_finetuning'
+    outdir = f'{args.experiment_cwd}/{args.experiment_name}/planning_ddqn' if not args.experiment.finetune else f'{args.experiment_cwd}/{args.experiment_name}/planning_ddqn/finetuning'
     outdir = pfrl.experiments.prepare_output_dir(None, outdir, exp_id=cli_args.exp_id, make_backup=False)
     args.experiment.outdir = outdir
     print(f'Logging to {outdir}')
@@ -348,7 +307,7 @@ def run():
         yaml.dump(_args, f, default_flow_style=False)
 
     # train
-    run_abstract_ddqn(envs, q_func, encoder, args.agent, args.experiment, finetuning_args=args.finetuning, device=device)
+    run_abstract_ddqn(envs, q_func, encoder, args.agent, args.experiment, device=device)
 
 
 if __name__ == '__main__':

@@ -70,6 +70,7 @@ def train_agent(
     episode_idx = 0
 
     # o_0, r_0
+
     obs = env.reset()
 
 

@@ -19,6 +19,8 @@ from pfrl import replay_buffers, utils
 from pfrl.q_functions import DiscreteActionValueHead
 from pfrl.experiments.evaluation_hooks import EvaluationHook
 
+from collections import defaultdict
+
 
 class RandomAgent(pfrl.agent.Agent):
     def __init__(self, action_selection, encoder):
@@ -55,14 +57,14 @@ class LogDiscountedReturn(EvaluationHook):
 
     def __init__(self):
         self.support_train_agent = True
-        self.created_header = False
+        self.header_created = defaultdict(lambda: False)
         
 
     def __call__(self, env, agent, evaluator, step, eval_stats, agent_stats, env_stats):
-        if not self.created_header:
+        if not self.header_created[evaluator.outdir]:
             with open(f'{evaluator.outdir}/discounted_return.txt', 'w') as f:
                 f.write('\t'.join(self.header) + '\n')
-            self.created_header = True
+            self.header_created[evaluator.outdir] = True
         if eval_stats is not None:
             with open(f'{evaluator.outdir}/discounted_return.txt', 'a+') as f:
                 f.write('\t'.join([str(step)] + [str(eval_stats[k]) for k in self.header[1:]]) + '\n')
@@ -78,12 +80,15 @@ def random_selection_initset(initset_s):
 def random_selection_from_obs(obs, iniset_fn):
     return random_selection_initset(iniset_fn(obs))
 
-def run_abstract_ddqn(envs, q_func, encoder, agent_args, experiment_args, device):
+def run_abstract_ddqn(envs, q_func, encoder, agent_args, experiment_args, finetuning_args=None, device='cpu'):
 
     '''
         envs: Dict of envs (e.g. {'train': train_env, 'eval': {'eval_env1', 'eval_env2', ...}})
         args: Namespace with DDQN config params
     '''
+
+    if experiment_args.finetune:
+        assert finetuning_args is not None
 
     logging.basicConfig(level=experiment_args.log_level)
     utils.set_random_seed(experiment_args.seed) # set random seed
@@ -93,17 +98,32 @@ def run_abstract_ddqn(envs, q_func, encoder, agent_args, experiment_args, device
 
 
     # Exploration
-    explorer = AbstractLinearDecayEpsilonGreedy(
-        1.0,
-        agent_args.final_epsilon,
-        agent_args.final_exploration_steps,
-        random_selection_initset,
-    )
+    if not experiment_args.finetune:
+        explorer = AbstractLinearDecayEpsilonGreedy(
+            1.0,
+            agent_args.final_epsilon,
+            agent_args.final_exploration_steps,
+            random_selection_initset,
+        )
+    else:
+        explorer = AbstractLinearDecayEpsilonGreedy(
+            1.0,
+            finetuning_args.final_epsilon,
+            finetuning_args.final_exploration_steps,
+            random_selection_initset,
+        )
+
 
     opt = torch.optim.Adam(q_func.parameters(), lr=agent_args.lr, eps=1.5e-4)
 
+
     ### REPLAY BUFFER
-    betasteps = agent_args.steps / agent_args.update_interval
+    if experiment_args.finetune:
+        betasteps = finetuning_args.steps / agent_args.update_interval  
+    else:
+        betasteps = agent_args.steps / agent_args.update_interval
+
+
     rbuf = replay_buffers.PrioritizedReplayBuffer(
         agent_args.replay_buffer_size,
         alpha=0.6,
@@ -134,7 +154,9 @@ def run_abstract_ddqn(envs, q_func, encoder, agent_args, experiment_args, device
     ### TRAINING
     if agent_args.load:
         agent.load(agent_args.load)
-    
+        if experiment_args.finetune:
+            agent.optimizer = torch.optim.Adam(q_func.parameters(), lr=finetuning_args.lr, eps=1.5e-4)
+     
     if experiment_args.demo:
         if experiment_args.eval_random_agent:
             agent = RandomAgent(random_selection_from_obs, encoder)
@@ -159,12 +181,12 @@ def run_abstract_ddqn(envs, q_func, encoder, agent_args, experiment_args, device
     else:
         if experiment_args.finetune:   
             agent = AbstractDDQNGrounded(encoder, agent, action_mask=env.initset, device=device)
-
+        steps = agent_args.steps if not experiment_args.finetune else finetuning_args.steps
 
         train_agent_with_evaluation(
             agent=agent,
             env=env,
-            steps=agent_args.steps,
+            steps=steps,
             eval_n_steps=None,
             checkpoint_freq=experiment_args.checkpoint_frequency,
             eval_n_episodes=experiment_args.eval_n_runs,

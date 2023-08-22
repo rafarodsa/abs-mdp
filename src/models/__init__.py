@@ -1,4 +1,5 @@
 from .gaussian import DiagonalGaussian, Deterministic, DiagonalGaussianModule
+from .gaussian import build_gaussian_mixture
 from .mlp import MLP, DynamicsMLP, RewardMLP, MLPCritic
 from .pixelcnn import PixelCNNStack, GatedPixelCNNLayer, PixelCNNDecoder, DeconvBlock
 from .residualconv import ConvResidualLayer, ResidualStack, ResidualConvEncoder, build_conv_critic, build_residual_critic, build_residual_encoder
@@ -15,3 +16,4 @@ ModuleFactory.register('mlp_critic', MLPCritic)
 ModuleFactory.register('rssm', RSSMFactory)
 ModuleFactory.register('cnn_critic', build_residual_critic)
 ModuleFactory.register('doubling_residual', build_residual_encoder)
+ModuleFactory.register('mixture_gaussian', build_gaussian_mixture)

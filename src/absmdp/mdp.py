@@ -47,7 +47,7 @@ class AbstractMDP(gym.Env):
         self.obs_dim = obs_dim
         self.init_classifier = init_classifier
         self._gamma = gamma
-
+        self._sample_model = False
         # define action and observation space
         self.action_space = gym.spaces.Discrete(n_options)
         self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(latent_dim,), dtype=np.float32)
@@ -61,6 +61,9 @@ class AbstractMDP(gym.Env):
 
     def render(self):
         pass
+
+    def sample_model(self, sample=True):
+        self._sample_model = sample
 
     def step(self, action):
         next_s = self.transition(self.state, action)
@@ -106,7 +109,7 @@ class AbstractMDP(gym.Env):
             input = torch.cat([state, self._action_to_one_hot(action)], dim=0)
         t = self.transition_fn.distribution(input)
         # print('sampling')
-        return t.sample()[0] + state
+        return t.sample()[0] + state if self._sample_model else t.mean + state
         # return t.mean + state
     
     def reward(self, state, action, next_state):
@@ -212,6 +215,7 @@ class AbstractMDPCritic(gym.Env):
         self._gamma = gamma
         self.rssm = rssm
         self.device='cpu'
+        self._sample_state = False
 
         self.modules = [encoder, grounding, transition, reward, init_classifier, tau]
         for m in self.modules:
@@ -227,6 +231,10 @@ class AbstractMDPCritic(gym.Env):
 
         self.reset()
     
+
+    def sample_state(self, sample=True):
+        self._sample_state = sample
+
     def reset(self, state=None):
         if self.rssm:
             self.transition_fn.feats.reset(self.device) # reset hidden state.
@@ -290,7 +298,7 @@ class AbstractMDPCritic(gym.Env):
         
         t = self.transition_fn.distribution(input.unsqueeze(0))
         # delta_s = t.sample()[0]
-        delta_s = t.mean
+        delta_s = t.mean if not self._sample_state else t.sample()[0]
         next_s = delta_s + state
         return next_s[0]
         # return t.mean + state

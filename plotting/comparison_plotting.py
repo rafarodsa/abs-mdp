@@ -142,6 +142,78 @@ def plot_comparison_learning_curves(
         plt.close()
 
 
+def generate_learning_curves(
+    base_dir, #str
+    group_keys=("rewardscale",),
+    group_func=None,
+    summary_fn=None,
+    csv_path_fn=None,
+    save_path=None,
+    show=True,
+    smoothen=10,
+    log_dir_path_map=None,
+    uniform_truncate=False,
+    truncate_max_frames=-1,
+    truncate_min_frames=-1,
+    ylabel=False,
+    xlabel=False,
+    legend_loc=None,
+    linewidth=2,
+    min_seeds=1,
+    all_seeds=False,
+    title=None,
+    min_final_val=None):
+
+    id_to_csv = csv_path_fn(base_dir=base_dir)
+
+    assert isinstance(group_keys, (tuple, list)), f"{type(group_keys)} should be tuple or list"
+    if save_path is not None:
+        plt.figure(figsize=(24,12))
+
+
+    ylabel = ylabel or "Average Return"
+    xlabel = xlabel or "Steps"
+
+    if log_dir_path_map is None:
+        if group_func is not None:
+            log_dir_path_map = extract_log_dirs_group_func(id_to_csv=id_to_csv, group_func=group_func, summary_fn=summary_fn)
+        else:
+            log_dir_path_map = extract_log_dirs(id_to_csv=id_to_csv, group_keys=group_keys, summary_fn=summary_fn)
+
+    curves_dicts = []
+    for config in log_dir_path_map:
+        if config is None:
+            continue
+        curves = log_dir_path_map[config]
+        print(config)
+        for curve in curves:
+            print(f"\t{len(curve[0])}")
+        truncated_xs, truncated_all_ys = truncate_and_interpolate(curves, max_frames=truncate_max_frames, min_frames=truncate_min_frames)
+        # print(truncated_all_ys.max())
+
+        if truncated_xs is None or len(truncated_all_ys) < min_seeds:
+            continue
+
+        if min_final_val is not None:
+            if np.array(truncated_all_ys)[:, -1].mean() <= min_final_val:
+                continue
+
+        # score_array = np.array(truncated_all_ys)
+        # print(np.max(truncated_all_ys))
+        curve_dict = generate_plot_dict(
+            # score_array,
+            truncated_xs,
+            truncated_all_ys,
+            label=config,
+            smoothen=smoothen,
+            linewidth=linewidth,
+            all_seeds=all_seeds
+        )
+        curves_dicts.append(curve_dict)
+
+    return curves_dicts
+
+
 def get_rmse_for_each_iteration(count_dict):
     exact, approx = get_true_vs_approx(count_dict, "bonus")
     assert len(exact) == len(approx)

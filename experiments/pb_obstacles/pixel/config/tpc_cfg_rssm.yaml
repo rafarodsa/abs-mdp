@@ -1,7 +1,8 @@
 # Config file for Pinball environment
 # Full State observation
 # Gridworld abstraction
-experiment_cwd: 'experiments/pb_obstacles/pixel'
+experiment_cwd: 'exp_results/pb_obstacles/pixel'
+model_config_dir: experiments/pb_obstacles/pixel
 seed: 0
 optimizer:
   type: adam
@@ -52,9 +53,9 @@ model:
   n_options: 4
   obs_dims: ${data.n_out_feats}
   latent_dim: 2
-  encoder: ${loadcfg:${experiment_cwd}/config/models/encoder_cnn.yaml}
-  decoder: ${loadcfg:${experiment_cwd}/config/models/decoder_cnn_critic.yaml}
-  transition: ${loadcfg:${experiment_cwd}/config/models/transition_rssm.yaml}
-  init_class: ${loadcfg:${experiment_cwd}/config/models/init_class_mlp.yaml}
-  reward: ${loadcfg:${experiment_cwd}/config/models/reward_mlp.yaml}
-  tau: ${loadcfg:${experiment_cwd}/config/models/tau_mlp.yaml}
+  encoder: ${loadcfg:${model_config_dir}/config/models/encoder_cnn.yaml}
+  decoder: ${loadcfg:${model_config_dir}/config/models/decoder_cnn_critic.yaml}
+  transition: ${loadcfg:${model_config_dir}/config/models/transition_rssm.yaml}
+  init_class: ${loadcfg:${model_config_dir}/config/models/init_class_mlp.yaml}
+  reward: ${loadcfg:${model_config_dir}/config/models/reward_mlp.yaml}
+  tau: ${loadcfg:${model_config_dir}/config/models/tau_mlp.yaml}

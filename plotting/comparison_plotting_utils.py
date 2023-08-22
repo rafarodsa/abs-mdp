@@ -118,3 +118,22 @@ def generate_plot(xs, all_ys, label, smoothen=0, linewidth=2, all_seeds=False):
     if all_seeds:
         for i, score in enumerate(all_ys):
             plt.plot(xs, score, linewidth=linewidth, label=label+f"_{i+1}", alpha=0.6)
+
+def generate_plot_dict(xs, all_ys, label, smoothen=0, linewidth=2, all_seeds=False):
+    if smoothen > 0:
+        xs = moving_average(xs, n=smoothen)
+        all_ys = smoothen_data(all_ys, n=smoothen)
+
+    median, mean, top, bottom = get_plot_params(all_ys)
+
+    # Create a data structure to store curve information
+    curve_data = {
+        "xs": xs,
+        "mean": mean,
+        "top": top,
+        "bottom": bottom,
+        "label": label,
+        "linewidth": linewidth,
+    }
+
+    return curve_data

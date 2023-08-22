@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torch.distributions import Normal, MultivariateNormal, Categorical
 import numpy as np
 from .configs import DiagGaussianConfig
 
@@ -45,8 +46,6 @@ class DiagonalNormal(torch.distributions.Distribution):
     
     def entropy(self):
         h = self.dist.entropy().sum(-1)
-        # p_m = MultivariateNormal(self.mean, covariance_matrix=torch.diag_embed(self.var))
-        # assert torch.allclose(p_m.entropy(), h)
         return h
 
     def detach(self):
@@ -129,6 +128,7 @@ class DiagonalGaussianModule(nn.Module):
             p.requires_grad_ = True
         return self
 
+
 class SphericalGaussianModule(DiagonalGaussianModule):
     def __init__(self, features, config):
         nn.Module.__init__(self)
@@ -149,15 +149,7 @@ class SphericalGaussianModule(DiagonalGaussianModule):
         log_var = self.min_var + softplus(log_var - self.min_var)
        
         return mean, log_var * torch.ones_like(mean)
-
-
-# class CalibratedOptimaGaussianModule(SphericalGaussianModule):
-#     def __init__(self, features, config):
-#         super().__init__(self, features, config)
-#         self.log_var = 1.
-
-#     def forward(self, input):
-
+    
 class FixedVarGaussian(DiagonalGaussianModule):
     def __init__(self, features, config: DiagGaussianConfig):
         nn.Module.__init__(self)
@@ -202,3 +194,142 @@ def Deterministic(config: DiagGaussianConfig):
     config.var = 1e-15
     return partial(FixedVarGaussian, config=config)
 
+
+
+### Gaussian Mixture 
+class MixtureDiagonalNormal(torch.distributions.Distribution):
+
+    def __init__(self, means, stds, pis):
+        super(MixtureDiagonalNormal, self).__init__()
+        self._means = means # list
+        self._stds = stds # list
+        self._pis = pis # (..., K)
+        
+        # Create DiagonalNormal components
+        self._components = [DiagonalNormal(mean, std) for mean, std in zip(self._means, self._stds)]
+
+    @property
+    def means(self):
+        return self._means
+
+    @property
+    def vars(self):
+        return [std ** 2 for std in self._stds]
+    
+    @property
+    def stds(self):
+        return self._stds
+    
+    @property
+    def mean(self):
+        weighted_means = [self._pis[..., i:i+1] * self._means[i] for i in range(len(self._components))]
+        return sum(weighted_means)
+
+    @property
+    def var(self):
+        weighted_vars_plus_means = [self._pis[..., i:i+1] * (self.vars[i] + self._means[i]**2) for i in range(len(self._components))]
+        mixture_var = sum(weighted_vars_plus_means) - self.mean**2
+        return mixture_var
+
+    @property
+    def std(self):
+        return torch.sqrt(self.var)
+
+    def sample(self, n_samples=1):
+        # Sampling using Categorical Distribution
+        # TODO Test
+        categorical = Categorical(probs=self._pis)
+        indices = categorical.sample((n_samples,))
+        samples = []
+        for i in range(n_samples):
+            sample_from_chosen_component = self._components[indices[i]].sample()
+            samples.append(sample_from_chosen_component)
+        return torch.stack(samples)
+
+    def log_prob(self, x, batched=False):
+        # Compute log prob for each component and then combine with log(pis)
+        # import ipdb; ipdb.set_trace()
+        batch_size = x.shape[0] // self._means[0].shape[0]
+        repeats = [batch_size] + [1] * (len(self._means[0].shape) - 1)
+        log_probs = torch.stack([component.log_prob(x, batched=batched) for component in self._components], dim=-1)
+        _pis = self._pis.repeat(*repeats) if batched else self._pis
+        return torch.logsumexp(log_probs + torch.log(_pis + 1e-10), dim=-1)
+
+    def entropy(self):
+        #TODO Test
+        # Entropy for each component
+        component_entropies = torch.stack([component.entropy() for component in self._components], dim=1)
+        
+        # Entropy of the mixing coefficients
+        pis_entropy = -torch.sum(self._pis * torch.log(self._pis + 1e-10), dim=1)
+        # Weighted sum of component entropies
+        weighted_component_entropies = torch.sum(self._pis * component_entropies, dim=1)
+
+        return weighted_component_entropies + pis_entropy
+
+    def detach(self):
+        return MixtureDiagonalNormal([mean.detach() for mean in self._means], [std.detach() for std in self._stds], self._pis.detach())
+
+
+class MixtureDiagonalGaussianModule(nn.Module):
+
+    def __init__(self, features, config):
+        super().__init__()
+        self.feats = features
+        self.output_dim = config.output_dim
+        self.k = config.n_components
+
+        self.means = nn.ModuleList([nn.Linear(config.input_dim, config.output_dim) for _ in range(self.k)])
+        self.log_vars = nn.ModuleList([nn.Linear(config.input_dim, config.output_dim) for _ in range(self.k)])
+        self.mixing_coeffs = nn.Linear(config.input_dim, self.k)  # the mixing coefficients
+        
+        self.min_var = torch.log(torch.tensor(config.min_std)) * 2
+        self.max_var = torch.log(torch.tensor(config.max_std)) * 2 
+
+    def forward(self, input):
+        feats = self.feats(input)
+        means, log_vars = [], []
+        for i in range(self.k):
+            mean, log_var = self.means[i](F.elu(feats)), self.log_vars[i](F.elu(feats))
+            # softly constrain the variance
+            log_var = self.max_var - F.softplus(self.max_var - log_var)
+            log_var = self.min_var + F.softplus(log_var - self.min_var)
+            means.append(mean)
+            log_vars.append(log_var)
+
+        pis = F.softmax(self.mixing_coeffs(F.elu(feats)), dim=-1)
+        return means, log_vars, pis
+
+    def sample_n_dist(self, input, n_samples=1):
+        means, log_vars, pis = self.forward(input)
+        stds = [torch.exp(log_var / 2) for log_var in log_vars]
+        mixture_dist = MixtureDiagonalNormal(means, stds, pis)
+        z = mixture_dist.sample(n_samples)
+        std_normal = DiagonalNormal(torch.zeros_like(means[0]), torch.ones_like(stds[0]))
+        return z, mixture_dist, std_normal
+
+    def sample(self, input, n_samples=1):
+        means, log_vars, pis = self.forward(input)
+        stds = [torch.exp(log_var / 2) for log_var in log_vars]
+        mixture_dist = MixtureDiagonalNormal(means, stds, pis)
+        z = mixture_dist.sample(n_samples)
+        return z
+
+    def distribution(self, input):
+        means, log_vars, pis = self.forward(input)
+        stds = [torch.exp(log_var / 2) for log_var in log_vars]
+        mixture_dist = MixtureDiagonalNormal(means, stds, pis)
+        return mixture_dist
+    
+    def freeze(self):
+        for p in self.parameters():
+            p.requires_grad_ = False
+        return self
+    
+    def unfreeze(self):
+        for p in self.parameters():
+            p.requires_grad_ = True
+        return self
+
+def build_gaussian_mixture(config):
+    return partial(MixtureDiagonalGaussianModule, config=config)

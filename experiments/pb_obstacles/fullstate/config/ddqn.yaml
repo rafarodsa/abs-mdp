@@ -1,0 +1,55 @@
+# environment.yaml
+experiment_cwd: exp_results/pb_obstacles/fullstate/mdps
+experiment_name: pinball_rssm_large_normal_4__model.latentdim_6__seed_0
+env:
+  absmdp: ${experiment_cwd}/${experiment_name}/cont_mdp.pt
+  absgroundmdp: false
+  render: false
+  init_thresh: 0.5
+  use_ground_init: false
+  reward_scale: 0. #0.00016666666666666666
+  gamma: 0.9997
+  goal: 0
+
+agent:
+  load: null
+  final_exploration_steps: 350000
+  final_epsilon: 0.1
+  eval_epsilon: 0.001
+  replay_start_size: 1000
+  replay_buffer_size: 100000
+  target_update_interval: 1000
+  steps: 1000000
+  update_interval: 5
+  num_step_return: 1
+  lr: 0.0005
+  eval_random_agent: false
+  gamma: ${env.gamma}
+
+q_func: 
+  type: 'mlp'
+  n_actions: 4
+  hidden_dims: [128, 128]
+  activation: relu
+  output_dim: ${q_func.n_actions}
+
+experiment:
+  seed: 31
+  gpu: -1
+  demo: false
+  eval_interval: 2500
+  eval_n_runs: 10
+  log_level: 20
+  checkpoint_frequency: null
+  max_episode_len: 100
+  log_tensorboard: true
+  outdir: planning_ddqn
+  finetune: false
+
+finetuning:
+  final_exploration_steps: 20000
+  final_epsilon: 0.1
+  eval_epsilon: 0.001
+  target_update_interval: 1000
+  steps: 100000
+  lr: 0.0005

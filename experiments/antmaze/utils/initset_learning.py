@@ -60,22 +60,26 @@ class Initset(pl.LightningModule):
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
         return loss
 
+    def compute_stats(self, y, y_hat):
+        accuracy = (y_hat.sigmoid() > 0.5).eq(y).float().mean()
+        tpr = ((y_hat.sigmoid() > 0.5).eq(y) * y).sum() / y.sum()
+        fpr = ((y_hat.sigmoid() > 0.5).ne(y) * (1-y)).sum() / (1-y).sum()
+        return accuracy, tpr, fpr
+
     def validation_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x) # logits
+        accuracy, tpr, fpr = self.compute_stats(y, y_hat)
         loss = torch.nn.functional.binary_cross_entropy_with_logits(y_hat, y, pos_weight=self.pos_weight(y))
-        tpr = (y_hat.sigmoid() > 0.5).eq(y).float().mean()
-        fpr = (y_hat.sigmoid() > 0.5).ne(y).float().mean()
-        self.log_dict({"val_loss": loss, "tpr": tpr, "fpr": fpr}, on_epoch=True, prog_bar=True)
+        self.log_dict({"val_loss": loss, "tpr": tpr, "fpr": fpr, 'acc': accuracy}, on_epoch=True, prog_bar=True)
         return loss
     
     def test_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
         loss = torch.nn.functional.binary_cross_entropy_with_logits(y_hat, y, pos_weight=self.pos_weight(y))
-        tpr = (y_hat.sigmoid() > 0.5).eq(y).float().mean()
-        fpr = (y_hat.sigmoid() > 0.5).ne(y).float().mean()
-        test_ = {"test_loss": float(loss), "tpr": float(tpr), "fpr": float(fpr)}
+        accuracy, tpr, fpr = self.compute_stats(y, y_hat)
+        test_ = {"test_loss": float(loss), "tpr": float(tpr), "fpr": float(fpr), 'acc': float(accuracy)}
         self.log_dict(test_, on_epoch=True, prog_bar=True)
         yaml.dump(test_, open(f"{self.cfg.trainer.save_path}/initset_test.yaml", "w"))
         return loss
