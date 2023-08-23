@@ -99,6 +99,7 @@ class RSSMAbstraction(pl.LightningModule):
 
     def step(self, batch, batch_idx):
         s, a, next_s, initset_s, reward, duration, lengths = batch.obs, batch.action, batch.next_obs, batch.initsets, batch.rewards, batch.duration.float(), batch.length
+        
 
         grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths)
 

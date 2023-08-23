@@ -18,23 +18,42 @@ import numpy as np
 import argparse
 from omegaconf import OmegaConf as oc
 import yaml
+from functools import reduce
 
-def get_initset_data(data):
-    return [(d.s, float(d.success)) for d in data]
+from src.utils import printarr
+# def get_initset_data(data):
+#     return [(d.s, float(d.success)) for d in data]
 
-def preprocess_data(df: pd.DataFrame) -> (List[OptionExecution], List[Dict]):
+# def preprocess_data(df: pd.DataFrame) -> (List[OptionExecution], List[Dict]):
+#     '''
+#         Preprocess data for initset learning
+#     '''
+#     # each row is data from an option
+#     data, name_to_idx = [], {}
+#     for i in range(len(df)):
+#         d = df.iloc[i]
+#         data.append(get_initset_data(d['data'])) # List of Lists of (s, success)
+#         name_to_idx[d['name']] = i
+
+#     data = [(elem[0][0], np.array([e[-1] for e in elem])) for elem in zip(*data)]
+#     return data, name_to_idx    
+
+
+def preprocess_data(df):
     '''
-    Preprocess data for initset learning
+        Preprocess data for initset learning
+        Each tuple has the form (s, a, success)
     '''
     # each row is data from an option
     data, name_to_idx = [], {}
     for i in range(len(df)):
         d = df.iloc[i]
-        data.append(get_initset_data(d['data'])) # List of Lists of (s, success)
+        data.append([(_d.s.astype(np.float32), int(i), np.float32(_d.success), d.name) for _d in d['data']]) # List of Lists of (s, a_idx, success, option_name)
         name_to_idx[d['name']] = i
 
-    data = [(elem[0][0], np.array([e[-1] for e in elem])) for elem in zip(*data)]
-    return data, name_to_idx    
+    data = reduce(lambda x, y: x+y, data)
+    return data, name_to_idx
+        
 
 
 class Initset(pl.LightningModule):
@@ -45,17 +64,26 @@ class Initset(pl.LightningModule):
         self.name_to_idx = {}
         self.save_hyperparameters()
 
-    def forward(self, x, opt_name=None):
-        if len(x.shape) == 1:
-            return self.model(x) if opt_name is None else self.model(x)[self.name_to_idx[opt_name]]
-        return self.model(x) if opt_name is None else self.model(x)[..., self.name_to_idx[opt_name]]
+    def forward(self, x, opt_name=None, opt_idx=None):
+        batched = len(x.shape) > 1
+        if not batched:
+            x = x.unsqueeze(0)
+        logits = self.model(x)
+        # collect logits for options in opt_idx
+        if opt_idx is not None:
+            logits = torch.gather(logits, -1, opt_idx.unsqueeze(-1)).squeeze(-1)
+        elif opt_name is not None:
+            logits = torch.gather(logits, -1, torch.tensor([self.name_to_idx[opt_name]]).to(self.device).unsqueeze(-1)).squeeze(-1)
+        if not batched:
+            logits = logits.squeeze(0)
+        return logits
 
     def pos_weight(self, y):
         return (y.shape[0] - y.sum(0, keepdim=True)) / y.sum(0, keepdim=True)
 
     def training_step(self, batch, batch_idx):
-        x, y = batch
-        y_hat = self(x)
+        x, idx, y, _ = batch
+        y_hat = self(x, opt_idx=idx)
         loss = torch.nn.functional.binary_cross_entropy_with_logits(y_hat, y, pos_weight=self.pos_weight(y))
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
         return loss
@@ -67,16 +95,16 @@ class Initset(pl.LightningModule):
         return accuracy, tpr, fpr
 
     def validation_step(self, batch, batch_idx):
-        x, y = batch
-        y_hat = self(x) # logits
+        x, idx, y, _ = batch
+        y_hat = self(x, opt_idx=idx)
         accuracy, tpr, fpr = self.compute_stats(y, y_hat)
         loss = torch.nn.functional.binary_cross_entropy_with_logits(y_hat, y, pos_weight=self.pos_weight(y))
         self.log_dict({"val_loss": loss, "tpr": tpr, "fpr": fpr, 'acc': accuracy}, on_epoch=True, prog_bar=True)
         return loss
     
     def test_step(self, batch, batch_idx):
-        x, y = batch
-        y_hat = self(x)
+        x, idx, y, _ = batch
+        y_hat = self(x, opt_idx=idx)
         loss = torch.nn.functional.binary_cross_entropy_with_logits(y_hat, y, pos_weight=self.pos_weight(y))
         accuracy, tpr, fpr = self.compute_stats(y, y_hat)
         test_ = {"test_loss": float(loss), "tpr": float(tpr), "fpr": float(fpr), 'acc': float(accuracy)}

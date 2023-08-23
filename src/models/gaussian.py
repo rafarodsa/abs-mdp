@@ -242,7 +242,7 @@ class MixtureDiagonalNormal(torch.distributions.Distribution):
         indices = categorical.sample((n_samples,))
         samples = []
         for i in range(n_samples):
-            sample_from_chosen_component = self._components[indices[i]].sample()
+            sample_from_chosen_component = self._components[indices[i]].sample()[0] # only one sample
             samples.append(sample_from_chosen_component)
         return torch.stack(samples)
 

@@ -280,7 +280,7 @@ class PinballDataset_(torch.utils.data.Dataset):
         if self.noise_dim > 0 and self.noise_level > 0:
             trajectories = [self.add_ar_noise(trajectory, noise_level=self.noise_level, noise_dim=self.noise_dim, ar_coeff=self.ar_coeff) for trajectory in trajectories]
         data = reduce(lambda x, acc: x + acc, trajectories, [])
-        data = self._filter_failed_executions(data)
+        # data = self._filter_failed_executions(data)
         return data
     
     def add_ar_noise(self, trajectory, noise_level=0.01, noise_dim=2, ar_coeff=0.9):

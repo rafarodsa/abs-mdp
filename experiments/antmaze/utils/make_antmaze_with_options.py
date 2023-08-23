@@ -12,17 +12,20 @@ import numpy as np
 import gym
 from tqdm import tqdm
 
+import matplotlib.pyplot as plt
+from src.utils import printarr
+
 GOAL_TOAL = 0.5
 DISTANCE = 1.
 N_OPTIONS = 8
 DIRECTIONS = [[1., 0.], [0., 1.], [-1., 0.], [0., -1.], [1., 1.], [-1., -1.], [1., -1.], [-1., 1.]]
 OPTION_NAMES = ['right', 'up', 'left', 'down', 'up-right', 'down-left', 'up-left', 'down-right']
-MAX_OPTION_EXECUTING_TIME=30
+MAX_OPTION_EXECUTING_TIME=100
 INITSET_THRESH = 0.5
 
 ANTMAZE_OPTION_MODELS = {
     'antmaze-umaze-v2': {
-        'initset_path': 'experiments/antmaze/antmaze-umaze-v2/initset/ckpt/best-v1.ckpt',
+        'initset_path': 'exp_results/antmaze/antmaze-umaze-v2/initset/ckpt/best-v1.ckpt',
         'policy_path': 'experiments/antmaze/antmaze-umaze-v2/policy/td3',
         'goal_tol': GOAL_TOAL,
         'distance': DISTANCE,
@@ -30,7 +33,7 @@ ANTMAZE_OPTION_MODELS = {
         'names': OPTION_NAMES,
     },
     'antmaze-medium-play-v2': {
-        'initset_path': 'experiments/antmaze/antmaze-medium-play-v2/initset/ckpt/best.ckpt',
+        'initset_path': 'exp_results/antmaze/antmaze-medium-play-v2/initset/ckpt/best-v1.ckpt',
         'policy_path': 'experiments/antmaze/antmaze-medium-play-v2/policy/td3',
         'goal_tol': GOAL_TOAL,
         'distance': DISTANCE,
@@ -99,8 +102,8 @@ def make_termination_probs(direction, distance, goal_tol, device='cpu'):
         '''
         goal = s0[..., :2] + displacement
         if len(s.shape) == 1:
-            return np.linalg.norm(s[:2] - goal) < goal_tol
-        return np.linalg.norm(s[:, :2] - goal[None], dim=1) < goal_tol
+            return (np.linalg.norm(s[:2] - goal) < goal_tol).astype(np.float32)
+        return (np.linalg.norm(s[:, :2] - goal[None], dim=1) < goal_tol).astype(np.float32)
     return lambda s0: partial(termination_probs, s0=s0)
 
 def make_option_policy(policy, direction, distance, device='cpu'):
@@ -127,6 +130,7 @@ def create_antmaze_options(args=None):
         parser.add_argument('--env', type=str, default='antmaze-umaze-v2')
         parser.add_argument('--save-path', type=str, default=None)
         parser.add_argument('--device', type=int, default=-1)
+        parser.add_argument('--max-exec-time', type=int, default=None)
         args = parser.parse_args()
 
     configs = ANTMAZE_OPTION_MODELS[args.env]
@@ -139,12 +143,13 @@ def create_antmaze_options(args=None):
             initiation_classifier=make_initiation_set(initset, option_name, device=device),
             termination_prob=make_termination_probs(dir, configs['distance'], configs['goal_tol'], device=device),
             policy_func_factory=make_option_policy(policy, dir, configs['distance'], device=device),
-            max_executing_time=MAX_OPTION_EXECUTING_TIME
+            max_executing_time=MAX_OPTION_EXECUTING_TIME if args.max_exec_time is None else args.max_exec_time,
+            name=option_name
         )
         options.append(o)
     
-    if args.save_path is not None:
-        torch.save(options, args.save_path)
+    # if args.save_path is not None:
+    #     torch.save(options, args.save_path)
     return options, initset
 
 def make_antmaze_options(envname, device):
@@ -157,23 +162,41 @@ def make_antmaze_options(envname, device):
             initiation_classifier=make_initiation_set(initset, option_name, device=device),
             termination_prob=make_termination_probs(dir, configs['distance'], configs['goal_tol'], device=device),
             policy_func_factory=make_option_policy(policy, dir, configs['distance'], device=device),
-            max_executing_time=MAX_OPTION_EXECUTING_TIME
+            max_executing_time=MAX_OPTION_EXECUTING_TIME,
+            name=option_name
         )
         options.append(o)
 
     return options, initset
 
 
-def make_antmaze(envname, seed=0, options=None, initset=None, device='cpu'):
-    env = antmaze.make_env(envname,
-            start=np.array([8., 0.]),
-            goal=np.array([-10., -10.]),
-            seed=seed)
-    env = CastObservationToFloat32(env)
-    env = TruncatedWrapper(env)
+def make_antmaze_with_options(envname, seed=0, options=None, initset=None, device='cpu'):
+    env = make_antmaze(envname, seed)
     env = EnvOptionWrapper(options, env)
     env = EnvInitsetWrapper(env, make_initiation_set(initset, option_name=None, device=device))
     return env
+
+def make_antmaze(envname, seed):
+    env = antmaze.make_env(
+                envname,
+                start=np.array([-10, -9]),
+                goal=np.array([-10., -10.]),
+                seed=seed
+            )
+    env = CastObservationToFloat32(env)
+    env = TruncatedWrapper(env)
+    return env
+
+
+def plot_initset_sinks(states, initset):
+    init = initset(states)
+    plt.figure()
+    plt.scatter(states[:, 0], states[:, 1], c=init.sum(-1) > 0, s=3)
+    plt.colorbar()
+    plt.savefig('sink.png')
+    print(f'prob of action available: {(init.sum(-1) > 0).float().mean()}')
+    print(f'prob of action unavailable: {(init.sum(-1) == 0).float().mean()}')
+    print(f'prob only one action avail {((init.sum(-1) == 1)).float().mean()}')
 
 
 def test_options():
@@ -184,35 +207,54 @@ def test_options():
         Wrap environment
         Test options
     '''
-    env = antmaze.make_env('antmaze-umaze-v2',
-            start=np.array([8., 0.]),
-            goal=np.array([0., 0.]),
-            seed=0)
+    # env = antmaze.make_env('antmaze-umaze-v2',
+    #         start=np.array([8., 0.]),
+    #         goal=np.array([0., 0.]),
+    #         seed=0)
+    # options, initset = create_antmaze_options()
+    # env = CastObservationToFloat32(env)
+    # env = TruncatedWrapper(env)
+
+    env = make_antmaze('antmaze-umaze-v2', seed=0)
     options, initset = create_antmaze_options()
-    env = CastObservationToFloat32(env)
-    env = TruncatedWrapper(env)
     env = EnvOptionWrapper(options, env)
     env = EnvInitsetWrapper(env, make_initiation_set(initset, option_name=None))
 
     # run for 1000 steps
-    N = 100
+    N = 1000
     
     max_steps = 10
     # generate trajectories
     trajs = []
+    states = []
+    actions = []
+    print(env.action_space)
+    initset_fn = make_initiation_set(initset, option_name=None, device='cpu')
+
+
     for i in tqdm(range(N)):
         s = env.reset()
         t = []
         timestep = 0
         done = False
         while not done and timestep < max_steps:
-            a = env.action_space.sample()
+            states.append(s)
+            iset = initset_fn(s)
+            if iset.sum() == 0:
+                print('no option available')
+            a = np.random.choice(np.nonzero(iset)[0])
+            # a = env.action_space.sample()
+            actions.append(a)
             ret = env.step(a)
             s, r, done = ret[:3]
             t.append((s, r, done))
             timestep += 1
         trajs.append(t)
 
+    states = torch.from_numpy(np.array(states)).float()
+    printarr(states)
+    printarr(np.array(actions))
+    plot_initset_sinks(states, initset_fn)
     # plot trajectories
     import matplotlib.pyplot as plt
     plt.figure()
@@ -223,3 +265,5 @@ def test_options():
 
 if __name__=='__main__':
     test_options()
+    # _, initset = make_antmaze_options('antmaze-umaze-v2', device='cpu')
+    # plot_initset_sinks(make_initiation_set(initset, option_name=None, device='cpu'))

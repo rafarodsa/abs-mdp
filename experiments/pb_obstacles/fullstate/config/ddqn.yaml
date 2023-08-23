@@ -3,6 +3,7 @@ experiment_cwd: exp_results/pb_obstacles/fullstate/mdps
 experiment_name: pinball_rssm_large_normal_4__model.latentdim_6__seed_0
 env:
   absmdp: ${experiment_cwd}/${experiment_name}/cont_mdp.pt
+  sample_abstract_transition: true
   absgroundmdp: false
   render: false
   init_thresh: 0.5
@@ -47,9 +48,9 @@ experiment:
   finetune: false
 
 finetuning:
-  final_exploration_steps: 20000
+  final_exploration_steps: 30000
   final_epsilon: 0.1
   eval_epsilon: 0.001
   target_update_interval: 1000
-  steps: 100000
+  steps: 250000
   lr: 0.0005

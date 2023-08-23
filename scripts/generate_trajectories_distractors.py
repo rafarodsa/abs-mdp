@@ -14,7 +14,7 @@ import zipfile
 
 from joblib import Parallel, delayed
 
-from scripts.utils import collect_trajectory
+from utils import collect_trajectory
 from envs.pinball.pinball_gym import PinballDistractors as Pinball
 from envs.pinball.controllers_pinball import create_position_controllers_v0 as OptionFactory
 from envs.pinball.controllers_pinball import create_position_options as OptionFactory2

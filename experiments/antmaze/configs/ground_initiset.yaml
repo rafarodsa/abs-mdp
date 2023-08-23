@@ -1,5 +1,5 @@
 trainer:
-  experiment_cwd: 'experiments/antmaze/antmaze-umaze-v2'
+  experiment_cwd: 'exp_results/antmaze/antmaze-umaze-v2'
   save_path: ${trainer.experiment_cwd}/initset
   epochs: 500
   accelerator: cpu
@@ -9,10 +9,10 @@ initset:
   type: mlp
   input_dim: 29
   output_dim: 8
-  hidden_dims: [256, 256, 256]
+  hidden_dims: [512, 512, 512]
   activation: silu
 data:
-  data_path: ${trainer.experiment_cwd}/data/data_10k.pkl
+  data_path: ${trainer.experiment_cwd}/data/data_4k.pkl
   save_path: ${trainer.save_path}
   batch_size: 128
   num_workers: 0

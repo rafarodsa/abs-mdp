@@ -12,7 +12,7 @@ from src.absmdp.discrete_mdp import DiscreteAbstractMDP
 from src.absmdp.datasets import PinballDataset
 from src.absmdp.datasets_traj import PinballDatasetTrajectory
 from omegaconf import OmegaConf as oc
-from scripts.utils import get_experiment_info
+from utils import get_experiment_info
 import torch
 
 parser = argparse.ArgumentParser()

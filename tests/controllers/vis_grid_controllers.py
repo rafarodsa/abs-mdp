@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from envs.pinball.pinball_gym import PinballEnvContinuous as Pinball
 from envs.pinball.controllers_pinball import PinballGridOptions, compute_grid_goal
 
-from scripts.utils import collect_trajectory, compute_initiation_masks
+from utils import collect_trajectory, compute_initiation_masks
 from functools import reduce
 from src.utils.printarr import printarr
 from tqdm import tqdm

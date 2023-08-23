@@ -71,7 +71,7 @@ class AbstractMDP(gym.Env):
         done = False
         tau =  self.tau(self.state, action)
         info = {'expected_length': tau.item()}
-        printarr(next_s, self.state)
+        # printarr(next_s, self.state)
         self._state = next_s
         return next_s.numpy(), r, done, info
     
@@ -248,6 +248,7 @@ class AbstractMDPCritic(gym.Env):
     def step(self, action):
         action = action.to(self.device)
         next_s = self.transition(self.state, action)
+        # printarr(next_s, self.state)
         r = self.reward(self.state, action, next_s).item()
         done = False
         tau =  self.tau(self.state, action)
@@ -291,17 +292,18 @@ class AbstractMDPCritic(gym.Env):
 
     def transition(self, state, action):
         batch = state.shape[0] if len(state.size()) > 1 else 1
+        batched = len(state.shape) > 1
         if len(state.size()) == 1:
             input = torch.cat([state, self._action_to_one_hot(action)], dim=-1)
         else: 
             input = torch.cat([state, self._action_to_one_hot(action)], dim=-1)
-        
-        t = self.transition_fn.distribution(input.unsqueeze(0))
-        # delta_s = t.sample()[0]
+        t = self.transition_fn.distribution(input)
         delta_s = t.mean if not self._sample_state else t.sample()[0]
+        # if len(delta_s.shape) > len(state.shape):
+        #     delta_s = delta_s.squeeze(0)
+        #     assert len(delta_s.shape) == len(state.shape), f'{delta_s.shape} != {state.shape}'
         next_s = delta_s + state
-        return next_s[0]
-        # return t.mean + state
+        return next_s
     
     def reward(self, state, action, next_state):
         a_ = self._action_to_one_hot(action)

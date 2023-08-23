@@ -10,7 +10,7 @@ import numpy as np
 from envs.pinball.pinball_gym import PinballEnvContinuous
 from envs.pinball.controllers_pinball import PinballGridOptions, create_position_options
 from envs.env_options import EnvOptionWrapper
-from scripts.utils import compute_initiation_masks
+from utils import compute_initiation_masks
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd

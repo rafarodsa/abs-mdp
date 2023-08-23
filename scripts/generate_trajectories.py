@@ -13,7 +13,7 @@ import zipfile
 
 from joblib import Parallel, delayed
 
-from scripts.utils import collect_trajectory
+from utils import collect_trajectory
 from envs.pinball.pinball_gym import PinballEnvContinuous as Pinball
 from envs.pinball.controllers_pinball import create_position_controllers_v0 as OptionFactory
 from envs.pinball.controllers_pinball import create_position_options as OptionFactory2
@@ -230,6 +230,8 @@ if __name__== "__main__":
             'grid_size': args.grid_size,
             'max_horizon': args.max_horizon,
             'option_type': args.option_type,
+            'n_trajectories': len(trajectories),
+            'n_samples': n_samples,
     }
     # dump in yaml
     

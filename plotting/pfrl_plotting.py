@@ -47,7 +47,8 @@ def gather_evaluator_csv_files_from_base_dir(base_dir=None, file_name='scores.tx
     for exp_dir in os.listdir(base_dir):
         if filter_fn(exp_dir):
             csv_path = os.path.join(base_dir, exp_dir, evaluator_dir, file_name)
-            id_to_csv[exp_dir] = csv_path
+            if os.path.exists(csv_path):
+                id_to_csv[exp_dir] = csv_path
     return id_to_csv
 
 
@@ -151,7 +152,7 @@ def compare_pfrl_experiments():
     parser.add_argument('--base-dirs', nargs='+', type=str, default=None)
     parser.add_argument('--curve-names', nargs='+', type=str, default=None)
     parser.add_argument('--group-by', nargs='+', type=str, default=['',])
-    parser.add_argument('--evaluator-dir', type=str, default='ground')
+    parser.add_argument('--evaluator-dirs', nargs='+', type=str, default='ground')
     parser.add_argument('--log-file', type=str, default='scores.txt')
     parser.add_argument('--x-axis', type=str, default='steps')
     parser.add_argument('--y-axis', type=str, default='mean')
@@ -168,31 +169,36 @@ def compare_pfrl_experiments():
     filter_fn = lambda path: True
     if args.regex is not None:
         filter_fn = filter_from_substring(args.regex)
-
-    csv_fn = partial(gather_evaluator_csv_files_from_base_dir, evaluator_dir=args.evaluator_dir, file_name=args.log_file, filter_fn=filter_fn)
     
     curves_groups = []
     if args.curve_names is None:
         args.curve_names = [None] * len(args.base_dirs)
     else:
         assert len(args.curve_names) == len(args.base_dirs)
+        
+    curve_names = []
+    for i, base_dir in enumerate(args.base_dirs):
+        for evaluator_dir in args.evaluator_dirs:
+            csv_fn = partial(gather_evaluator_csv_files_from_base_dir, evaluator_dir=evaluator_dir, file_name=args.log_file, filter_fn=filter_fn)
+            curves = generate_learning_curves(
+                base_dir=base_dir,
+                group_keys=args.group_by,
+                summary_fn=lambda csv: get_summary_data(csv, column_keys=[args.x_axis, args.y_axis]),
+                csv_path_fn=csv_fn,
+                smoothen=args.window_size,
+                save_path=args.save_path,
+                ylabel=args.ylabel,
+                xlabel=args.xlabel,
+                show=args.show,
+            )
+            for c in curves:
+                c['label'] = f'{evaluator_dir}_{c["label"]}'
+                curve_names.append(args.curve_names[i])
+            curves_groups.append(curves)
 
-    for base_dir in args.base_dirs:
-        curves = generate_learning_curves(
-            base_dir=base_dir,
-            group_keys=args.group_by,
-            summary_fn=lambda csv: get_summary_data(csv, column_keys=[args.x_axis, args.y_axis]),
-            csv_path_fn=csv_fn,
-            smoothen=args.window_size,
-            save_path=args.save_path,
-            ylabel=args.ylabel,
-            xlabel=args.xlabel,
-            show=args.show,
-        )
-        # print(curves)
-        curves_groups.append(curves)
+    
 
-    plot_curve_groups(curves_groups, args.curve_names)
+    plot_curve_groups(curves_groups, curve_names)
     
     plt.legend()
 

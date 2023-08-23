@@ -22,7 +22,7 @@ from omegaconf import OmegaConf as oc
 from sklearn import manifold
 
 from collections import namedtuple
-from scripts.utils import get_experiment_info, prepare_outdir
+from utils import get_experiment_info, prepare_outdir
 
 import os
 
@@ -175,42 +175,42 @@ if __name__ == '__main__':
         except:
             print('Isomap failed..')
         
-        ## LLE
-        print('LLE... (modified)')
-        try:
-            t = manifold.LocallyLinearEmbedding(n_components=n_components, n_neighbors=n_neighbors, method='modified', eigen_solver='dense').fit(z)
-            Y = t.transform(z)
-            _next_z = t.transform(predicted_z)
-            plt.figure()
-            plt.scatter(Y[:, 0], Y[:, 1], s=5)
-            plt.scatter(_next_z[:, 0], _next_z[:, 1])
-            plt.grid()
-            plt.savefig(f'{save_path}/lle-z-space.png')
-        except:
-            print('LLE did not work')
+        # ## LLE
+        # print('LLE... (modified)')
+        # try:
+        #     t = manifold.LocallyLinearEmbedding(n_components=n_components, n_neighbors=n_neighbors, method='modified', eigen_solver='dense').fit(z)
+        #     Y = t.transform(z)
+        #     _next_z = t.transform(predicted_z)
+        #     plt.figure()
+        #     plt.scatter(Y[:, 0], Y[:, 1], s=5)
+        #     plt.scatter(_next_z[:, 0], _next_z[:, 1])
+        #     plt.grid()
+        #     plt.savefig(f'{save_path}/lle-z-space.png')
+        # except:
+        #     print('LLE did not work')
     
         
-        ##Local Tangent space alignment LLE 
-        try:
-            print('LLE... (LTSA)')
-            Y = manifold.LocallyLinearEmbedding(n_components=n_components, n_neighbors=n_neighbors, method='ltsa', eigen_solver='dense').fit_transform(z)
-            plt.figure()
-            plt.scatter(Y[:, 0], Y[:, 1], s=5)
-            plt.grid()
-            plt.savefig(f'{save_path}/ltsa-lle-z-space.png')
-        except:
-            print('LLE... (LSTA) failed')
+        # ##Local Tangent space alignment LLE 
+        # try:
+        #     print('LLE... (LTSA)')
+        #     Y = manifold.LocallyLinearEmbedding(n_components=n_components, n_neighbors=n_neighbors, method='ltsa', eigen_solver='dense').fit_transform(z)
+        #     plt.figure()
+        #     plt.scatter(Y[:, 0], Y[:, 1], s=5)
+        #     plt.grid()
+        #     plt.savefig(f'{save_path}/ltsa-lle-z-space.png')
+        # except:
+        #     print('LLE... (LSTA) failed')
         
-        ## Spectral
-        print('Spectral Embedding...')
-        try:
-            Y = manifold.SpectralEmbedding(n_components=n_components, n_neighbors=n_neighbors).fit_transform(z)
-            plt.figure()
-            plt.scatter(Y[:, 0], Y[:, 1], s=5)
-            plt.grid()
-            plt.savefig(f'{save_path}/spectral-z-space.png')
-        except:
-            print('Spectral embedding did not work')
+        # ## Spectral
+        # print('Spectral Embedding...')
+        # try:
+        #     Y = manifold.SpectralEmbedding(n_components=n_components, n_neighbors=n_neighbors).fit_transform(z)
+        #     plt.figure()
+        #     plt.scatter(Y[:, 0], Y[:, 1], s=5)
+        #     plt.grid()
+        #     plt.savefig(f'{save_path}/spectral-z-space.png')
+        # except:
+        #     print('Spectral embedding did not work')
             
     
         ### TSNE embedding
@@ -225,17 +225,17 @@ if __name__ == '__main__':
         except:
             print('TSNE failed...')
 
-        # ## Hessian LLE 
-        try:
-            print('LLE... (hessian)')
-            nn = n_components * (n_components+3)/2 + 1
-            Y = manifold.LocallyLinearEmbedding(n_components=n_components, n_neighbors=int(nn), method='hessian', eigen_solver='dense').fit_transform(z)
-            plt.figure()
-            plt.scatter(Y[:, 0], Y[:, 1], s=5)
-            plt.grid()
-            plt.savefig(f'{save_path}/hess-lle-z-space.png')
-        except:
-            print('LLE Hessian failed')
+        # # ## Hessian LLE 
+        # try:
+        #     print('LLE... (hessian)')
+        #     nn = n_components * (n_components+3)/2 + 1
+        #     Y = manifold.LocallyLinearEmbedding(n_components=n_components, n_neighbors=int(nn), method='hessian', eigen_solver='dense').fit_transform(z)
+        #     plt.figure()
+        #     plt.scatter(Y[:, 0], Y[:, 1], s=5)
+        #     plt.grid()
+        #     plt.savefig(f'{save_path}/hess-lle-z-space.png')
+        # except:
+        #     print('LLE Hessian failed')
         
         ## MDS
         try:

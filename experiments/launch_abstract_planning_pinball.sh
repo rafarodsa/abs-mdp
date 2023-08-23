@@ -41,7 +41,7 @@ for path in $matching_subdirs; do
 
     onager prelaunch +command "python experiments/pb_obstacles/fullstate/plan.py --config experiments/pb_obstacles/fullstate/config/ddqn.yaml --experiment_cwd ${search_directory} --experiment_name ${path} --experiment.finetune ${finetune} " \
     +jobname "${job_name}_${count}" \
-    +arg --use-ground-init false \
+    +arg --use-ground-init true \
     +arg --env.goal 0 1 2 3 4 5 6 7 8 9 \
     +arg --experiment.seed 31 56 43 64 24 \
     +tag --exp-id

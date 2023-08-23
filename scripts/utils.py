@@ -22,7 +22,9 @@ def execute_option(env, initial_state, option, obs_type='simple', max_exec_time=
     can_execute = option.execute(initial_state)
     rewards = []
     done = False
-    s = np.array(env.reset(initial_state))
+    # s = np.array(env.reset(initial_state))
+    # print(initial_state)
+    s = initial_state
     next_s = s
 
     o = np.array(env.render()) if obs_type == 'pixel' else s
@@ -88,19 +90,23 @@ def collect_trajectory(env, options, obs_type='simple', max_exec_time=200, horiz
     s = env.reset()
     # print('Sampled initial state...')
     o = np.array(env.render()) if obs_type == 'pixel' else np.array(s)
+    # print(s[:2])
     executed = True
     done = False
     
     for t in range(horizon): # execute t options in sequence
         if done: # episode terminated
             break
-        if executed or with_failures:
-            initiation_mask_s = compute_initiation_masks(s, options).astype(np.float32)
-        else:
-            initiation_mask_s[option_n] = 0
+        # if executed or with_failures:
+        #     initiation_mask_s = compute_initiation_masks(s, options).astype(np.float32)
+        # else:
+        #     print(f'Option {option_n} failed, removing from initiation set')
+        #     initiation_mask_s[option_n] = 0
+
+        initiation_mask_s = compute_initiation_masks(s, options).astype(np.float32)
 
         if np.sum(initiation_mask_s) == 0 and not with_failures:
-            print(f'No options available in {s} at time {t}, setting as terminal state.')
+            print(f'No options available in {s} at time {t}, setting as terminal state with original initset {initiation_mask_s}')
             if len(trajectory) > 0:
                 trajectory[-1] = trajectory[-1].modify(done=True)
             break # no options available
@@ -111,6 +117,7 @@ def collect_trajectory(env, options, obs_type='simple', max_exec_time=200, horiz
             
         option = options[option_n]
         try:
+            # print(s[:2])
             o, next_o, rewards, executed, duration, info = execute_option(env, np.array(s), option, obs_type=obs_type, max_exec_time=max_exec_time)
         except Exception as e:
             print('Error executing option')
@@ -121,6 +128,7 @@ def collect_trajectory(env, options, obs_type='simple', max_exec_time=200, horiz
         rewards = rewards + [0] * (max_exec_time - len(rewards))
         done = info['done']
 
+        initiation_mask_s[option_n] = float(executed)
         trajectory.append(Transition(np.array(o), option_n, np.array(next_o), rewards, done, executed, duration, np.array(initiation_mask_s), info, np.float32(t==0)))
         infos.append(info)
         s = next_s

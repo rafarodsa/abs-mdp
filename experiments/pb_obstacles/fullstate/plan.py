@@ -143,7 +143,7 @@ def make_abstract_env(test=False, test_seed=127, train_seed=255, args=None, rewa
     print('================ CREATE ENVIRONMENT ================', GOAL_REWARD)
     env_sim = torch.load(args.absmdp)
     env_sim.to(device)
-    env_sim._sample_state = False
+    env_sim._sample_state = args.sample_abstract_transition
     discounted = not test
     goal = GOALS[args.goal]
     print(f'GOAL: {goal[:2]} ± {GOAL_TOL}')

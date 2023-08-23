@@ -10,7 +10,7 @@ from src.utils import printarr
 
 from envs import EnvGoalWrapper, EnvOptionWrapper, EnvInitsetWrapper, AbstractEnvWrapper
 
-from experiments.antmaze.utils.make_antmaze_with_options import make_antmaze_options, make_antmaze
+from experiments.antmaze.utils.make_antmaze_with_options import make_antmaze_options, make_antmaze_with_options
 
 
 from omegaconf import OmegaConf as oc
@@ -25,19 +25,35 @@ import yaml
 
 
 from src.models import ModuleFactory
-GOALS = [
-    [3., 0.],
-    [5., 0.],
-    [8., 0.],
-    [8., 2.5],
-    [8., 5.],
-    [8., 7.5],
-    [5., 7.5],
-    [3., 7.5],
-    [0., 7.5]
-]
 
-GOAL = GOALS[0]
+GOALS = {
+    'antmaze-umaze-v2': [
+                            [3., 0.],
+                            [5., 0.],
+                            [8., 0.],
+                            [8., 2.5],
+                            [8., 5.],
+                            [8., 7.5],
+                            [5., 7.5],
+                            [3., 7.5],
+                            [0., 7.5]
+                        ],
+    'antmaze-medium-play-v2': [
+                                 [20., 2.5],
+                                 [17., 12.5],
+                                 [10., 16],
+                                 [3., 2.5],
+                                 [5., 20.],
+                                 [17., 20.],
+                                 [12.5, 10.],
+                                 [8., 8.],
+                                 [0., 15.],
+                                 [4., 8.]
+                              ]
+
+}
+
+
 STEP_SIZE = 1/25
 GOAL_TOL = 0.5
 GOAL_REWARD = 1.
@@ -58,16 +74,30 @@ def make_abstract_env(test=False, test_seed=127, train_seed=255, args=None, rewa
 
 def make_ground_env(test=False, test_seed=0, train_seed=1, args=None, reward_scale=0., gamma=GAMMA, device='cpu'):
     options, initset = make_antmaze_options(args.envname, device=device)
-    goal = GOALS[args.goal]
+    goal = GOALS[args.envname][args.goal]
     print(f'Goal: {goal}')
     discounted = not test
-    env = make_antmaze(args.envname, test_seed if test else train_seed, options, initset, device=device)
+    env = make_antmaze_with_options(args.envname, test_seed if test else train_seed, options, initset, device=device)
     # env.set_goal(np.array(goal))
     env = EnvGoalWrapper(env, goal_fn(goal, GOAL_TOL), goal_reward=GOAL_REWARD, discounted=discounted, gamma=gamma)
     return env
 
 
+def plot_maze(env, envname, save_path='.'):
+    # sample states
+    states = []
+    for _ in range(10000):
+        states.append(env.reset())
+    states = np.array(states)
+    import matplotlib.pyplot as plt
+    plt.scatter(states[:, 0], states[:, 1], s=1)
 
+    # plot goals
+    goals = np.array(GOALS[envname])
+    plt.scatter(goals[:, 0], goals[:, 1], s=10, c='r')
+
+    plt.savefig(f'{save_path}/{envname}_goals.png')
+    print(f'Saved goals vis to {save_path}/{envname}_goals.png')
 
 def run():
 
@@ -79,6 +109,7 @@ def run():
     cli_cfg = parse_oc_args(unknown)
     cfg = oc.load(cli_args.config)
     args = oc.merge(cfg, cli_cfg)
+
 
     device = f'cuda:{args.experiment.gpu}' if args.experiment.gpu >= 0 else 'cpu'
     # make envs.
@@ -96,6 +127,8 @@ def run():
                                 gamma=args.env.gamma,
                                 device = device
                             )
+        
+        # plot_maze(env, args.env.envname, save_path=args.experiment_cwd)
     else:
         env = make_abstract_env(
                                 train_seed=train_seed, 
@@ -176,4 +209,5 @@ def run():
 
 
 if __name__ == '__main__':
+
     run()

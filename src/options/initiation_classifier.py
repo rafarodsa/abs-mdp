@@ -57,3 +57,5 @@ class InitsetModel(pl.LightningModule):
     
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.cfg.lr)
+    
+

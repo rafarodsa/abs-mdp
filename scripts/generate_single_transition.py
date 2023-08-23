@@ -17,7 +17,7 @@ from functools import reduce
 
 from joblib import Parallel, delayed
 
-from scripts.utils import run_options
+from utils import run_options
 import os
 
 if __name__== "__main__":

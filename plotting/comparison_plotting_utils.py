@@ -54,7 +54,7 @@ def interpolate_xys(scores):
     return np.array(flattened_unique), np.array(all_returns)
 
 def truncate_and_interpolate(scores, max_frames=-1, min_frames=-1):
-    filtered_scores = [(frames, returns) for (frames, returns) in scores if max(frames) > min_frames]
+    filtered_scores = [(frames, returns) for (frames, returns) in scores if len(frames) > 0 and max(frames) > min_frames]
     if not filtered_scores:
         return None, None
     assert all(all(frames[i] <= frames[i+1] for i in range(len(frames) - 1)) for (frames, returns) in filtered_scores), "needs to be sorted for what follows"
