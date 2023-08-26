@@ -15,7 +15,7 @@ scheduler:
     end_factor: 1.
     total_iters: 1.
 batch_size: 16 
-epochs: 1000
+epochs: 500
 accelerator: cpu
 devices: 1
 save_path: ${experiment_cwd}/mdps
@@ -32,7 +32,7 @@ data:
   data_path: ${experiment_cwd}/data/data_cont_25_4096.zip
   save_path: ${save_path}
   batch_size: ${batch_size}
-  num_workers: 2
+  num_workers: 0
   train_split: 0.8
   val_split: 0.1
   test_split: 0.1

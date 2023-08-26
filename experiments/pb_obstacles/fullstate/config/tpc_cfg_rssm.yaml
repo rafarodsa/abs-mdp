@@ -29,10 +29,10 @@ loss:
   initset_const: 1
   n_samples: 1
 data:
-  data_path: ${experiment_cwd}/data/cont-v1-25-small.zip
+  data_path: ${experiment_cwd}/data/data_cont_25_512.zip
   save_path: ${save_path}
   batch_size: ${batch_size}
-  num_workers: 1
+  num_workers: 0
   train_split: 0.8
   val_split: 0.1
   test_split: 0.1

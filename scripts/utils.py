@@ -36,7 +36,8 @@ def execute_option(env, initial_state, option, obs_type='simple', max_exec_time=
             if action is None:
                 break # option terminated
             next_s, r, done, _, info = env.step(action)
-
+            if isinstance(r, np.ndarray):
+                r = np.sum(r)
             rewards.append(r)
             t += 1
         if t >= max_exec_time and not done:
@@ -75,42 +76,34 @@ def run_options(env, init_state, options, obs_type='simple', max_exec_time=200):
         initiation_mask_s_prime = compute_initiation_masks(next_s, options)
         rewards = rewards + [0] * (max_exec_time - len(rewards))
  
-        dataset.append(Transition(o, option_n, next_o, rewards, info['done'], executed, duration, np.array([initiation_mask_s, initiation_mask_s_prime]), info, np.float32(True)))
+        dataset.append(Transition(o, option_n, next_o, rewards, info['done'], executed, 9, np.array([initiation_mask_s, initiation_mask_s_prime]), info, np.float32(True)))
 
     return list(dataset), infos
 
 
-def collect_trajectory(env, options, obs_type='simple', max_exec_time=200, horizon=100, with_failures=True):
+def collect_trajectory(env, options, obs_type='simple', max_exec_time=200, horizon=100, uniform=False):
     '''
         Collect samples from sequential option execution. Uniform policy over available options.
     '''
     trajectory = []
     infos = []
-    # print('Collecting trajectory...')
     s = env.reset()
-    # print('Sampled initial state...')
     o = np.array(env.render()) if obs_type == 'pixel' else np.array(s)
-    # print(s[:2])
     executed = True
     done = False
     
     for t in range(horizon): # execute t options in sequence
         if done: # episode terminated
             break
-        # if executed or with_failures:
-        #     initiation_mask_s = compute_initiation_masks(s, options).astype(np.float32)
-        # else:
-        #     print(f'Option {option_n} failed, removing from initiation set')
-        #     initiation_mask_s[option_n] = 0
+       
 
         initiation_mask_s = compute_initiation_masks(s, options).astype(np.float32)
-
-        if np.sum(initiation_mask_s) == 0 and not with_failures:
-            print(f'No options available in {s} at time {t}, setting as terminal state with original initset {initiation_mask_s}')
-            if len(trajectory) > 0:
-                trajectory[-1] = trajectory[-1].modify(done=True)
-            break # no options available
-        if not with_failures:
+        if not uniform:
+            if np.sum(initiation_mask_s) == 0:
+                print(f'No options available in {s} at time {t}, setting as terminal state with original initset {initiation_mask_s}')
+                if len(trajectory) > 0:
+                    trajectory[-1] = trajectory[-1].modify(done=True)
+                break # no options available
             option_n = np.random.choice(len(options), p=initiation_mask_s/np.sum(initiation_mask_s)) # sample option uniformly
         else:
             option_n = np.random.choice(len(options))

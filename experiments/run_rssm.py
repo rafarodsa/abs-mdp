@@ -1,7 +1,7 @@
 import lightning as pl
 
 from src.absmdp.infomax_attn import AbstractMDPTrainer
-from src.absmdp.tpc_critic_rssm import RSSMAbstraction as TPCAbstraction
+from src.absmdp.tpc_critic_rssm import RSSMAbstraction as TPCAbstraction, RSSMAbstractModel
 
 from src.absmdp.datasets_traj import PinballDatasetTrajectory as PinballDataset
 from omegaconf import OmegaConf as oc
@@ -59,7 +59,13 @@ def run(cfg, ckpt=None, args=None):
     cfg.data.save_path = save_path
     # torch._dynamo.config.verbose=True
     # model = torch.compile(TPCAbstraction(cfg))
-    model = TPCAbstraction(cfg)
+
+    if args.model_success_rate:
+        model = RSSMAbstractModel(cfg)
+    else:
+        model = TPCAbstraction(cfg)
+
+    # model = TPCAbstraction(cfg) if not args.model_success_rate else RSSMAbstractModel(cfg)
     
     data = PinballDataset(cfg.data)
 
@@ -115,6 +121,8 @@ def main():
     parser.add_argument('--num-nodes', type=int, default=1)
     parser.add_argument('--strategy', type=str, default='auto')
     parser.add_argument('--tag', type=str, default='')
+    parser.add_argument('--model-success-rate', action='store_true', default=False)
+    parser.add_argument('--initsets-from-success', action='store_true', default=False)
 
     parser.add_argument('--train-mdp', action='store_true', default=False)
 
@@ -123,9 +131,14 @@ def main():
     logging.basicConfig(level=args.loglevel)
 
     cli_cfg = parse_oc_args(unknown)
-    cfg = TPCAbstraction.load_config(args.config)
+    
+    if args.model_success_rate:
+        cfg = RSSMAbstractModel.load_config(args.config)
+    else:
+        cfg = TPCAbstraction.load_config(args.config)
     cfg = oc.merge(cfg, cli_cfg)
-
+    cfg.initsets_from_success = args.initsets_from_success
+    
     if not args.train_mdp:
         run(cfg, args.from_ckpt, args)
     else:

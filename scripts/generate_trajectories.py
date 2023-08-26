@@ -87,7 +87,7 @@ if __name__== "__main__":
     parser.add_argument('--image-size', type=int, default=100)
     parser.add_argument('--option_type', type=str, default='continuous-v1')
     parser.add_argument('--grid_size', type=int, default=20)
-    parser.add_argument('--with-failures', action='store_true', default=False)
+    parser.add_argument('--uniform', action='store_true', default=False)
     args = parser.parse_args()
 
     dir, name = os.path.split(args.save_path)
@@ -103,7 +103,7 @@ if __name__== "__main__":
     env = Pinball(config=args.env_config, width=grid_size, height=grid_size, render_mode='rgb_array') 
 
     if args.option_type == 'continuous-v1':
-        options = OptionFactory2(env, translation_distance=1/args.grid_size)
+        options = OptionFactory2(env, translation_distance=1/args.grid_size, check_can_execute=False)
     elif args.option_type == 'continuous-v0':
         options = OptionFactory(env)
     elif args.option_type == 'grid':
@@ -115,7 +115,7 @@ if __name__== "__main__":
     
     options_desc = {i: str(o) for i, o in enumerate(options)}
 
-    trajectories = Parallel(n_jobs=args.n_jobs)(delayed(collect_trajectory)(env, options, obs_type=args.observation, max_exec_time=max_exec_time, horizon=args.max_horizon, with_failures=args.with_failures) for i in tqdm(range(args.num_traj)))        
+    trajectories = Parallel(n_jobs=args.n_jobs)(delayed(collect_trajectory)(env, options, obs_type=args.observation, max_exec_time=max_exec_time, horizon=args.max_horizon, uniform=args.uniform) for i in tqdm(range(args.num_traj)))        
     
     if args.observation == 'pixel':
         trajectories = save_and_compress(trajectories, zfile)

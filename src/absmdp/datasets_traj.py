@@ -135,7 +135,7 @@ def split(_list, batch_size):
 class PinballDatasetTrajectory_(torch.utils.data.Dataset):
     IMG_FORMAT = 'tj_{}_obs_{}.png'
 
-    def __init__(self, path_to_file, transforms=None, obs_type='full', length=32, dtype=torch.float32, noise_level=0.01, num_workers=1):
+    def __init__(self, path_to_file, transforms=None, obs_type='full', length=32, dtype=torch.float32, noise_level=0., num_workers=1):
         self.zfile_name = path_to_file
         self.transforms = transforms
         self.dtype = dtype
@@ -146,22 +146,27 @@ class PinballDatasetTrajectory_(torch.utils.data.Dataset):
         self.load()
 
     def load(self):
-        with zipfile.ZipFile(self.zfile_name, 'r') as zfile:
-            print('Loading trajectories...')
-            self.trajectories = torch.load(zfile.open('transitions.pt'))
-            self.trajectories = list(filter(lambda t: len(t) > 0, self.trajectories))
-            nl = list(filter(lambda n: '.png' in n, zfile.namelist()))
-        if self.obs_type == 'pixels':
-            print(self.num_workers)
-            batch_size = len(nl) // self.num_workers if self.num_workers > 1 else len(nl)
-            images_loaded = Parallel(n_jobs=self.num_workers)(delayed(load_images)(self.zfile_name, imgs) for imgs in split(nl, batch_size))
-            images_loaded = reduce(lambda x,acc: x+acc, images_loaded, [])
-            print(f'{len(images_loaded)} images loaded! ')
-            self.images_loaded = dict(images_loaded)     
+        try:
+            with zipfile.ZipFile(self.zfile_name, 'r') as zfile:
+                print(f'Loading trajectories... from {self.zfile_name}')
+                self.trajectories = torch.load(zfile.open('transitions.pt'))
+                self.trajectories = list(filter(lambda t: len(t) > 0, self.trajectories))
+                nl = list(filter(lambda n: '.png' in n, zfile.namelist()))
+            if self.obs_type == 'pixels':
+                print(self.num_workers)
+                batch_size = len(nl) // self.num_workers if self.num_workers > 1 else len(nl)
+                images_loaded = Parallel(n_jobs=self.num_workers)(delayed(load_images)(self.zfile_name, imgs) for imgs in split(nl, batch_size))
+                images_loaded = reduce(lambda x,acc: x+acc, images_loaded, [])
+                print(f'{len(images_loaded)} images loaded! ')
+                self.images_loaded = dict(images_loaded)     
+        except:
+            raise ValueError(f'File {self.zfile_name} could not be opened')
 
     def __transform_transition(self, datum):
         datum = self._set_dtype(datum)
         rew = torch.Tensor(datum.rewards).to(self.dtype)
+
+
         if self.obs_type != 'pixels':
             obs, next_obs = datum.obs, datum.next_obs  
         else:
@@ -175,6 +180,7 @@ class PinballDatasetTrajectory_(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         trajectory = self.trajectories[index]
+
         trajectory = [self.__transform_transition(datum) for datum in trajectory]
         length = len(trajectory)
         padding = self.length - length
@@ -219,7 +225,7 @@ class PinballDatasetTrajectory_(torch.utils.data.Dataset):
             s_ = torch.from_numpy(s_).to(self.dtype)
         duration = torch.tensor(duration).to(self.dtype)
         initsets = torch.from_numpy(initsets).to(self.dtype)
-        executed = torch.tensor(executed).to(self.dtype)
+        executed = torch.tensor(executed).to(self.dtype) if not isinstance(executed, torch.Tensor) else torch.tensor(executed.item()).to(self.dtype)
         return datum.modify(obs=s, next_obs=s_, initsets=initsets, executed=executed, duration=duration)
 
     def _process_pixel_obs(self, obs):

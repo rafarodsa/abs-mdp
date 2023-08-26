@@ -23,7 +23,7 @@ import logging
 from src.utils.printarr import printarr
 
 class InfoNCEAbstraction(pl.LightningModule):
-    INITSET_CLASS_THRESH = 0.65
+    INITSET_CLASS_THRESH = 0.5
 
     def __init__(self, cfg: TrainerConfig):
         super().__init__()

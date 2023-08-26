@@ -16,6 +16,8 @@ from src.utils.symlog import symlog, symexp
 from src.absmdp.infomax_attn import AbstractMDPTrainer
 from src.utils.printarr import printarr
 
+from src.absmdp.tpc_critic_rssm import RSSMAbstraction, RSSMAbstractModel
+
 import logging
 logger = logging.getLogger(__name__)
 
@@ -199,6 +201,7 @@ class AbstractMDPCritic(gym.Env):
                  obs_dim,
                  init_classifier,
                  gamma=0.9997,
+                 prob_success=None,
                  rssm=False
                 ):
         
@@ -216,8 +219,13 @@ class AbstractMDPCritic(gym.Env):
         self.rssm = rssm
         self.device='cpu'
         self._sample_state = False
+        self.success = prob_success
 
-        self.modules = [encoder, grounding, transition, reward, init_classifier, tau]
+        self.modules = [encoder, transition, reward, init_classifier, tau]
+        if self.success is not None:
+            self.modules.append(prob_success)
+        if grounding is not None:
+            self.modules.append(grounding)
         for m in self.modules:
             m.eval()
             m.to(self.device)
@@ -246,14 +254,15 @@ class AbstractMDPCritic(gym.Env):
         pass
 
     def step(self, action):
-        action = action.to(self.device)
-        next_s = self.transition(self.state, action)
-        # printarr(next_s, self.state)
-        r = self.reward(self.state, action, next_s).item()
-        done = False
-        tau =  self.tau(self.state, action)
-        info = {'tau': tau.item()}
-        self._state = next_s
+        with torch.no_grad():
+            action = action.to(self.device)
+            next_s = self.transition(self.state, action)
+            # printarr(next_s, self.state)
+            r = self.reward(self.state, action, next_s).item()
+            done = False
+            tau =  self.tau(self.state, action)
+            info = {'tau': tau.item()}
+            self._state = next_s
         return next_s[0], r, done, info
 
     @property
@@ -293,9 +302,22 @@ class AbstractMDPCritic(gym.Env):
     def transition(self, state, action):
         batch = state.shape[0] if len(state.size()) > 1 else 1
         batched = len(state.shape) > 1
-        if len(state.size()) == 1:
-            input = torch.cat([state, self._action_to_one_hot(action)], dim=-1)
-        else: 
+
+        if self.success is not None:
+            success_probs = self.success(state).sigmoid()
+            if isinstance(action, np.ndarray):
+                action = torch.from_numpy(action)
+            elif isinstance(action, (int, np.int64)):
+                action = torch.tensor(action)
+            if batched and state.shape[0] == 1:
+                action = action.unsqueeze(0)
+
+            success_prob_action = success_probs.gather(-1, action.unsqueeze(-1)).squeeze(-1)
+            success = torch.bernoulli(success_prob_action)
+            if batched and state.shape[0] == 1:
+                success = success.unsqueeze(0)
+            input = torch.cat([state, self._action_to_one_hot(action), success], dim=-1)
+        else:
             input = torch.cat([state, self._action_to_one_hot(action)], dim=-1)
         t = self.transition_fn.distribution(input)
         delta_s = t.mean if not self._sample_state else t.sample()[0]
@@ -353,10 +375,13 @@ class AbstractMDPCritic(gym.Env):
 
     @staticmethod
     def _prepare_models(mdp_trainer):
+
+
         encoder = mdp_trainer.encoder
         encoder.requires_grad_(False)
         grounding = mdp_trainer.grounding
-        grounding.requires_grad_(False)
+        if grounding is not None:
+            grounding.requires_grad_(False)
         transition = mdp_trainer.transition
         transition.requires_grad_(False)
         reward_fn = mdp_trainer.reward_fn
@@ -364,9 +389,16 @@ class AbstractMDPCritic(gym.Env):
         init_classifier = mdp_trainer.initsets
         init_classifier.requires_grad_(False)
         tau = mdp_trainer.tau
-        
-
         tau.requires_grad_(False)
+        
+        if isinstance(mdp_trainer, RSSMAbstractModel):
+            prob_success = mdp_trainer.success
+            prob_success.requires_grad_(False)
+        else:
+            prob_success = None
+
+
+
         mdp_elems = {
                      'encoder': encoder, 
                      'grounding': grounding, 
@@ -377,6 +409,7 @@ class AbstractMDPCritic(gym.Env):
                      'n_options': mdp_trainer.n_options,
                      'latent_dim': mdp_trainer.latent_dim,
                      'obs_dim': mdp_trainer.obs_dim,
-                     'gamma': mdp_trainer.cfg.data.gamma
+                     'gamma': mdp_trainer.cfg.data.gamma,
+                     'prob_success': prob_success
                     }
         return mdp_elems

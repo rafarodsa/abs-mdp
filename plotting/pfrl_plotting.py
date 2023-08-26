@@ -10,6 +10,8 @@ from plotting.comparison_plotting import plot_comparison_learning_curves, genera
 from matplotlib import pyplot as plt
 
 from functools import partial
+from itertools import product
+from collections import defaultdict
 
 def get_summary_data(csv_path, column_keys=('steps', 'episodes', 'mean')):
     assert len(column_keys) == 2, f'Must specify X and Y axis only, got {column_keys}'
@@ -51,6 +53,23 @@ def gather_evaluator_csv_files_from_base_dir(base_dir=None, file_name='scores.tx
                 id_to_csv[exp_dir] = csv_path
     return id_to_csv
 
+def gather_evaluator_csv_files_from_base_dirs(base_dir=[], file_name='scores.txt', evaluator_dir='ground', filter_fn=lambda path: True):
+    """
+    Here the base_dir is assumed to be ~/acme, and under the base_dir are the dirs
+    named with `acme_id`, under which has `logs/evaluator/logs.csv`.
+
+    Args:
+        base_dir (_type_): acme results dir, if None use the default acme setting
+        filter_fn (boolean function): 
+    Returns:
+        dict exp_dir -> csv_path
+    """
+
+    id_to_csv = {}
+    for basedir in base_dir:
+        id_to_csv.update(gather_evaluator_csv_files_from_base_dir(basedir, file_name, evaluator_dir, filter_fn))
+    return id_to_csv
+
 
 def filter_from_substring(substring):
     def filter_fn(exp_dir):
@@ -90,13 +109,13 @@ def csv_to_curves(filename):
 
     return curves
 
-def plot_curve_groups(curve_groups, curve_group_names):
-    for i, (group, group_name) in enumerate(zip(curve_groups, curve_group_names)):
+def plot_curve_groups(curve_groups, curve_group_names, x_offsets=None):
+    for i, (group, group_name, offset) in enumerate(zip(curve_groups, curve_group_names, x_offsets)):
         identifier = group_name if group_name is not None else f"group_{i}"
         for curve in group:
             label = f"{identifier}_{curve['label']}"
-            plt.plot(curve["xs"], curve["mean"], linewidth=2, label=label, alpha=0.9)
-            plt.fill_between(curve["xs"], curve["top"], curve["bottom"], alpha=0.2)
+            plt.plot(curve["xs"] + offset, curve["mean"], linewidth=2, label=label, alpha=0.9)
+            plt.fill_between(curve["xs"] + offset, curve["top"], curve["bottom"], alpha=0.2)
 
 def save_curve_groups_to_csv(curve_groups, curve_group_names, filename):
     df = pd.DataFrame()
@@ -146,13 +165,191 @@ def load_curve_groups_from_csv(filename):
 
     return result
 
+def group_dirs_by_pattern(basedir, depth, identifiers, filter_func=None):
+    """
+    Group directories based on the pattern {identifier}_n or [+-]identifier, 
+    where identifier is one of the possible identifiers.
+    The identifier is matched as a substring of the directory name.
+    Only directories that pass the filter_func will be included.
+    """
+    # Compile patterns for each identifier
+    patterns_n = [re.compile(f"{re.escape(identifier)}_([\d]+(\.[\d]+)?)") for identifier in identifiers]
+    patterns_bool = [re.compile(f"[+-]{re.escape(identifier)}") for identifier in identifiers]
+    
+    dir_dict = {}
+    found_identifiers = set()
+    for current_dir, subdirs, _ in os.walk(basedir):
+        current_depth = current_dir.count(os.sep) - basedir.count(os.sep)
+        # print(f'current_depth: {current_depth}, current_dir: {current_dir}, subdirs: {subdirs}, basedir: {basedir}')
+        if current_depth < depth:
+            for subdir in subdirs:
+                full_path = os.path.join(current_dir, subdir)
+                if len(identifiers) > 0:
+                    for identifier, pattern_n, pattern_bool in zip(identifiers, patterns_n, patterns_bool):
+                        match_n = pattern_n.search(subdir)
+                        match_bool = pattern_bool.search(subdir)
+                        if match_n:
+                            found_identifiers.add(identifier)
+                            key = f"{match_n.group(0)}"
+                            _add_to_result(dir_dict, key, full_path, current_depth, depth, filter_func)
+                        if match_bool:
+                            found_identifiers.add(identifier)
+                            key = f"{match_bool.group(0)}"
+                            _add_to_result(dir_dict, key, full_path, current_depth, depth, filter_func)
+
+            # remove found identifiers from the list of identifiers
+            identifiers = list(set(identifiers) - found_identifiers)
+
+        else:
+            break
+        
+
+    # expand the paths to the last level allowed
+    for k, v in dir_dict.items():
+        if len(v) > 0:
+            _expanded_paths = []
+            for path in v:
+                current_depth = path.count(os.sep) - basedir.count(os.sep)
+                _expanded_paths.extend(get_subdirs(path, depth - current_depth, filter_func))
+            dir_dict[k] = _expanded_paths
+
+    return dir_dict, found_identifiers
+
+
+def get_subdirs(base_path, depth, filter_fn=None):
+    if depth < 0:
+        return []
+
+    # subdirs = [base_path] if (filter_fn is None or filter_fn(base_path)) else []
+    subdirs = []
+    start_level = base_path.rstrip(os.path.sep).count(os.path.sep)
+    
+    for root, dirs, _ in os.walk(base_path):
+        if filter_fn is not None:
+            dirs[:] = [d for d in dirs if filter_fn(os.path.join(root, d))]
+        
+        current_level = root.count(os.path.sep) - start_level
+        if current_level == depth-1:
+            for directory in dirs:
+                subdirs.append(os.path.join(root, directory))
+    return subdirs
+
+def _add_to_result(dir_dict, key, full_path, current_depth, depth, filter_func):
+    # Check for immediate subdirectories if we're at depth-1
+    if current_depth == depth - 1:
+        dplus1_subdirs = [os.path.join(full_path, d1_subdir) for d1_subdir in os.listdir(full_path) if os.path.isdir(os.path.join(full_path, d1_subdir))]
+        # Apply the filter function, if provided
+        if filter_func:
+            dplus1_subdirs = [path for path in dplus1_subdirs if filter_func(path)]
+        dir_dict.setdefault(key, []).extend(dplus1_subdirs)
+    elif not filter_func or filter_func(full_path):
+        dir_dict.setdefault(key, []).append(full_path)
+
+
+def join_dirs(dir_dict, identifiers):
+    
+    identifier_values = defaultdict(set)
+    for identifier in identifiers:
+        for k in dir_dict.keys():
+            if identifier in k:
+                identifier_values[identifier].add(k)
+    
+    new_ids = product(*identifier_values.values())
+    new_dir_dict = defaultdict(set)
+    for new_id in new_ids:
+        key  = "__".join(new_id)
+        paths = [v for k, v in dir_dict.items() if k in new_id]
+        if len(paths) > 0:
+            print(paths)
+            new_dir_dict[key] = set(paths[0]).intersection(*paths)
+    return new_dir_dict
+
+def multiple_level_exp():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--base-dirs', nargs='+', type=str, default=None)
+    parser.add_argument('--curve-names', nargs='+', type=str, default=None)
+    parser.add_argument('--group-by', nargs='+', type=str, default=['',])
+    parser.add_argument('--evaluator-dirs', nargs='+', type=str, default=['ground'])
+    parser.add_argument('--x-offset', nargs='+', type=float, default=None)
+    parser.add_argument('--log-file', type=str, default='scores.txt')
+    parser.add_argument('--x-axis', type=str, default='steps')
+    parser.add_argument('--y-axis', type=str, default='mean')
+    parser.add_argument('--xlabel', type=str, default='steps')
+    parser.add_argument('--ylabel', type=str, default='success rate')
+    parser.add_argument('--regex', type=str, default=None)
+    parser.add_argument('--save-path', type=str, default=None)
+    parser.add_argument('--save-curves', action='store_true')
+    parser.add_argument('--window-size', type=int, default=10)
+    parser.add_argument('--show', action='store_true')
+    parser.add_argument('--depth', type=int, default=2)
+    args = parser.parse_args()
+
+
+    filter_fn = None
+    if args.regex is not None:
+        filter_fn = filter_from_substring(args.regex)
+
+    paths, found_ids = group_dirs_by_pattern(args.base_dirs[0], args.depth, args.group_by, filter_func=filter_fn)
+    paths = join_dirs(paths, found_ids)
+    curves_groups = []
+    if args.curve_names is None:
+        args.curve_names = [None] * len(args.base_dirs)
+    else:
+        assert len(args.curve_names) == len(args.base_dirs)
+
+
+    if args.x_offset is None:
+        args.x_offset = [0] * len(args.base_dirs)
+    elif len(args.x_offset) <= len(args.base_dirs):
+        args.x_offset = args.x_offset + [0] * (len(args.base_dirs) - len(args.x_offset)) # pad with zeros
+        
+    curve_names = []
+    offsets = []
+    groupbys = set()
+
+    group_keys = set(args.group_by) - set(found_ids)
+    if len(group_keys) == 0:
+        group_keys = ['']
+    for i, (group_name, base_dir) in enumerate(paths.items()):
+        for evaluator_dir in args.evaluator_dirs:
+            csv_fn = partial(gather_evaluator_csv_files_from_base_dirs, evaluator_dir=evaluator_dir, file_name=args.log_file, filter_fn=lambda path: True)
+            
+            curves = generate_learning_curves(
+                base_dir=base_dir,
+                group_keys=group_keys,
+                summary_fn=lambda csv: get_summary_data(csv, column_keys=[args.x_axis, args.y_axis]),
+                csv_path_fn=csv_fn,
+                smoothen=args.window_size,
+                save_path=args.save_path,
+                ylabel=args.ylabel,
+                xlabel=args.xlabel,
+                show=args.show,
+            )
+            for c in curves:
+                groupbys.add(c['label'])
+                c['label'] = f'{group_name}_{evaluator_dir}_{c["label"]}'
+                curve_names.append(c['label'])
+            curves_groups.append(curves)
+
+
+    plot_curve_groups(curves_groups, curve_names, x_offsets=[0]*len(curves_groups))
+    
+    plt.legend()
+
+    if args.save_path is not None:
+        plt.savefig(args.save_path)
+
+    if args.save_curves:
+        path = os.path.split(args.save_path)[0]
+        save_curve_groups_to_csv(curves_groups, args.curve_names, os.path.join(path, 'curves.csv'))
 
 def compare_pfrl_experiments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--base-dirs', nargs='+', type=str, default=None)
     parser.add_argument('--curve-names', nargs='+', type=str, default=None)
     parser.add_argument('--group-by', nargs='+', type=str, default=['',])
-    parser.add_argument('--evaluator-dirs', nargs='+', type=str, default='ground')
+    parser.add_argument('--evaluator-dirs', nargs='+', type=str, default=['ground'])
+    parser.add_argument('--x-offset', nargs='+', type=float, default=None)
     parser.add_argument('--log-file', type=str, default='scores.txt')
     parser.add_argument('--x-axis', type=str, default='steps')
     parser.add_argument('--y-axis', type=str, default='mean')
@@ -175,8 +372,16 @@ def compare_pfrl_experiments():
         args.curve_names = [None] * len(args.base_dirs)
     else:
         assert len(args.curve_names) == len(args.base_dirs)
+
+
+    if args.x_offset is None:
+        args.x_offset = [0] * len(args.base_dirs)
+    elif len(args.x_offset) <= len(args.base_dirs):
+        args.x_offset = args.x_offset + [0] * (len(args.base_dirs) - len(args.x_offset)) # pad with zeros
         
     curve_names = []
+    offsets = []
+    groupbys = set()
     for i, base_dir in enumerate(args.base_dirs):
         for evaluator_dir in args.evaluator_dirs:
             csv_fn = partial(gather_evaluator_csv_files_from_base_dir, evaluator_dir=evaluator_dir, file_name=args.log_file, filter_fn=filter_fn)
@@ -192,13 +397,15 @@ def compare_pfrl_experiments():
                 show=args.show,
             )
             for c in curves:
+                groupbys.add(c['label'])
                 c['label'] = f'{evaluator_dir}_{c["label"]}'
                 curve_names.append(args.curve_names[i])
+                offsets.append(args.x_offset[i])
             curves_groups.append(curves)
 
     
 
-    plot_curve_groups(curves_groups, curve_names)
+    plot_curve_groups(curves_groups, curve_names, x_offsets=offsets)
     
     plt.legend()
 
@@ -210,7 +417,21 @@ def compare_pfrl_experiments():
         save_curve_groups_to_csv(curves_groups, args.curve_names, os.path.join(path, 'curves.csv'))
 
 
-    
+    # print final scores ordered from highest to lowest
+    print_best_scores(curves_groups)
+
+def print_best_scores(curves_groups):
+    final_scores = []
+    for curves in curves_groups:
+        for curve in curves:
+            final_scores.append((curve['label'], curve['mean'][-1]))
+    final_scores = sorted(final_scores, key=lambda x: x[1], reverse=True)
+    # print final scores in table format
+    print("Final scores:")
+    print("-------------")
+    print("Experiment\t\t\t\t\tScore")  
+    for score in final_scores:
+        print(f"{score[0]}\t\t{score[1]}")
 
 def plot_pfrl_experiments():
     parser = argparse.ArgumentParser()
@@ -244,6 +465,9 @@ def plot_pfrl_experiments():
 
 
 
+
+
 if __name__ == '__main__':
 #    plot_pfrl_experiments()
     compare_pfrl_experiments()
+    # multiple_level_exp()

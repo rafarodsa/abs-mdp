@@ -23,7 +23,7 @@ import logging
 from src.utils.printarr import printarr
 
 class RSSMAbstraction(pl.LightningModule):
-    INITSET_CLASS_THRESH = 0.65
+    INITSET_CLASS_THRESH = 0.5
 
     def __init__(self, cfg: TrainerConfig):
         super().__init__()
@@ -34,7 +34,6 @@ class RSSMAbstraction(pl.LightningModule):
         self.obs_dim = cfg.model.obs_dims
         self.latent_dim = cfg.model.latent_dim
         self.n_options = cfg.model.n_options
-
         self.encoder = build_model(cfg.model.encoder.features)
         self.transition = build_distribution(cfg.model.transition)
         self.grounding = build_model(cfg.model.decoder)
@@ -44,7 +43,6 @@ class RSSMAbstraction(pl.LightningModule):
         self.lr = cfg.optimizer.params.lr
         self.hyperparams = cfg.loss
         self.kl_const =  self.hyperparams.kl_const
-
 
     def forward(self, state, action):
         z = self.encoder(state)
@@ -56,7 +54,7 @@ class RSSMAbstraction(pl.LightningModule):
     def _get_device(self, x):
         d = x.get_device()
         return 'cpu' if d < 0 else f'cuda:{d}'
-    def _run_step(self, s, a, next_s, initset_s, reward, duration, lengths):
+    def _run_step(self, s, a, next_s, initset_s, reward, duration, lengths, executed=None):
         
         # sample encoding of (s, s') and add noise
         z = self.encoder(s)
@@ -79,10 +77,18 @@ class RSSMAbstraction(pl.LightningModule):
         next_z_dist = self.transition.distribution(torch.cat([z, a], dim=-1))
         transition_loss = self.consistency_loss(z, next_z, next_z_dist, mask=_mask)
         tpc_loss = self.tpc_loss(z, next_z, next_z_dist, min_length=lengths.min())
+    
+        # initsets 
+        if self.cfg.initsets_from_success:
+            initset_loss = self.initset_loss_from_executed(z, a, executed, _mask)
+        else:
+            initset_loss = self.initset_loss(z[_mask], initset_s[_mask])
 
-        # initsets
-        initset_loss = self.initset_loss(z[_mask], initset_s[_mask])
-        return grounding_loss.mean(), transition_loss.mean(), tpc_loss.mean(), initset_loss.mean(), reward_loss.mean(), tau_loss.mean()
+
+        # regulizer
+        norm_loss = (z_c[_mask] ** 2).sum(-1).mean() / self.latent_dim
+
+        return grounding_loss.mean(), transition_loss.mean(), tpc_loss.mean(), initset_loss.mean(), reward_loss.mean(), tau_loss.mean(), norm_loss.mean()
 
 
     def initset_loss(self, z, initset_target):
@@ -97,18 +103,32 @@ class RSSMAbstraction(pl.LightningModule):
         return initset_loss
 
 
-    def step(self, batch, batch_idx):
-        s, a, next_s, initset_s, reward, duration, lengths = batch.obs, batch.action, batch.next_obs, batch.initsets, batch.rewards, batch.duration.float(), batch.length
-        
+    def initset_loss_from_executed(self, z, action, executed, mask):
+        _act_idx = action.argmax(-1, keepdim=True)
+        initset_pred = torch.gather(self.initsets(z), -1, _act_idx).squeeze(-1)
+        n_pos = executed.sum(-1, keepdim=True)
+        n_neg = executed.shape[1] - n_pos
+        if torch.all(n_neg==0):
+            pos_weight = torch.tensor(1.)
+        else:
+            pos_weight = torch.where(n_pos > 0, n_neg / n_pos, 1.)
 
-        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths)
+        # printarr(initset_pred, executed, pos_weight, z, action)
+        initset_loss = (F.binary_cross_entropy_with_logits(initset_pred, executed, pos_weight=pos_weight, reduction='none') * mask).sum(-1)
+        return initset_loss
+
+
+    def step(self, batch, batch_idx):
+        s, a, next_s, initset_s, reward, duration, lengths, executed = batch.obs, batch.action, batch.next_obs, batch.initsets, batch.rewards, batch.duration.float(), batch.length, batch.executed
+        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss, norm_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths, executed)
 
         loss = self.hyperparams.grounding_const * grounding_loss + \
                 self.hyperparams.transition_const * transition_loss + \
                 self.hyperparams.tpc_const * tpc_loss + \
                 self.hyperparams.initset_const * initset_loss + \
                 self.hyperparams.reward_const * reward_loss + \
-                self.hyperparams.tau_const * tau_loss
+                self.hyperparams.tau_const * tau_loss + \
+                norm_loss
         
 
         # log std deviations for encoder.
@@ -117,17 +137,25 @@ class RSSMAbstraction(pl.LightningModule):
             'transition_loss': transition_loss,
             'tpc_loss': tpc_loss,
             'initset_loss': initset_loss,
-            'loss': loss
+            'loss': loss,
+            'norm_2': norm_loss
 
         }
         # logger.debug(f'Losses: {logs}')
         return loss, logs
 	
-    def consistency_loss(self, z, next_z, next_z_dist, mask):
+    def consistency_loss(self, z, next_z, next_z_dist, mask, executed=None):
         '''
             -log T(z'|z, a) 
         '''
-        return -(next_z_dist.log_prob(next_z-z) * mask).sum(-1)
+        pos_weight = torch.tensor(1.)
+        if executed is not None:
+            n_pos = executed.sum(-1, keepdim=True)
+            n_neg = executed.shape[1] - n_pos
+            if torch.any(n_neg==0):
+                pos_weight = torch.where(n_pos > 0, n_neg / n_pos, 1.)
+
+        return -(next_z_dist.log_prob(next_z-z) * mask * pos_weight).sum(-1)
 	
     def grounding_loss(self, next_z, next_s):
         '''
@@ -202,8 +230,7 @@ class RSSMAbstraction(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         s, a, next_s, executed, initset_s, reward, duration, lengths = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets, batch.rewards, batch.duration.float(), batch.length
         # assert torch.all(executed) # check all samples are successful executions.
-
-        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths)    
+        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss, norm_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths, executed=executed)    
 
         batch_size, length = s.shape[0], s.shape[1]
         _mask = torch.arange(length).to(self.get_device(s)).repeat(batch_size, 1) < lengths.unsqueeze(1)
@@ -213,6 +240,9 @@ class RSSMAbstraction(pl.LightningModule):
         next_z = self.transition.distribution(t_in).mean + z
         initset_pred = (torch.sigmoid(self.initsets(z[_mask])) > self.INITSET_CLASS_THRESH).float()
         initset_acc = (initset_pred == initset_s[_mask]).float().mean()
+        initset_pred = torch.sigmoid(self.initsets(z))
+        executed_pred = torch.gather((initset_pred > self.INITSET_CLASS_THRESH).float(), -1, a.argmax(-1, keepdim=True)).squeeze()
+        executed_acc = (executed_pred[_mask] == executed[_mask]).float().mean()
 
         # nll_loss = self.grounding_loss(next_z[_mask], next_s[_mask]).mean()
         nll_loss = self.grounding_loss_normal(next_z[_mask])
@@ -221,18 +251,20 @@ class RSSMAbstraction(pl.LightningModule):
                 'val_infomax': grounding_loss.mean(),
                 'val_transition': transition_loss.mean(),
                 'val_tpc_loss': tpc_loss.mean(),
+                'val_executed_acc': executed_acc,
                 'val_initset_loss': initset_loss.mean(),
                 'val_initset_acc': initset_acc,
                 'val_reward_loss': reward_loss.mean(), 
                 'val_tau_loss': tau_loss.mean(),
-                'val_nll_loss': nll_loss.mean()
+                'val_nll_loss': nll_loss.mean(),
+                'val_norm_2': norm_loss.mean()
             }
         self.log_dict(logs, on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         return logs['val_infomax']
 	
     def test_step(self, batch, batch_idx):
         s, a, next_s, executed, initset_s, reward, duration, lengths = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets, batch.rewards, batch.duration.float(), batch.length
-        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths)    
+        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss, norm_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths, executed=executed)    
 
         batch_size, length = s.shape[0], s.shape[1]
         _mask = torch.arange(length).to(self._get_device(s)).repeat(batch_size, 1) < lengths.unsqueeze(1)
@@ -271,3 +303,140 @@ class RSSMAbstraction(pl.LightningModule):
                 return cfg
         except FileNotFoundError:
             raise ValueError(f"Could not find config file at {path}")
+        
+
+class RSSMAbstractModel(RSSMAbstraction):
+    def __init__(self, cfg):
+        oc.resolve(cfg)
+        cfg.model.transition.features.latent_dim = cfg.model.latent_dim + 1 # add executed flag
+        super().__init__(cfg)
+        self.grounding = None
+        self.success = build_model(cfg.model.init_class)
+
+
+    def _run_step(self, s, a, next_s, initset_s, reward, duration, lengths, executed=None):
+                
+        # sample encoding of (s, s') and add noise
+        z = self.encoder(s)
+        z_c = z
+        next_z_c = self.encoder(next_s)
+        noise_std = 0.2
+        z = z + torch.randn_like(z) * noise_std
+        next_z  =  next_z_c + torch.randn_like(z) * noise_std 
+        
+        batch_size, length = s.shape[0], s.shape[1]
+
+
+        _mask = torch.arange(length).to(self._get_device(s)).repeat(batch_size, 1) < lengths.unsqueeze(1)
+        grounding_loss = self.grounding_loss_normal(next_z[_mask])
+        reward_loss = self.reward_loss(reward[_mask], z_c[_mask], a[_mask], next_z_c[_mask])
+        tau_loss = self.duration_loss(duration[_mask], z_c[_mask], a[_mask])
+
+        # transition losses
+        next_z_dist = self.transition.distribution(torch.cat([z, a, executed.unsqueeze(-1)], dim=-1))
+        transition_loss = self.consistency_loss(z, next_z, next_z_dist, mask=_mask)
+        tpc_loss = self.tpc_loss(z, next_z, next_z_dist, min_length=lengths.min())
+
+
+        # initsets 
+        initset_loss = self.initset_loss_from_executed(z, a, executed, _mask)
+        success_loss = self.prob_success_loss(z[_mask], a[_mask], executed[_mask])
+
+        # regularizer
+        norm_loss = (z_c[_mask] ** 2).sum(-1)
+
+        return grounding_loss.mean(), transition_loss.mean(), tpc_loss.mean(), initset_loss.mean(), reward_loss.mean(), tau_loss.mean(), success_loss.mean(), norm_loss.mean()
+    
+    def prob_success_loss(self, z, a, executed):
+        success_logits = torch.gather(self.success(z), -1, a.argmax(-1, keepdim=True)).squeeze(-1)
+        loss = F.binary_cross_entropy_with_logits(success_logits, executed, reduction='none')
+        return loss
+    
+    def step(self, batch, batch_idx):
+        s, a, next_s, initset_s, reward, duration, lengths, executed = batch.obs, batch.action, batch.next_obs, batch.initsets, batch.rewards, batch.duration.float(), batch.length, batch.executed
+        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss, prob_success, norm_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths, executed)
+
+        loss = self.hyperparams.grounding_const * grounding_loss + \
+                self.hyperparams.transition_const * transition_loss + \
+                self.hyperparams.tpc_const * tpc_loss + \
+                self.hyperparams.initset_const * initset_loss + \
+                self.hyperparams.reward_const * reward_loss + \
+                self.hyperparams.tau_const * tau_loss + \
+                prob_success + \
+                norm_loss
+        
+
+        # log std deviations for encoder.
+        logs = {
+            'grounding_loss': grounding_loss,
+            'transition_loss': transition_loss,
+            'tpc_loss': tpc_loss,
+            'initset_loss': initset_loss,
+            'norm_2': norm_loss,
+            'loss': loss
+
+        }
+        # logger.debug(f'Losses: {logs}')
+        return loss, logs
+    
+
+    def validation_step(self, batch, batch_idx):
+        s, a, next_s, executed, initset_s, reward, duration, lengths = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets, batch.rewards, batch.duration.float(), batch.length
+        # assert torch.all(executed) # check all samples are successful executions.
+        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss, prob_success, norm_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths, executed=executed)    
+
+        batch_size, length = s.shape[0], s.shape[1]
+        _mask = torch.arange(length).to(self.get_device(s)).repeat(batch_size, 1) < lengths.unsqueeze(1)
+
+        z = self.encoder(s)
+        t_in = torch.cat([z, a, executed.unsqueeze(-1)], dim=-1)
+        next_z = self.transition.distribution(t_in).mean + z
+        initset_pred = (torch.sigmoid(self.initsets(z[_mask])) > self.INITSET_CLASS_THRESH).float()
+        initset_acc = (initset_pred == initset_s[_mask]).float().mean()
+        initset_pred = torch.sigmoid(self.initsets(z))
+        executed_pred = torch.gather((initset_pred > self.INITSET_CLASS_THRESH).float(), -1, a.argmax(-1, keepdim=True)).squeeze()
+        executed_acc = (executed_pred[_mask] == executed[_mask]).float().mean()
+
+        nll_loss = self.grounding_loss_normal(next_z[_mask])
+
+        logs = {
+                'val_infomax': grounding_loss.mean(),
+                'val_transition': transition_loss.mean(),
+                'val_tpc_loss': tpc_loss.mean(),
+                'val_executed_acc': executed_acc,
+                'val_prob_success': prob_success.mean(),
+                'val_initset_loss': initset_loss.mean(),
+                'val_initset_acc': initset_acc,
+                'val_reward_loss': reward_loss.mean(), 
+                'val_tau_loss': tau_loss.mean(),
+                'val_nll_loss': nll_loss.mean(),
+                'val_norm_2': norm_loss.mean()
+            }
+        self.log_dict(logs, on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        return logs['val_infomax']
+	
+    def test_step(self, batch, batch_idx):
+        s, a, next_s, executed, initset_s, reward, duration, lengths = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets, batch.rewards, batch.duration.float(), batch.length
+        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss, prob_success, norm_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths, executed=executed)    
+
+        batch_size, length = s.shape[0], s.shape[1]
+        _mask = torch.arange(length).to(self._get_device(s)).repeat(batch_size, 1) < lengths.unsqueeze(1)
+
+        z = self.encoder(s)
+        t_in = torch.cat([z, a, executed.unsqueeze(-1)], dim=-1)
+        next_z = self.transition.distribution(t_in).mean + z
+        initset_pred = (torch.sigmoid(self.initsets(z[_mask])) > self.INITSET_CLASS_THRESH).float()
+        initset_acc = (initset_pred == initset_s[_mask]).float().mean()
+
+        nll_loss = self.grounding_loss_normal(next_z[_mask]).mean()
+        self.log_dict({
+                        'nll_loss': nll_loss,
+                        'initset_acc': initset_acc,
+                        'initset_loss': initset_loss.mean(),
+                        'reward_loss': reward_loss.mean(),
+                        'transition_loss': transition_loss.mean(),
+                        'tau_loss': tau_loss.mean(),
+                        'prob_success': prob_success.mean()
+                       }
+                       ,on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        return nll_loss

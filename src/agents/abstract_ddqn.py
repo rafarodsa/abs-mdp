@@ -343,15 +343,8 @@ class AbstractDDQNGrounded(pfrl.agent.Agent):
         
     def act(self, obs, initset=None):
         z = self.encoder(torch.from_numpy(obs).to(self.device))
-        # printarr(obs, z)
-        # with torch.no_grad():
-        #     q_values = self.agent._evaluate_model_and_update_recurrent_states(z)
-        
-        # mask = (1-self.action_mask(torch.from_numpy(obs).unsqueeze(0))) * -1e9 if initiset is None else (1-initiset) * -1e9
-        # action = (q_values.q_values + mask).argmax(-1)
         action = self.agent.act(z, initset)
         return action
-
     
     def load(self, dirname):
         self.agent.load(dirname)
@@ -367,3 +360,32 @@ class AbstractDDQNGrounded(pfrl.agent.Agent):
         return self.agent.get_statistics()
         
     
+# class GroundedHierarchicalAgent(pfrl.Agent):
+#     def __init__(self, agent, encoder, initset_fn):
+#         self.agent = agent
+#         self._encoder = encoder
+#         self._initset_fn = initset_fn
+    
+#     def act(self, obs):
+#         z = self.encoder(obs)
+#         return self.agent.act(z)
+    
+#     def observe(self, obs, reward, done, reset, info):
+#         z = self.encoder(obs)
+#         self.agent.observe(z, reward, done, reset, info)
+
+#     @property
+#     def encoder(self):
+#         return self._encoder
+    
+#     @property
+#     def initset_fn(self):
+#         return self._initset_fn
+
+#     @encoder.setter
+#     def encoder(self, encoder):
+#         self._encoder = encoder
+    
+#     @initset_fn.setter
+#     def initset_fn(self, initset_fn):
+#         self._initset_fn = initset_fn

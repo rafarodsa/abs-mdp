@@ -52,6 +52,7 @@ if __name__ == '__main__':
     parser.add_argument('--n-samples', type=int, default=1000)
     parser.add_argument('--device', type=str, default='cpu')
     parser.add_argument('--rssm', action='store_true')
+    parser.add_argument('--dataset', type=str, default='')
     args = parser.parse_args()
 
     config_file, ckpt_path = get_experiment_info(args.experiment)
@@ -65,6 +66,9 @@ if __name__ == '__main__':
     # Load config
     cfg = oc.load(config_file).cfg
     
+    if len(args.dataset) > 0:
+        cfg.data.data_path = args.dataset
+
     # Load
     # model = InfomaxAbstraction.load_from_checkpoint(args.from_ckpt, cfg=cfg)
     if not args.rssm:

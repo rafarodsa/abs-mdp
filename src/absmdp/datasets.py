@@ -169,7 +169,7 @@ class PinballDataset_(torch.utils.data.Dataset):
         
     def load(self):
         with zipfile.ZipFile(self.zfile_name, 'r') as zfile:
-            print('Loading trajectories...')
+            print(f'Loading trajectories... from {self.zfile_name}')
             self.trajectories = torch.load(zfile.open('transitions.pt'))
             print('Loading rewards...')
             self.rewards = torch.load(zfile.open('rewards.pt'))
