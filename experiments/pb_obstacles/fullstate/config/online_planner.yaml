@@ -1,0 +1,105 @@
+experiment_cwd: exp_results/pb_obstacles/fullstate/absmdps
+experiment_name: test
+exp_id: test
+fabric:
+  accelerator: gpu
+  devices: 1
+  strategy: auto
+
+experiment:
+  seed: 31
+  gpu: 0
+  demo: false
+  eval_interval: 1000
+  eval_n_runs: 5
+  log_level: 20
+  checkpoint_frequency: 1000 
+  max_rollout_len: 64 # max length to rollout the ground env.
+  log_tensorboard: true
+  discounted: false
+  steps: 80000
+  train_every: 8
+  max_episode_len: 100
+  outdir: planning_ddqn
+
+world_model:
+  ckpt: exp_results/pb_obstacles/fullstate/mdps/pinball_markov_4096_3__model.latentdim_16/phi_train/ckpts/last.ckpt
+  data_path: exp_results/pb_obstacles/fullstate/data/trajectories_cont_25_128.zip
+  name: null
+  reward_scale: ${planner.env.reward_scale}
+  sample_transition: true
+  model_success: false
+  gamma: ${planner.env.gamma}
+  
+  model:
+    model_config_dir: experiments/pb_obstacles/fullstate/
+    n_options: 4
+    obs_dims: 4
+    latent_dim: 2
+    trajectory_len: 64
+    encoder: ${loadcfg:${model.model_config_dir}/config/models/encoder_mlp.yaml}
+    decoder: ${loadcfg:${model.model_config_dir}/config/models/decoder_mlp_critic.yaml}
+    transition: ${loadcfg:${model.model_config_dir}/config/models/transition_gaussian.yaml}
+    init_class: ${loadcfg:${model.model_config_dir}/config/models/init_class_mlp.yaml}
+    reward: ${loadcfg:${model.model_config_dir}/config/models/reward_mlp.yaml}
+    tau: ${loadcfg:${model.model_config_dir}/config/models/tau_mlp.yaml}
+
+  optimizer:
+    type: adam
+    params:
+      lr: 1e-4
+  scheduler:
+    type: 'linear_scheduler'
+    params:
+      start_factor: 1.
+      end_factor: 1.
+      total_iters: 1.
+
+  loss:
+    grounding_const: 1.
+    tpc_const: 1
+    kl_const: 1
+    transition_const: 1.
+    reward_const: 1
+    tau_const: 1.
+    initset_const: 1
+    n_samples: 1
+
+  data:
+    buffer_size: 512
+    batch_size: 16
+
+planner:
+  env:
+    sample_abstract_transition: true
+    absgroundmdp: false
+    render: false
+    init_thresh: 0.5
+    use_ground_init: false
+    reward_scale: 0. #0.00016666666666666666
+    gamma: 0.9997
+    goal: 2
+
+  agent:
+    load: null
+    final_exploration_steps: 0.3 # proportion of agent trainings steps to decay the epsilon
+    final_epsilon: 0.1
+    eval_epsilon: 0.001
+    replay_start_size: 1000
+    replay_buffer_size: 100000
+    target_update_interval: 10000
+    update_interval: 5
+    num_step_return: 1
+    steps: 1000000
+    lr: 1e-4
+    eval_random_agent: false
+    rollout_len: 100
+
+  q_func: 
+    type: 'mlp'
+    n_actions: 4
+    hidden_dims: [256, 256]
+    activation: silu
+    output_dim: ${world_model.model.n_options}
+
+
