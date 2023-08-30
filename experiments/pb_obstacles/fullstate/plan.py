@@ -100,13 +100,14 @@ def ground_state_sampler(g_sampler, grounding_function, n_samples=1000, device='
         return s
     return __sample
 
-def gaussian_ball_goal_fn(phi, goal, goal_tol, n_samples=100):
+def gaussian_ball_goal_fn(phi, goal, goal_tol, n_samples=100, device='cpu'):
     goal = torch.Tensor(goal).unsqueeze(0)
     samples = torch.randn(n_samples, 4) * goal_tol
     encoded_samples = phi(samples + goal)
     encoded_goal = phi(goal)
     printarr(encoded_goal, encoded_samples)
     encoded_tol = torch.sqrt(((encoded_goal-encoded_samples) ** 2).sum(-1).mean())
+    encoded_tol, encoded_goal = encoded_tol.to(device), encoded_goal.to(device)
     def __goal(z):
         _d = (((z-encoded_goal)/encoded_tol) ** 2).sum(-1)
         return torch.exp(-_d) > 0.3

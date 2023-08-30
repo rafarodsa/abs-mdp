@@ -31,3 +31,34 @@ class CyclicalKLAnnealing(Callback):
         self.pl_module = pl_module
         self.pl_module.kl_const = 0.
         print(f'Peak time: {self.peak_time}, iter per cycle: {self.iter_per_cycle}, n_iterations: {self.n_iterations}')
+    
+
+class Ratio:
+    def __init__(self, ratio):
+        self.ratio = ratio
+        self.prev_t = None
+    
+    def __call__(self, t):
+        if self.ratio == 0:
+            return 0
+        if self.prev_t is None:
+            self.prev_t = t
+            return 1
+        repeat = int((t-self.prev_t) * self.ratio)
+        self.prev_t += repeat / self.ratio
+        return repeat
+
+class Every:
+    def __init__(self, every):
+        self.every = every
+        self.prev_t = None
+    
+    def __call__(self, t):
+        if self.prev_t is None:
+            self.prev_t = t
+            return True
+        
+        if t - self.prev_t >= self.every:
+            self.prev_t = t
+            return True
+        return False

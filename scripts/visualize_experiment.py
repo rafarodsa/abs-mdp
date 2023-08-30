@@ -53,6 +53,7 @@ if __name__ == '__main__':
     parser.add_argument('--device', type=str, default='cpu')
     parser.add_argument('--rssm', action='store_true')
     parser.add_argument('--dataset', type=str, default='')
+
     args = parser.parse_args()
 
     config_file, ckpt_path = get_experiment_info(args.experiment)
@@ -90,6 +91,7 @@ if __name__ == '__main__':
         _action.append(action.to(args.device))
         _next_obs.append(next_obs.to(args.device))
     obs, action, next_obs = torch.cat(_obs, dim=0), torch.cat(_action, dim=0), torch.cat(_next_obs, dim=0)
+
 
 
     Batch = namedtuple('batch', ['obs', 'action', 'next_obs'])

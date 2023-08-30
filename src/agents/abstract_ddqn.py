@@ -151,6 +151,7 @@ class AbstractDoubleDQN(DoubleDQN):
         return self.batch_act([obs], [initset])[0]
 
     def batch_act(self, batch_obs: Sequence[Any], batch_initset_s: Sequence[Any] = None) -> Sequence[Any]:
+
         batch_s = self.batch_states(batch_obs, self.device, self.phi)
         if batch_initset_s is not None:
             if isinstance(batch_initset_s[0], np.ndarray):
@@ -158,7 +159,7 @@ class AbstractDoubleDQN(DoubleDQN):
             else:
                 batch_initset_s = torch.stack(batch_initset_s, dim=0).to(device=self.device)
         else:
-            print('Warning: Executing Initset function')
+            # print('Warning: Executing Initset function')
             batch_initset_s = self.action_mask(batch_s)
 
         action_mask = (1-batch_initset_s) * -1e12
@@ -166,7 +167,6 @@ class AbstractDoubleDQN(DoubleDQN):
         with torch.no_grad(), evaluating(self.model):
             batch_av = self._evaluate_model_and_update_recurrent_states(batch_obs)
             batch_argmax = (batch_av.q_values + action_mask).argmax(-1)
-            # printarr(batch_argmax, batch_av.q_values, action_mask)
         if self.training:
             batch_action = [
                 self.explorer.select_action(
@@ -269,6 +269,7 @@ class AbstractDoubleDQN(DoubleDQN):
         Returns:
             None
         """
+
         has_weight = "weight" in experiences[0][0]
         exp_batch = batch_experiences(
             experiences,
@@ -301,7 +302,7 @@ class AbstractDoubleDQN(DoubleDQN):
 
     def save(self, dirname):
         super().save(dirname)
-        self.replay_buffer.save(f'{dirname}/replay_buffer.pt')
+        # self.replay_buffer.save(f'{dirname}/replay_buffer.pt')
 
     def load(self, dirname):
         super().load(dirname)
@@ -332,7 +333,7 @@ class AbstractLinearDecayEpsilonGreedy(explorers.LinearDecayEpsilonGreedy):
     
 
 class AbstractDDQNGrounded(pfrl.agent.Agent):
-    def __init__(self, encoder, agent, action_mask, device='cpu'):
+    def __init__(self, encoder, agent, action_mask=None, device='cpu'):
         self.agent = agent
         self.encoder = encoder
         self.action_mask = action_mask
@@ -342,7 +343,8 @@ class AbstractDDQNGrounded(pfrl.agent.Agent):
         print(self.gamma)
         
     def act(self, obs, initset=None):
-        z = self.encoder(torch.from_numpy(obs).to(self.device))
+        with torch.no_grad():
+            z = self.encoder(torch.from_numpy(obs).to(self.device))
         action = self.agent.act(z, initset)
         return action
     
@@ -350,7 +352,8 @@ class AbstractDDQNGrounded(pfrl.agent.Agent):
         self.agent.load(dirname)
     
     def observe(self, obs, reward, done, reset, info):
-        z = self.encoder(torch.from_numpy(obs).to(self.device))
+        with torch.no_grad():
+            z = self.encoder(torch.from_numpy(obs).to(self.device))
         self.agent.observe(z, reward, done, reset, info)
     
     def save(self, dirname):
@@ -358,7 +361,9 @@ class AbstractDDQNGrounded(pfrl.agent.Agent):
     
     def get_statistics(self):
         return self.agent.get_statistics()
-        
+    
+    def getattr(self, name):
+        return getattr(self.agent, name)
     
 # class GroundedHierarchicalAgent(pfrl.Agent):
 #     def __init__(self, agent, encoder, initset_fn):

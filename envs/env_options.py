@@ -19,6 +19,7 @@ class EnvOptionWrapper(gym.Wrapper):
         done = done or next_initset.sum() == 0
         info['initset_next_s'] = next_initset
         info['initset_s'] = self.last_initset
+        info['success'] = not truncated
         self._last_initset = next_initset
         self.state = next_s
         return next_s.astype(np.float32), r, done, truncated, info

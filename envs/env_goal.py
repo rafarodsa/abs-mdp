@@ -19,6 +19,10 @@ class EnvGoalWrapper(gym.Env):
             next_s, r, done, info = ret
         else:
             next_s, r, done, truncated, info = ret
+        
+        info['env_reward'] = r
+        info['env_done'] = done
+
         r = self.reward_scale * r
         tau = 1 if 'tau' not in info else info['tau']
         # done = False
@@ -26,6 +30,12 @@ class EnvGoalWrapper(gym.Env):
             r = r + self.goal_reward * (self.gamma ** (tau-1)) if self.discounted else r + self.goal_reward
             done = True
             print(f'goal reached {next_s[:2]}')
+            info['goal_reached'] = True
+            info['task_reward'] = self.goal_reward 
+        else:
+            info['goal_reached'] = False
+            info['task_reward'] = 0.
+
         return next_s, r, done, info
 
     def reset(self, state=None):

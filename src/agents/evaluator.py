@@ -77,6 +77,8 @@ def _run_episodes(
         logger.info(
             "evaluation episode %s length:%s R:%s", len(scores), episode_len, test_r
         )
+
+    print(f'Evaluation: mean return {sum(scores) / len(scores)}, mean length {sum(lengths) / len(lengths)}')
     return scores, lengths, exec_time, discounted_scores
 
 
