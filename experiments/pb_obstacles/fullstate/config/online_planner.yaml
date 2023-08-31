@@ -24,7 +24,7 @@ experiment:
 
 world_model:
   ckpt: exp_results/pb_obstacles/fullstate/mdps/pinball_markov_4096_3__model.latentdim_16/phi_train/ckpts/last.ckpt
-  data_path: exp_results/pb_obstacles/fullstate/data/trajectories_cont_25_128.zip
+  data_path: exp_results/pb_obstacles/fullstate/data/trajectories_cont_25_1024.zip
   name: null
   reward_scale: ${planner.env.reward_scale}
   sample_transition: true

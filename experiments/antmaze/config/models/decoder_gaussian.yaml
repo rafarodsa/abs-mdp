@@ -1,0 +1,13 @@
+features:
+  type: mlp
+  input_dim: ${model.latent_dim}
+  output_dim: 32
+  hidden_dims:
+  - 64
+  activation: relu
+dist:
+  type: diag_gaussian
+  output_dim: ${model.obs_dims}
+  input_dim: ${model.decoder.features.output_dim}
+  min_std: 0.001
+  max_std: 100

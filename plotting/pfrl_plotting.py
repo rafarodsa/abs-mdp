@@ -13,6 +13,9 @@ from functools import partial
 from itertools import product
 from collections import defaultdict
 
+import seaborn as sns
+
+
 def get_summary_data(csv_path, column_keys=('steps', 'episodes', 'mean')):
     assert len(column_keys) == 2, f'Must specify X and Y axis only, got {column_keys}'
 
@@ -111,11 +114,11 @@ def csv_to_curves(filename):
 
 def plot_curve_groups(curve_groups, curve_group_names, x_offsets=None):
     for i, (group, group_name, offset) in enumerate(zip(curve_groups, curve_group_names, x_offsets)):
-        identifier = group_name if group_name is not None else f"group_{i}"
-        for curve in group:
+        for curve, name, xoffset in zip(group, group_name, offset):
+            identifier = name if name is not None else f"group_{i}"
             label = f"{identifier}_{curve['label']}"
-            plt.plot(curve["xs"] + offset, curve["mean"], linewidth=2, label=label, alpha=0.9)
-            plt.fill_between(curve["xs"] + offset, curve["top"], curve["bottom"], alpha=0.2)
+            plt.plot(curve["xs"] + xoffset, curve["mean"], linewidth=2, label=label, alpha=0.9)
+            plt.fill_between(curve["xs"] + xoffset, curve["top"], curve["bottom"], alpha=0.2)
 
 def save_curve_groups_to_csv(curve_groups, curve_group_names, filename):
     df = pd.DataFrame()
@@ -264,27 +267,7 @@ def join_dirs(dir_dict, identifiers):
             new_dir_dict[key] = set(paths[0]).intersection(*paths)
     return new_dir_dict
 
-def multiple_level_exp():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--base-dirs', nargs='+', type=str, default=None)
-    parser.add_argument('--curve-names', nargs='+', type=str, default=None)
-    parser.add_argument('--group-by', nargs='+', type=str, default=['',])
-    parser.add_argument('--evaluator-dirs', nargs='+', type=str, default=['ground'])
-    parser.add_argument('--x-offset', nargs='+', type=float, default=None)
-    parser.add_argument('--log-file', type=str, default='scores.txt')
-    parser.add_argument('--x-axis', type=str, default='steps')
-    parser.add_argument('--y-axis', type=str, default='mean')
-    parser.add_argument('--xlabel', type=str, default='steps')
-    parser.add_argument('--ylabel', type=str, default='success rate')
-    parser.add_argument('--regex', type=str, default=None)
-    parser.add_argument('--save-path', type=str, default=None)
-    parser.add_argument('--save-curves', action='store_true')
-    parser.add_argument('--window-size', type=int, default=10)
-    parser.add_argument('--show', action='store_true')
-    parser.add_argument('--depth', type=int, default=2)
-    args = parser.parse_args()
-
-
+def multiple_level_exp(args):
     filter_fn = None
     if args.regex is not None:
         filter_fn = filter_from_substring(args.regex)
@@ -343,26 +326,25 @@ def multiple_level_exp():
         path = os.path.split(args.save_path)[0]
         save_curve_groups_to_csv(curves_groups, args.curve_names, os.path.join(path, 'curves.csv'))
 
-def compare_pfrl_experiments():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--base-dirs', nargs='+', type=str, default=None)
-    parser.add_argument('--curve-names', nargs='+', type=str, default=None)
-    parser.add_argument('--group-by', nargs='+', type=str, default=['',])
-    parser.add_argument('--evaluator-dirs', nargs='+', type=str, default=['ground'])
-    parser.add_argument('--x-offset', nargs='+', type=float, default=None)
-    parser.add_argument('--log-file', type=str, default='scores.txt')
-    parser.add_argument('--x-axis', type=str, default='steps')
-    parser.add_argument('--y-axis', type=str, default='mean')
-    parser.add_argument('--xlabel', type=str, default='steps')
-    parser.add_argument('--ylabel', type=str, default='success rate')
-    parser.add_argument('--regex', type=str, default=None)
-    parser.add_argument('--save-path', type=str, default=None)
-    parser.add_argument('--save-curves', action='store_true')
-    parser.add_argument('--window-size', type=int, default=10)
-    parser.add_argument('--show', action='store_true')
-    args = parser.parse_args()
+def compare_pfrl_experiments(args):
+    curves_groups, curve_names, offsets, groupbys = get_curves(args)
+
+    plot_curve_groups(curves_groups, curve_names, x_offsets=offsets)
+    
+    plt.legend()
+
+    if args.save_path is not None:
+        plt.savefig(args.save_path)
+
+    if args.save_curves:
+        path = os.path.split(args.save_path)[0]
+        save_curve_groups_to_csv(curves_groups, args.curve_names, os.path.join(path, 'curves.csv'))
 
 
+    # print final scores ordered from highest to lowest
+    print_best_scores(curves_groups)
+
+def get_curves(args):
     filter_fn = lambda path: True
     if args.regex is not None:
         filter_fn = filter_from_substring(args.regex)
@@ -381,8 +363,12 @@ def compare_pfrl_experiments():
         
     curve_names = []
     offsets = []
+    x_offsets = []
+    names = []
     groupbys = set()
     for i, base_dir in enumerate(args.base_dirs):
+        offsets = []
+        curve_names = []
         for evaluator_dir in args.evaluator_dirs:
             csv_fn = partial(gather_evaluator_csv_files_from_base_dir, evaluator_dir=evaluator_dir, file_name=args.log_file, filter_fn=filter_fn)
             curves = generate_learning_curves(
@@ -402,23 +388,11 @@ def compare_pfrl_experiments():
                 curve_names.append(args.curve_names[i])
                 offsets.append(args.x_offset[i])
             curves_groups.append(curves)
-
-    
-
-    plot_curve_groups(curves_groups, curve_names, x_offsets=offsets)
-    
-    plt.legend()
-
-    if args.save_path is not None:
-        plt.savefig(args.save_path)
-
-    if args.save_curves:
-        path = os.path.split(args.save_path)[0]
-        save_curve_groups_to_csv(curves_groups, args.curve_names, os.path.join(path, 'curves.csv'))
+            names.append(curve_names)
+            x_offsets.append(offsets)
 
 
-    # print final scores ordered from highest to lowest
-    print_best_scores(curves_groups)
+    return curves_groups,names,x_offsets, groupbys
 
 def print_best_scores(curves_groups):
     final_scores = []
@@ -433,41 +407,77 @@ def print_best_scores(curves_groups):
     for score in final_scores:
         print(f"{score[0]}\t\t{score[1]}")
 
-def plot_pfrl_experiments():
+
+def plot_subplots(args):
+    curves, curve_names, x_offsets, groupbys = get_curves(args)
+    subplot_groups = list(groupbys)
+    subplot_groups.sort()
+    n_cols = args.n_cols
+    layout = (len(subplot_groups) // n_cols + len(subplot_groups) % n_cols, n_cols)
+    print(f'Subplot layout: {layout}')
+    print(f'Subplot groups: {subplot_groups}')
+    
+    # sns.set_context("paper")
+    sns.set_style("whitegrid")
+
+    # Set color palette
+    palette = sns.color_palette('husl', len(curves))
+
+    fig, axs = plt.subplots(*layout, sharex=True, sharey=True, figsize=(24,12))
+
+
+    for j, (group, group_name, offset) in enumerate(zip(curves, curve_names, x_offsets)):
+        for curve, xoffset, name in zip(group, offset, group_name):
+            identifier = name if name is not None else f"group_{j}"
+            subplot_idx = list(filter(lambda x: x[-1] in curve['label'], enumerate(subplot_groups)))
+            if len(subplot_idx) == 0:
+                print(f"Curve {curve['label']} does not match any of the subplots")
+                continue
+            plt.subplot(*layout, subplot_idx[0][0] + 1)
+            label = f"{identifier}_{curve['label']}"
+            color = palette[j]  # Assigning color based on curve index
+            curve['label'] = label
+            plt.plot(curve["xs"] + xoffset, curve["mean"], color=color, linewidth=0.1, label=label)
+            plt.fill_between(curve["xs"] + xoffset, curve["top"], curve["bottom"], color=color, alpha=0.2)
+            plt.title(subplot_idx[0][1], fontsize=8)
+    
+    if args.save_path is not None:
+        print(f'Saving figure to {args.save_path}')
+        plt.savefig(args.save_path)
+
+    print_best_scores(curves)
+
+def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--base-dir', type=str, default=None)
-    parser.add_argument('--group-by', nargs='+', type=str, default=['', ])
+    parser.add_argument('script', type=str, choices=['compare', 'multiple_level', 'subplot'], default='compare')
+    parser.add_argument('--base-dirs', nargs='+', type=str, default=None)
+    parser.add_argument('--curve-names', nargs='+', type=str, default=None)
+    parser.add_argument('--group-by', nargs='+', type=str, default=['',])
+    parser.add_argument('--evaluator-dirs', nargs='+', type=str, default=['ground'])
+    parser.add_argument('--x-offset', nargs='+', type=float, default=None)
+    parser.add_argument('--log-file', type=str, default='scores.txt')
     parser.add_argument('--x-axis', type=str, default='steps')
     parser.add_argument('--y-axis', type=str, default='mean')
     parser.add_argument('--xlabel', type=str, default='steps')
     parser.add_argument('--ylabel', type=str, default='success rate')
     parser.add_argument('--regex', type=str, default=None)
     parser.add_argument('--save-path', type=str, default=None)
+    parser.add_argument('--save-curves', action='store_true')
     parser.add_argument('--window-size', type=int, default=10)
     parser.add_argument('--show', action='store_true')
-    args = parser.parse_args()
-
-    if args.regex is not None:
-        filter_fn = filter_from_substring(args.regex)
-
-
-    plot_comparison_learning_curves(
-        base_dir=args.base_dir,
-        group_keys=args.group_by,
-        summary_fn=lambda csv: get_summary_data(csv, column_keys=[args.x_axis, args.y_axis]),
-        csv_path_fn=gather_evaluator_csv_files_from_base_dir,
-        smoothen=args.window_size,
-        save_path=args.save_path,
-        ylabel=args.ylabel,
-        xlabel=args.xlabel,
-        show=args.show,
-    )
+    parser.add_argument('--depth', type=int, default=2)
+    parser.add_argument('--n-cols', type=int, default=4)
+    args, unknown = parser.parse_known_args()
 
 
-
-
+    if args.script == 'compare':
+        compare_pfrl_experiments(args)
+    elif args.script == 'multiple_level':
+        multiple_level_exp(args)
+    elif args.script == 'subplot':
+        plot_subplots(args)
+    else:
+        raise NotImplementedError(f"Unknown script {args.script}")
 
 if __name__ == '__main__':
-#    plot_pfrl_experiments()
-    compare_pfrl_experiments()
-    # multiple_level_exp()
+    parse_args()

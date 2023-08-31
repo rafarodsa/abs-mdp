@@ -63,12 +63,12 @@ class PinballEnv(gym.Env):
 
         self.expanded_obs = self._expand_obstacles(ball_rad=self.pinball.ball.radius * 1.10)
 
-        # plot obstacles
-        f, ax = plt.subplots()
-        for n_obs, obs in zip(self.expanded_obs, self.vertices):
-            ax.plot(obs[:, 0], obs[:, 1], c='k')
-            ax.plot(n_obs[:, 0], n_obs[:, 1], c='r')
-        plt.savefig('obstacles.png')
+        # # plot obstacles
+        # f, ax = plt.subplots()
+        # for n_obs, obs in zip(self.expanded_obs, self.vertices):
+        #     ax.plot(obs[:, 0], obs[:, 1], c='k')
+        #     ax.plot(n_obs[:, 0], n_obs[:, 1], c='r')
+        # plt.savefig('obstacles.png')
         
         if start_pos:
             self.pinball.set_initial_pos(start_pos)
@@ -319,11 +319,12 @@ class PinballEnvContinuous(PinballEnv):
         reward = self.pinball.reward(action) if not done else self.GOAL_REWARD
         return next_s, reward, done, False, {}
 
-class PinballPixelWrapper(gym.Env):
-    def __init__(self, environment, n_frames=1):
+class PinballPixelWrapper(gym.Wrapper):
+    def __init__(self, environment, n_frames=1, bw=True):
         self.frames = deque(maxlen=n_frames)
         self.env = environment
         self.n_frames = n_frames
+        self.bw = bw
 
     def step(self, *args, **kwargs):
         ret = self.env.step(*args, **kwargs)
@@ -331,12 +332,23 @@ class PinballPixelWrapper(gym.Env):
         if len(self.frames) < self.n_frames:
             self._init_queue(frame)
         self.frames.append(frame)
+        if self.bw:
+            next_obs = self.black_and_white(np.array(frame))
+        else:
+            next_obs = np.array(frame)
 
-        return np.array(self.frames), *ret[1:-1], {"next_state": ret[0]}
+        info = ret[-1]
+        info['next_state'] = ret[0]
+        return next_obs, *ret[1:-1], info
 
     def _init_queue(self, frame):
         for i in range(self.n_frames):
             self.frames.append(np.zeros_like(frame))
+
+    def black_and_white(self, obs):
+        r,g,b = obs[:, :, 0], obs[:, :, 1], obs[:, :, 2]
+        noise = np.random.randn(*r.shape) * 1/255
+        return np.clip((0.2989 * r + 0.5870 * g + 0.1140 * b)[np.newaxis] / 255 + noise, 0, 1).astype(np.float32)
 
     def reset(self, *args, **kwargs):
         self.frames.clear()
@@ -345,10 +357,12 @@ class PinballPixelWrapper(gym.Env):
         if len(self.frames) < self.n_frames:
             self._init_queue(frame)
         self.frames.append(frame)
-        return np.array(self.frames)
 
-    def sample_initial_positions(self, N):
-        return self.env.sample_initial_positions(N)
+        if self.bw:
+            next_obs = self.black_and_white(np.array(frame))
+        else:
+            next_obs = np.array(frame)
+        return next_obs
     
     @property
     def action_space(self):

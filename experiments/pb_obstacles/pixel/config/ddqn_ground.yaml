@@ -1,6 +1,6 @@
 # environment.yaml
-experiment_cwd: exp_results/pb_obstacles/fullstate/mdps
-experiment_name: pinball_rssm_large_normal_4__model.latentdim_6__seed_0
+experiment_cwd: exp_results/pb_obstacles/pixel/mdps
+experiment_name: pinball_rssm_large_pixel_4__model.latentdim_6__seed_0
 env:
   absmdp: ${experiment_cwd}/${experiment_name}/cont_mdp.pt
   sample_abstract_transition: true
@@ -31,10 +31,17 @@ agent:
 q_func: 
   n_actions: 4
   ground:
-    type: 'mlp'
-    hidden_dims: [128, 128]
-    activation: relu
-    output_dim: ${q_func.n_actions}
+    type: doubling_residual
+    in_width: 50
+    in_height: 50
+    color_channels: 1
+    depth: 24
+    cnn_blocks: 2
+    min_resolution: 4
+    mlp_layers: [256, ]
+    outdim: 4
+    mlp_activation: silu
+    cnn_activation: silu
   abstract:
     type: 'mlp'
     hidden_dims: [128, 128]

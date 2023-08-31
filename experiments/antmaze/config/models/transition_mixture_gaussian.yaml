@@ -1,0 +1,13 @@
+features:
+  type: dynamics_mlp
+  latent_dim: ${model.latent_dim}
+  n_options: ${model.n_options}
+  hidden_dims: [128, 128]
+  activation: relu
+dist:
+  type: mixture_gaussian
+  n_components: 4
+  output_dim: ${model.latent_dim}
+  input_dim: ${model.latent_dim}
+  min_std: 0.001
+  max_std: 100

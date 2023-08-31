@@ -13,7 +13,7 @@ import numpy as np
 
 
 from omegaconf import OmegaConf as oc
-from experiments.pb_obstacles.fullstate.plan import make_ground_env, gaussian_ball_goal_fn, GOALS, GOAL_TOL, parse_oc_args
+from experiments.pb_obstacles.plan import make_ground_env, gaussian_ball_goal_fn, GOALS, GOAL_TOL, parse_oc_args
 from src.absmdp.absmdp import AbstractMDP
 from src.models import ModuleFactory
 from src.agents.abstract_ddqn import AbstractDDQNGrounded, AbstractDoubleDQN, AbstractLinearDecayEpsilonGreedy

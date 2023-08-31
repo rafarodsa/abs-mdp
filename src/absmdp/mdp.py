@@ -413,3 +413,43 @@ class AbstractMDPCritic(gym.Env):
                      'prob_success': prob_success
                     }
         return mdp_elems
+
+
+class NormalizedObsWrapper(gym.Wrapper):
+    def __init__(self, env, device='cpu'):
+        super().__init__(env)
+        assert isinstance(env, (AbstractMDP, AbstractMDPCritic))
+        self.env = env
+        self._mean = None
+        self._std = None
+        self.device = device
+
+    def _make_normalizing_function(self, env, n_samples=5000):
+        s = [env.reset() for _ in range(n_samples)]
+        s = np.stack(s)
+        self._mean = np.mean(s, axis=0)
+        self._std = np.std(s, axis=0)
+        print('mean', self._mean, self._mean.mean())
+        print('std', self._std, self._std.mean())
+
+        print('max', np.max(s, axis=0))
+        print('min', np.min(s, axis=0))
+
+    def normalize(self, obs):
+        if self._mean is None or self._std is None:
+            self._make_normalizing_function(self.env)
+        return (obs - self._mean)/self._std
+
+    def reset(self, state=None):
+        obs = self.env.reset(state)
+        return self.normalize(obs)
+    
+    def step(self, action):
+        obs, r, done, info = self.env.step(action)
+        return self.normalize(obs), r, done, info
+    
+    def encoder(self, obs):
+        return self.normalize(self.env.encode(obs))
+
+    def init_classifier(self, obs):
+        return self.env.init_classifier(obs * self._std + self._mean)

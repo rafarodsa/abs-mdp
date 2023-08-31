@@ -89,7 +89,7 @@ def tune():
     optuna_db_path = f'{cfg.experiment_cwd}/{tune_cfg.db}'
     storage = optuna.storages.JournalStorage(
             optuna.storages.JournalFileStorage(optuna_db_path)
-        )
+    )
 
     study = optuna.create_study(
                         direction=tune_cfg.direction,

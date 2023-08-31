@@ -10,9 +10,9 @@ finetune='false'
 partition='3090-gcondo'
 substring=''
 outdir='planning_ddqn'
-
+tune=''
 # Parse the command line options and arguments
-while getopts j:dfp:s:o: opt; do
+while getopts j:dfp:s:o:t opt; do
     case "$opt" in
         j) job_name="$OPTARG";;
         d) dryrun='-d';;
@@ -20,6 +20,7 @@ while getopts j:dfp:s:o: opt; do
         p) partition="$OPTARG";;
         s) substring="$OPTARG";;
         o) outdir="$OPTARG";;
+        t) tune='true';;
         \?) echo "Usage: $0 -j <job_name> <search_directory> <string_prefix>"
             exit 1;;
     esac
@@ -46,20 +47,60 @@ echo $job_name
 
 count=1
 jobnames=()
-for path in $matching_subdirs; do
 
-    onager prelaunch +command "python experiments/pb_obstacles/fullstate/plan.py --config experiments/pb_obstacles/fullstate/config/ddqn_sim.yaml --experiment_cwd ${search_directory} --experiment_name ${path} --experiment.finetune ${finetune} --experiment.outdir ${outdir} " \
-    +jobname "${job_name}_${count}" \
-    +arg --use-ground-init false \
-    +arg --env.goal 0 1 2 3 4 5 6 7 8 9 \
-    +arg --experiment.seed 31 56 43 64 24 \
-    +tag --exp-id
+if [[ -z "$tune" ]]; then 
+    for path in $matching_subdirs; do
 
-    jobnames+=("${job_name}_${count}")
-    count=$((count + 1))
-    
-done
+        onager prelaunch +command "python experiments/pb_obstacles/fullstate/plan.py --config experiments/pb_obstacles/fullstate/config/ddqn_sim.yaml --experiment_cwd ${search_directory} --experiment_name ${path} --experiment.finetune ${finetune} --experiment.outdir ${outdir}" \
+        +jobname "${job_name}_${count}" \
+        +arg --use-ground-init false \
+        +arg --env.goal 0 1 2 3 4 5 6 7 8 9 \
+        +arg --experiment.seed 31 56 43 64 24 \
+        +tag --exp-id
 
+        jobnames+=("${job_name}_${count}")
+        count=$((count + 1))
+        
+    done
+else
+    for path in $matching_subdirs; do
+
+        onager prelaunch +command "python experiments/pb_obstacles/fullstate/plan.py tune --config experiments/pb_obstacles/fullstate/config/ddqn_sim.yaml --experiment_cwd ${search_directory} --experiment_name ${path}  --experiment.outdir ${outdir} --tune-config experiments/pb_obstacles/fullstate/config/tune.yaml" \
+        +jobname "${job_name}_${count}" \
+        +arg --experiment.seed 56 \
+        +tag --exp-id
+
+        jobnames+=("${job_name}_${count}")
+        count=$((count + 1))
+        
+    done
+fi
+
+# for jobname in "${jobnames[@]}"; do
+#     if [[ -z tune ]]; do 
+#         onager launch --jobname "$jobname" --backend slurm -p $partition --cpus 16 --mem 32 --time 1-00:00:00 $dryrun
+#     else
+#         onager launch --jobname "$jobname" --backend slurm -p $partition --cpus 4 --mem 8 --tasks-per-node 4 --time 6:00:00 $dryrun
+#     fi
+# done 
+
+total_cpus=0
+other_partition='3090-gcondo'
 for jobname in "${jobnames[@]}"; do
-    onager launch --jobname "$jobname" --backend slurm -p $partition --cpus 4 --mem 8 --tasks-per-node 4 --time 6:00:00 $dryrun
-done 
+    if [[ -z "${tune}" ]]; then
+        if [[ $((total_cpus + 4)) -le 32 ]]; then
+            onager launch --jobname "$jobname" --backend slurm -p $$partition --cpus 4 --mem 8 --tasks-per-node 4 --duration 6:00:00 $dryrun
+            total_cpus=$((total_cpus + 4))
+        else
+            onager launch --jobname "$jobname" --backend slurm -p $partition --cpus 4 --mem 8 --tasks-per-node 4 --duration 6:00:00 $dryrun
+        fi
+    else
+
+        if [[ $((total_cpus + 16)) -le 32 ]]; then
+            onager launch --jobname "$jobname" --backend slurm -p "$partition" --cpus 16 --mem 32 --duration 1-00:00:00 $dryrun
+            total_cpus=$((total_cpus + 16))
+        else
+            onager launch --jobname "$jobname" --backend slurm -p $partition --cpus 16 --mem 32 --duration 1-00:00:00 $dryrun
+        fi
+    fi
+done

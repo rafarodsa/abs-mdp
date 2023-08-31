@@ -73,7 +73,7 @@ class EnvOptionWrapper(gym.Wrapper):
     def render(self, *args, **kwargs):
         return self.env.render(*args, **kwargs)
 
-class EnvInitsetWrapper(gym.Env):
+class EnvInitsetWrapper(gym.Wrapper):
     def __init__(self, env, initset_fn):
         self.env = env
         self.initset_fn = initset_fn

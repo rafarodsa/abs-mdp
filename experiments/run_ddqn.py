@@ -80,7 +80,7 @@ def random_selection_initset(initset_s):
 def random_selection_from_obs(obs, iniset_fn):
     return random_selection_initset(iniset_fn(obs))
 
-def run_abstract_ddqn(envs, q_func, encoder, agent_args, experiment_args, finetuning_args=None, device='cpu'):
+def run_abstract_ddqn(envs, q_func, encoder, agent_args, experiment_args, finetuning_args=None, normalizer=lambda x: x, device='cpu', tune=False, trial=None):
 
     '''
         envs: Dict of envs (e.g. {'train': train_env, 'eval': {'eval_env1', 'eval_env2', ...}})
@@ -147,7 +147,7 @@ def run_abstract_ddqn(envs, q_func, encoder, agent_args, experiment_args, finetu
         clip_delta=True,
         update_interval=agent_args.update_interval,
         batch_accumulator="sum",
-        phi=lambda x: x,
+        phi=normalizer,
         minibatch_size=32
     )
 
@@ -182,8 +182,11 @@ def run_abstract_ddqn(envs, q_func, encoder, agent_args, experiment_args, finetu
         if experiment_args.finetune:   
             agent = AbstractDDQNGrounded(encoder, agent, action_mask=env.initset, device=device)
         steps = agent_args.steps if not experiment_args.finetune else finetuning_args.steps
+        eval_hooks = [LogDiscountedReturn()]
+        if tune:
+            eval_hooks.append(pfrl.experiments.evaluation_hooks.OptunaPrunerHook(trial=trial))
 
-        train_agent_with_evaluation(
+        _, eval_stats = train_agent_with_evaluation(
             agent=agent,
             env=env,
             steps=steps,
@@ -198,5 +201,7 @@ def run_abstract_ddqn(envs, q_func, encoder, agent_args, experiment_args, finetu
             train_max_episode_len=experiment_args.max_episode_len,
             eval_max_episode_len=experiment_args.max_episode_len,
             discounted=False,
-            evaluation_hooks=[LogDiscountedReturn()]
+            evaluation_hooks=eval_hooks
         )
+    print(eval_stats)
+    return eval_stats
