@@ -13,6 +13,8 @@ from pfrl.utils.ask_yes_no import ask_yes_no
 from src.agents.evaluator import Evaluator
 from src.utils.printarr import printarr
 
+import time, datetime
+from collections import deque
 
 
 def save_agent_replay_buffer(agent, t, outdir, suffix="", logger=None):
@@ -90,9 +92,10 @@ def train_agent(
             eval_results = [evaluate(evaluator, t, episode_idx, agent, successful_score) for evaluator in evaluators]
             eval_dicts, _ = list(zip(*eval_results))
             eval_stats_history.append(eval_dicts)
-
+        init_tic = time.perf_counter()
+        time_per_step = deque(maxlen=25)
         while t < steps:
-
+            tic = time.perf_counter()
             # a_t
             initset_s = env.last_initset
             action = agent.act(obs, initset_s)
@@ -124,6 +127,7 @@ def train_agent(
                 stats = agent.get_statistics()
                 logger.info("statistics:%s", stats)
                 episode_idx += 1
+            
 
             if evaluators is not None and (episode_end or eval_during_episode):
                 eval_results = [evaluate(evaluator, t, episode_idx, agent, successful_score) for evaluator in evaluators]
@@ -132,8 +136,8 @@ def train_agent(
                 # if any in success is True
                 if any(success):
                     break
-
-
+                
+            toc = time.perf_counter()
             if episode_end:
                 if t == steps:
                     break
@@ -141,8 +145,12 @@ def train_agent(
                 episode_r = 0
                 episode_len = 0
                 obs = env.reset()
+                time_per_step.append(toc-tic)
+                logger.info(f'Iteration time: {toc-tic}s | Estimated time left: {datetime.timedelta(seconds=(steps-t)*sum(time_per_step)/len(time_per_step))}')
             if checkpoint_freq and t % checkpoint_freq == 0:
                 save_agent(agent, t, outdir, logger, suffix="_checkpoint")
+
+                
 
     except (Exception, KeyboardInterrupt):
         # Save the current model before being killed
@@ -152,6 +160,7 @@ def train_agent(
     # Save the final model
     save_agent(agent, t, outdir, logger, suffix="_finish")
 
+    print(f'Total time: {datetime.timedelta(seconds=time.perf_counter()-init_tic)}.')
     return eval_stats_history
 
 

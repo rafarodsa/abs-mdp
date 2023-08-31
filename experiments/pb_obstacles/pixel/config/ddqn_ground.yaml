@@ -17,13 +17,13 @@ agent:
   final_exploration_steps: 350000
   final_epsilon: 0.1
   eval_epsilon: 0.001
-  replay_start_size: 1000
+  replay_start_size: 10000
   replay_buffer_size: 100000
-  target_update_interval: 1000
+  target_update_interval: 10000
   steps: 1000000
   update_interval: 5
   num_step_return: 1
-  lr: 0.0005
+  lr: 0.0001
   eval_random_agent: false
   gamma: ${env.gamma}
   normalize_obs: false
@@ -52,7 +52,7 @@ experiment:
   seed: 31
   gpu: -1
   demo: false
-  eval_interval: 2500
+  eval_interval: 10000
   eval_n_runs: 10
   log_level: 20
   checkpoint_frequency: null

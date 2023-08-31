@@ -506,7 +506,7 @@ class AbstractMDP(nn.Module, gym.Env):
         '''
             Freeze modules
         '''
-        if not isinstance(modules, list):
+        if isinstance(modules, str):
             modules = [modules]
         for module in modules:
             getattr(self, module).eval()

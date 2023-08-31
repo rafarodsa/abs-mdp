@@ -143,8 +143,7 @@ def main():
     task_reward = make_task_reward()
     world_model.set_task_reward(task_reward)
 
-    # TODO freeze representation
-    world_model.freeze('encoder')
+    world_model.freeze(world_model_cfg.fixed_modules)
 
     # make grounded agent
     agent, grounded_agent = make_ddqn_agent(agent_cfg, experiment_cfg=cfg.experiment, world_model=world_model)
