@@ -19,6 +19,7 @@ from experiments import parse_oc_args
 from experiments.run_ddqn import run_abstract_ddqn
 
 from src.absmdp.mdp import NormalizedObsWrapper
+from src.agents.multiprocess_env import MultiprocessVectorEnv
 
 import pfrl
 from pfrl.q_functions import DiscreteActionValueHead
@@ -219,6 +220,16 @@ def make_ground_env(test=False, test_seed=0, train_seed=1, args=None, reward_sca
     env.seed(test_seed if test else train_seed)
     return env
 
+def make_batched_ground_env(make_env, num_envs, seeds):
+    vec_env = MultiprocessVectorEnv(
+        [
+            partial(make_env, train_seed=seeds[i])
+            for i in range(num_envs)
+        ]
+    )
+    return vec_env
+
+
 def parse_oc_args(oc_args):
     assert len(oc_args)%2==0
     oc_args = ['='.join([oc_args[i].split('--')[-1], oc_args[i+1]]) for i in range(len(oc_args)) if i%2==0]
@@ -242,6 +253,7 @@ def get_params():
     parser.add_argument('--config', type=str, default='experiments/pb_obstacles/pixel/config/ddqn_ground.yaml')
     parser.add_argument('--exp-id', type=str, default=None)
     parser.add_argument('--pixels', action='store_true', default=False, help='Use pixels as input')
+    parser.add_argument('--batch-env', type=int, default=1, help='Number of ground environments to run in parallel')
     # Add specific arguments for 'tune'
     parser.add_argument('--tuner-config', type=str, default='experiments/pb_obstacles/fullstate/config/tune.yaml')
     
@@ -261,6 +273,18 @@ def run(planner_config, cli_args, tune=False, trial=None):
 
     # make envs.
     train_seed = planner_config.experiment.seed
+
+        
+    if cli_args.batch_env > 1:
+        # Set different random seeds for different subprocesses.
+        # If seed=0 and processes=4, subprocess seeds are [0, 1, 2, 3].
+        # If seed=1 and processes=4, subprocess seeds are [4, 5, 6, 7].
+        process_seeds = np.arange(cli_args.batch_env).astype(np.int64) + planner_config.experiment.seed * cli_args.batch_env
+        print(f'Process seeds: {process_seeds}')
+        assert process_seeds.max() < 2**32
+        process_seeds = [int(s) for s in process_seeds]
+       
+    
     test_seed = 2**31 - 1 - planner_config.experiment.seed
 
    
@@ -281,7 +305,13 @@ def run(planner_config, cli_args, tune=False, trial=None):
         abstract_goal_fn = partial(gaussian_ball_goal_fn, env=ground_env)
     
     if planner_config.env.absgroundmdp or planner_config.experiment.finetune:
-        env = ground_env        
+        if cli_args.batch_env == 1:
+            env = ground_env        
+        else:
+            
+            env_maker = partial(make_ground_env, args=planner_config.env, reward_scale=planner_config.env.reward_scale, gamma=planner_config.env.gamma, device=device, from_pixels=cli_args.pixels)
+            env = make_batched_ground_env(env_maker, cli_args.batch_env, process_seeds)
+
     else:
         env = make_abstract_env(
                                 train_seed=train_seed, 
@@ -432,6 +462,8 @@ def run(planner_config, cli_args, tune=False, trial=None):
         print('not normalizing')
         normalizer = lambda x: x
 
+    print(os.getpid(), 'PID')
+
     scores = run_abstract_ddqn(
                                 envs, 
                                 q_func, 
@@ -442,7 +474,9 @@ def run(planner_config, cli_args, tune=False, trial=None):
                                 normalizer=normalizer, 
                                 device=device, 
                                 tune=tune, 
-                                trial=trial
+                                trial=trial,
+                                batched=cli_args.batch_env > 1,
+                                example_env=ground_env
                             )
     return scores
 

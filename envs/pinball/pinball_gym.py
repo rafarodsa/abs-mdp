@@ -234,12 +234,12 @@ class PinballEnv(gym.Env):
             )
             return
 
-        try:
-            import pygame
-        except ImportError:
-            raise DependencyNotInstalled(
-                "pygame is not installed, run `pip install gym[classic_control]`"
-            )
+        # try:
+        #     import pygame
+        # except ImportError:
+        #     raise DependencyNotInstalled(
+        #         "pygame is not installed, run `pip install gym[classic_control]`"
+        #     )
         
         if self.screen is None:
             if self.render_mode == "human":
@@ -390,12 +390,12 @@ class PinballDistractors(PinballEnvContinuous):
             )
             return
 
-        try:
-            import pygame
-        except ImportError:
-            raise DependencyNotInstalled(
-                "pygame is not installed, run `pip install gym[classic_control]`"
-            )
+        # try:
+        #     import pygame
+        # except ImportError:
+        #     raise DependencyNotInstalled(
+        #         "pygame is not installed, run `pip install gym[classic_control]`"
+        #     )
         
         if self.screen is None:
             if self.render_mode == "human":

@@ -50,14 +50,14 @@ q_func:
 
 experiment:
   seed: 31
-  gpu: -1
+  gpu: 0
   demo: false
   eval_interval: 10000
   eval_n_runs: 10
   log_level: 20
   checkpoint_frequency: null
   max_episode_len: 100
-  log_tensorboard: true
+  log_tensorboard: false
   outdir: planning_ddqn
   finetune: false
 

@@ -11,6 +11,7 @@ from src.agents.abstract_ddqn import AbstractDoubleDQN as AbstractDDQN, Abstract
 from src.agents.abstract_ddqn import AbstractDDQNGrounded
 
 from src.agents.train_agent import train_agent_with_evaluation
+from src.agents.train_agent_batch import train_agent_batch_with_evaluation
 from src.agents.evaluator import eval_performance
 from src.utils.printarr import printarr
 
@@ -80,7 +81,7 @@ def random_selection_initset(initset_s):
 def random_selection_from_obs(obs, iniset_fn):
     return random_selection_initset(iniset_fn(obs))
 
-def run_abstract_ddqn(envs, q_func, encoder, agent_args, experiment_args, finetuning_args=None, normalizer=lambda x: x, device='cpu', tune=False, trial=None):
+def run_abstract_ddqn(envs, q_func, encoder, agent_args, experiment_args, finetuning_args=None, normalizer=lambda x: x, device='cpu', tune=False, trial=None, batched=False, example_env=None):
 
     '''
         envs: Dict of envs (e.g. {'train': train_env, 'eval': {'eval_env1', 'eval_env2', ...}})
@@ -134,8 +135,10 @@ def run_abstract_ddqn(envs, q_func, encoder, agent_args, experiment_args, finetu
 
     ## MAKE AGENT
 
+    _initset_fn = env.initset if not batched else example_env.initset
+
     agent = AbstractDDQN(
-        env.initset,
+        _initset_fn,
         q_func,
         opt,
         rbuf,
@@ -182,26 +185,27 @@ def run_abstract_ddqn(envs, q_func, encoder, agent_args, experiment_args, finetu
         if experiment_args.finetune:   
             agent = AbstractDDQNGrounded(encoder, agent, action_mask=env.initset, device=device)
         steps = agent_args.steps if not experiment_args.finetune else finetuning_args.steps
-        eval_hooks = [LogDiscountedReturn()]
+        eval_hooks = [LogDiscountedReturn()] if not batched else []
         if tune:
             eval_hooks.append(pfrl.experiments.evaluation_hooks.OptunaPrunerHook(trial=trial))
-
-        _, eval_stats = train_agent_with_evaluation(
-            agent=agent,
-            env=env,
-            steps=steps,
-            eval_n_steps=None,
-            checkpoint_freq=experiment_args.checkpoint_frequency,
-            eval_n_episodes=experiment_args.eval_n_runs,
-            eval_interval=experiment_args.eval_interval,
-            outdir=experiment_args.outdir,
-            save_best_so_far_agent=True,
-            eval_envs=eval_envs,
-            use_tensorboard=experiment_args.log_tensorboard,
-            train_max_episode_len=experiment_args.max_episode_len,
-            eval_max_episode_len=experiment_args.max_episode_len,
-            discounted=False,
-            evaluation_hooks=eval_hooks
-        )
+        trainer_fn = train_agent_with_evaluation if not batched else train_agent_batch_with_evaluation
+        _, eval_stats = trainer_fn(
+                                    agent=agent,
+                                    env=env,
+                                    steps=steps,
+                                    eval_n_steps=None,
+                                    checkpoint_freq=experiment_args.checkpoint_frequency,
+                                    eval_n_episodes=experiment_args.eval_n_runs,
+                                    eval_interval=experiment_args.eval_interval,
+                                    outdir=experiment_args.outdir,
+                                    save_best_so_far_agent=True,
+                                    eval_envs=eval_envs,
+                                    use_tensorboard=experiment_args.log_tensorboard,
+                                    train_max_episode_len=experiment_args.max_episode_len,
+                                    eval_max_episode_len=experiment_args.max_episode_len,
+                                    discounted=False,
+                                    evaluation_hooks=eval_hooks,
+                                    log_interval=1000
+                                )
 
     return eval_stats

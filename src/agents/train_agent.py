@@ -92,6 +92,7 @@ def train_agent(
             eval_results = [evaluate(evaluator, t, episode_idx, agent, successful_score) for evaluator in evaluators]
             eval_dicts, _ = list(zip(*eval_results))
             eval_stats_history.append(eval_dicts)
+       
         init_tic = time.perf_counter()
         time_per_step = deque(maxlen=25)
         while t < steps:
@@ -184,7 +185,8 @@ def train_agent_with_evaluation(
     use_tensorboard=False,
     eval_during_episode=False,
     logger=None,
-    discounted=False
+    discounted=False,
+    log_interval=None
 ):
     """Train an agent while periodically evaluating it.
 
@@ -237,7 +239,7 @@ def train_agent_with_evaluation(
             "To run evaluation during training episodes, you need to specify `eval_env`"
             " that is independent from `env`."
         )
-        eval_env = env
+        eval_envs = {'train': env}
 
     if eval_max_episode_len is None:
         eval_max_episode_len = train_max_episode_len
