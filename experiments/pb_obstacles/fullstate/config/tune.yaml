@@ -1,0 +1,28 @@
+study_name: mixture
+storage: exp_results/pb_obstacles/fullstate/mixture.db
+direction: maximize
+seed: null
+
+sampler: TpeSampler
+steps_budget: 10000000
+n_trials: 12
+n_jobs: -1
+
+pruner:
+  type: HyperbandPruner
+  eval_interval: 10000
+
+params_to_tune:
+  agent.lr: ['float', [1e-5, 1e-2], 'log_uniform']
+  agent.final_exploration_steps: ['int', [10000, 150000], 'log_uniform']
+  agent.target_update_interval: ['categorical', [100,  500, 1000, 2000, 5000, 7500, 10000]]
+  agent.update_interval: ['categorical', [1, 5, 10]]
+  agent.replay_buffer_size: ['int', [10000, 500000], 'log_uniform']
+  agent.final_epsilon: ['float', [0.01, 0.2]]
+
+planner_params:
+  agent.steps: 200000
+  experiment.eval_interval: 10000
+  experiment.eval_n_runs: 5
+  experiment.max_episode_len: 100
+  env.goal: 9

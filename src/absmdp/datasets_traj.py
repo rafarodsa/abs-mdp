@@ -153,7 +153,7 @@ class PinballDatasetTrajectory_(torch.utils.data.Dataset):
                 self.trajectories = list(filter(lambda t: len(t) > 0, self.trajectories))
                 nl = list(filter(lambda n: '.png' in n, zfile.namelist()))
             if self.obs_type == 'pixels':
-                print(self.num_workers)
+                print(f'Loading with {self.num_workers} workers')
                 batch_size = len(nl) // self.num_workers if self.num_workers > 1 else len(nl)
                 images_loaded = Parallel(n_jobs=self.num_workers)(delayed(load_images)(self.zfile_name, imgs) for imgs in split(nl, batch_size))
                 images_loaded = reduce(lambda x,acc: x+acc, images_loaded, [])
@@ -209,6 +209,7 @@ class PinballDatasetTrajectory_(torch.utils.data.Dataset):
             return self.images_loaded[img_path]
         else: # load
             try:
+                print('Warning: reloading image')
                 img = self.zfile.open(img_path)
                 img_ = Image.open(img)
                 img_ = np.array(img_)
@@ -263,13 +264,13 @@ class PinballDatasetTrajectory(pl.LightningDataModule):
         self.train, self.val, self.test = torch.utils.data.random_split(self.dataset, [self.train_split, self.val_split, self.test_split])
 
     def train_dataloader(self):
-        return torch.utils.data.DataLoader(self.train, batch_size=self.batch_size, shuffle=self.shuffle, num_workers=self.num_workers)
+        return torch.utils.data.DataLoader(self.train, batch_size=self.batch_size, shuffle=self.shuffle, num_workers=self.num_workers-1)
 
     def val_dataloader(self):
-        return torch.utils.data.DataLoader(self.val, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
+        return torch.utils.data.DataLoader(self.val, batch_size=self.batch_size, shuffle=self.shuffle, num_workers=self.num_workers-1)
 
     def test_dataloader(self):
-        return torch.utils.data.DataLoader(self.test, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
+        return torch.utils.data.DataLoader(self.test, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers-1)
     
     def _load_linear_transform(self):
         if os.path.isfile(f'{self.cfg.save_path}/lintransform.pt'):

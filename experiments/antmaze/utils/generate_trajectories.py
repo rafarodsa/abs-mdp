@@ -218,3 +218,4 @@ if __name__== "__main__":
     torch.save(debug, bs)
     zfile.writestr('debug.pt', bs.getvalue())
     print(f'Debug info saved at {args.save_path}/debug.pt')
+    zfile.close()

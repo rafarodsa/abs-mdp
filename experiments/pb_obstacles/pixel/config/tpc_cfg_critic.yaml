@@ -14,7 +14,7 @@ scheduler:
     start_factor: 1.
     end_factor: 1.
     total_iters: 1.
-batch_size: 64 
+batch_size: 16
 epochs: 200
 accelerator: gpu
 devices: 1
@@ -29,10 +29,11 @@ loss:
   initset_const: 1
   n_samples: 1
 data:
-  data_path: ${experiment_cwd}/data/simple-contv1-failures-no-errors-25.zip
+  data_path: ${experiment_cwd}/data/trajectories_cont_25_1024.zip
   save_path: ${save_path}
   batch_size: ${batch_size}
-  num_workers: 0
+  length: 64
+  num_workers: 2
   train_split: 0.8
   val_split: 0.1
   test_split: 0.1
@@ -42,7 +43,7 @@ data:
   n_out_feats: 4
   state_dim : 4
   obs_type: pixels
-  gamma: 0.99
+  gamma: 0.9997
   noise_level: 0.0
   noise_dim: 0
   ar_coeff: 0.9
@@ -52,8 +53,8 @@ model:
   n_options: 4
   obs_dims: ${data.n_out_feats}
   latent_dim: 2
-  encoder: ${loadcfg:${model_config_dir}/config/models/encoder_residual.yaml}
-  decoder: ${loadcfg:${model_config_dir}/config/models/decoder_residual_critic.yaml}
+  encoder: ${loadcfg:${model_config_dir}/config/models/encoder_cnn.yaml}
+  decoder: ${loadcfg:${model_config_dir}/config/models/decoder_cnn_critic.yaml}
   transition: ${loadcfg:${model_config_dir}/config/models/transition_gaussian.yaml}
   init_class: ${loadcfg:${model_config_dir}/config/models/init_class_mlp.yaml}
   reward: ${loadcfg:${model_config_dir}/config/models/reward_mlp.yaml}

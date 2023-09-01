@@ -43,7 +43,7 @@ data:
   n_out_feats: 4
   state_dim : 4
   obs_type: pixels
-  gamma: 0.99
+  gamma: 0.9997
   noise_level: 0.0
   noise_dim: 0
   ar_coeff: 0.9

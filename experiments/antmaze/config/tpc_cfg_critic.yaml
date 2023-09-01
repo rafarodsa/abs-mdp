@@ -1,7 +1,7 @@
 # Config file for Pinball environment
 # Full State observation
 # Gridworld abstraction
-experiment_cwd: exp_results/antmaze
+experiment_cwd: exp_results/antmaze/antmaze-umaze-v2
 model_config_dir: experiments/antmaze
 seed: 0
 optimizer:
@@ -14,8 +14,8 @@ scheduler:
     start_factor: 1.
     end_factor: 1.
     total_iters: 1.
-batch_size: 64
-epochs: 500
+batch_size: 16
+epochs: 1000
 accelerator: gpu
 devices: 1
 save_path: ${experiment_cwd}/mdps
@@ -29,19 +29,19 @@ loss:
   initset_const: 1
   n_samples: 1
 data:
-  data_path: ${experiment_cwd}/data/cont-v1-25-small.zip
+  data_path: ${experiment_cwd}/data/trajectories_4096.zip
   save_path: ${save_path}
   batch_size: ${batch_size}
   length: 64
-  num_workers: 4
+  num_workers: 2
   train_split: 0.8
   val_split: 0.1
   test_split: 0.1
   shuffle: True  
   n_reward_samples: 5
   n_options: ${model.n_options}
-  n_out_feats: 4
-  state_dim : 4
+  n_out_feats: 29
+  state_dim : 29
   obs_type: simple
   gamma: 0.9997
   noise_level: 0.0
@@ -50,7 +50,7 @@ data:
   linear_transform: False
   non_linear_transform: False
 model:
-  n_options: 4
+  n_options: 8
   obs_dims: ${data.n_out_feats}
   latent_dim: 2
   encoder: ${loadcfg:${model_config_dir}/config/models/encoder_mlp.yaml}
