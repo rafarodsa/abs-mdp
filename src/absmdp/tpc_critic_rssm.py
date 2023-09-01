@@ -47,7 +47,6 @@ class RSSMAbstraction(pl.LightningModule):
     def forward(self, state, action):
         z = self.encoder(state)
         t_in = torch.cat([z, action], dim=-1)
-        # printarr(z)
         next_z = self.transition.distribution(t_in).mean + z
         return next_z
     
@@ -85,10 +84,7 @@ class RSSMAbstraction(pl.LightningModule):
             initset_loss = self.initset_loss(z[_mask], initset_s[_mask])
 
 
-        # regulizer
-        norm_loss = (z_c[_mask] ** 2).sum(-1).mean() / self.latent_dim
-
-        return grounding_loss.mean(), transition_loss.mean(), tpc_loss.mean(), initset_loss.mean(), reward_loss.mean(), tau_loss.mean(), norm_loss.mean()
+        return grounding_loss.mean(), transition_loss.mean(), tpc_loss.mean(), initset_loss.mean(), reward_loss.mean(), tau_loss.mean()
 
 
     def initset_loss(self, z, initset_target):
@@ -120,15 +116,15 @@ class RSSMAbstraction(pl.LightningModule):
 
     def step(self, batch, batch_idx):
         s, a, next_s, initset_s, reward, duration, lengths, executed = batch.obs, batch.action, batch.next_obs, batch.initsets, batch.rewards, batch.duration.float(), batch.length, batch.executed
-        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss, norm_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths, executed)
+        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths, executed)
 
         loss = self.hyperparams.grounding_const * grounding_loss + \
                 self.hyperparams.transition_const * transition_loss + \
                 self.hyperparams.tpc_const * tpc_loss + \
                 self.hyperparams.initset_const * initset_loss + \
                 self.hyperparams.reward_const * reward_loss + \
-                self.hyperparams.tau_const * tau_loss + \
-                norm_loss
+                self.hyperparams.tau_const * tau_loss 
+
         
 
         # log std deviations for encoder.
@@ -138,7 +134,6 @@ class RSSMAbstraction(pl.LightningModule):
             'tpc_loss': tpc_loss,
             'initset_loss': initset_loss,
             'loss': loss,
-            'norm_2': norm_loss
 
         }
         # logger.debug(f'Losses: {logs}')
@@ -230,7 +225,7 @@ class RSSMAbstraction(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         s, a, next_s, executed, initset_s, reward, duration, lengths = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets, batch.rewards, batch.duration.float(), batch.length
         # assert torch.all(executed) # check all samples are successful executions.
-        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss, norm_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths, executed=executed)    
+        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths, executed=executed)    
 
         batch_size, length = s.shape[0], s.shape[1]
         _mask = torch.arange(length).to(self.get_device(s)).repeat(batch_size, 1) < lengths.unsqueeze(1)
@@ -257,14 +252,13 @@ class RSSMAbstraction(pl.LightningModule):
                 'val_reward_loss': reward_loss.mean(), 
                 'val_tau_loss': tau_loss.mean(),
                 'val_nll_loss': nll_loss.mean(),
-                'val_norm_2': norm_loss.mean()
             }
         self.log_dict(logs, on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         return logs['val_infomax']
 	
     def test_step(self, batch, batch_idx):
         s, a, next_s, executed, initset_s, reward, duration, lengths = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets, batch.rewards, batch.duration.float(), batch.length
-        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss, norm_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths, executed=executed)    
+        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths, executed=executed)    
 
         batch_size, length = s.shape[0], s.shape[1]
         _mask = torch.arange(length).to(self._get_device(s)).repeat(batch_size, 1) < lengths.unsqueeze(1)
@@ -342,10 +336,8 @@ class RSSMAbstractModel(RSSMAbstraction):
         initset_loss = self.initset_loss_from_executed(z, a, executed, _mask)
         success_loss = self.prob_success_loss(z[_mask], a[_mask], executed[_mask])
 
-        # regularizer
-        norm_loss = (z_c[_mask] ** 2).sum(-1)
 
-        return grounding_loss.mean(), transition_loss.mean(), tpc_loss.mean(), initset_loss.mean(), reward_loss.mean(), tau_loss.mean(), success_loss.mean(), norm_loss.mean()
+        return grounding_loss.mean(), transition_loss.mean(), tpc_loss.mean(), initset_loss.mean(), reward_loss.mean(), tau_loss.mean(), success_loss.mean()
     
     def prob_success_loss(self, z, a, executed):
         success_logits = torch.gather(self.success(z), -1, a.argmax(-1, keepdim=True)).squeeze(-1)
@@ -354,7 +346,7 @@ class RSSMAbstractModel(RSSMAbstraction):
     
     def step(self, batch, batch_idx):
         s, a, next_s, initset_s, reward, duration, lengths, executed = batch.obs, batch.action, batch.next_obs, batch.initsets, batch.rewards, batch.duration.float(), batch.length, batch.executed
-        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss, prob_success, norm_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths, executed)
+        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss, prob_success = self._run_step(s, a, next_s, initset_s, reward, duration, lengths, executed)
 
         loss = self.hyperparams.grounding_const * grounding_loss + \
                 self.hyperparams.transition_const * transition_loss + \
@@ -362,8 +354,7 @@ class RSSMAbstractModel(RSSMAbstraction):
                 self.hyperparams.initset_const * initset_loss + \
                 self.hyperparams.reward_const * reward_loss + \
                 self.hyperparams.tau_const * tau_loss + \
-                prob_success + \
-                norm_loss
+                prob_success 
         
 
         # log std deviations for encoder.
@@ -372,7 +363,6 @@ class RSSMAbstractModel(RSSMAbstraction):
             'transition_loss': transition_loss,
             'tpc_loss': tpc_loss,
             'initset_loss': initset_loss,
-            'norm_2': norm_loss,
             'loss': loss
 
         }
@@ -383,7 +373,7 @@ class RSSMAbstractModel(RSSMAbstraction):
     def validation_step(self, batch, batch_idx):
         s, a, next_s, executed, initset_s, reward, duration, lengths = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets, batch.rewards, batch.duration.float(), batch.length
         # assert torch.all(executed) # check all samples are successful executions.
-        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss, prob_success, norm_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths, executed=executed)    
+        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss, prob_success = self._run_step(s, a, next_s, initset_s, reward, duration, lengths, executed=executed)    
 
         batch_size, length = s.shape[0], s.shape[1]
         _mask = torch.arange(length).to(self.get_device(s)).repeat(batch_size, 1) < lengths.unsqueeze(1)
@@ -410,14 +400,13 @@ class RSSMAbstractModel(RSSMAbstraction):
                 'val_reward_loss': reward_loss.mean(), 
                 'val_tau_loss': tau_loss.mean(),
                 'val_nll_loss': nll_loss.mean(),
-                'val_norm_2': norm_loss.mean()
             }
         self.log_dict(logs, on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         return logs['val_infomax']
 	
     def test_step(self, batch, batch_idx):
         s, a, next_s, executed, initset_s, reward, duration, lengths = batch.obs, batch.action, batch.next_obs, batch.executed, batch.initsets, batch.rewards, batch.duration.float(), batch.length
-        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss, prob_success, norm_loss = self._run_step(s, a, next_s, initset_s, reward, duration, lengths, executed=executed)    
+        grounding_loss, transition_loss, tpc_loss, initset_loss, reward_loss, tau_loss, prob_success = self._run_step(s, a, next_s, initset_s, reward, duration, lengths, executed=executed)    
 
         batch_size, length = s.shape[0], s.shape[1]
         _mask = torch.arange(length).to(self._get_device(s)).repeat(batch_size, 1) < lengths.unsqueeze(1)

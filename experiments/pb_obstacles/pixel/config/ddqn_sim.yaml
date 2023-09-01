@@ -29,12 +29,25 @@ agent:
   normalize_obs: false
 
 q_func: 
-  type: 'mlp'
   n_actions: 4
-  hidden_dims: [128, 128]
-  activation: relu
-  output_dim: ${q_func.n_actions}
-
+  ground:
+    type: doubling_residual
+    in_width: 50
+    in_height: 50
+    color_channels: 1
+    depth: 24
+    cnn_blocks: 2
+    min_resolution: 4
+    mlp_layers: [256, ]
+    outdim: 4
+    mlp_activation: silu
+    cnn_activation: silu
+  abstract:
+    type: 'mlp'
+    hidden_dims: [128, 128]
+    activation: relu
+    output_dim: ${q_func.n_actions}
+    
 experiment:
   seed: 31
   gpu: -1

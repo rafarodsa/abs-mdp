@@ -203,5 +203,5 @@ def run_abstract_ddqn(envs, q_func, encoder, agent_args, experiment_args, finetu
             discounted=False,
             evaluation_hooks=eval_hooks
         )
-    print(eval_stats)
+
     return eval_stats

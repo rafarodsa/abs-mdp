@@ -11,8 +11,9 @@ partition='3090-gcondo'
 substring=''
 outdir='planning_ddqn'
 tune=''
+images=''
 # Parse the command line options and arguments
-while getopts j:dfp:s:o:t opt; do
+while getopts j:dfp:s:o:ti opt; do
     case "$opt" in
         j) job_name="$OPTARG";;
         d) dryrun='-d';;
@@ -21,6 +22,7 @@ while getopts j:dfp:s:o:t opt; do
         s) substring="$OPTARG";;
         o) outdir="$OPTARG";;
         t) tune='true';;
+        i) images='--pixels';;
         \?) echo "Usage: $0 -j <job_name> <search_directory> <string_prefix>"
             exit 1;;
     esac
@@ -48,10 +50,17 @@ echo $job_name
 count=1
 jobnames=()
 
+if [[ -z "$images" ]]; 
+then
+    config=experiments/pb_obstacles/fullstate/config/ddqn_sim.yaml
+else
+    config=experiments/pb_obstacles/pixel/config/ddqn_sim.yaml
+fi
+
 if [[ -z "$tune" ]]; then 
     for path in $matching_subdirs; do
 
-        onager prelaunch +command "python experiments/pb_obstacles/fullstate/plan.py --config experiments/pb_obstacles/fullstate/config/ddqn_sim.yaml --experiment_cwd ${search_directory} --experiment_name ${path} --experiment.finetune ${finetune} --experiment.outdir ${outdir}" \
+        onager prelaunch +command "python experiments/pb_obstacles/plan.py plan --config $config --experiment_cwd ${search_directory} --experiment_name ${path} --experiment.finetune ${finetune} --experiment.outdir ${outdir} ${images}" \
         +jobname "${job_name}_${count}" \
         +arg --use-ground-init false \
         +arg --env.goal 0 1 2 3 4 5 6 7 8 9 \
@@ -65,7 +74,7 @@ if [[ -z "$tune" ]]; then
 else
     for path in $matching_subdirs; do
 
-        onager prelaunch +command "python experiments/pb_obstacles/fullstate/plan.py tune --config experiments/pb_obstacles/fullstate/config/ddqn_sim.yaml --experiment_cwd ${search_directory} --experiment_name ${path}  --experiment.outdir ${outdir} --tune-config experiments/pb_obstacles/fullstate/config/tune.yaml" \
+        onager prelaunch +command "python experiments/pb_obstacles/plan.py tune --config $config --experiment_cwd ${search_directory} --experiment_name ${path}  --experiment.outdir ${outdir} --tune-config experiments/pb_obstacles/fullstate/config/tune.yaml" \
         +jobname "${job_name}_${count}" \
         +arg --experiment.seed 56 \
         +tag --exp-id
@@ -89,7 +98,7 @@ other_partition='3090-gcondo'
 for jobname in "${jobnames[@]}"; do
     if [[ -z "${tune}" ]]; then
         if [[ $((total_cpus + 4)) -le 32 ]]; then
-            onager launch --jobname "$jobname" --backend slurm -p $$partition --cpus 4 --mem 8 --tasks-per-node 4 --duration 6:00:00 $dryrun
+            onager launch --jobname "$jobname" --backend slurm -p $partition --cpus 4 --mem 8 --tasks-per-node 4 --duration 6:00:00 $dryrun
             total_cpus=$((total_cpus + 4))
         else
             onager launch --jobname "$jobname" --backend slurm -p $partition --cpus 4 --mem 8 --tasks-per-node 4 --duration 6:00:00 $dryrun

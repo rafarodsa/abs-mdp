@@ -320,7 +320,7 @@ class PinballEnvContinuous(PinballEnv):
         return next_s, reward, done, False, {}
 
 class PinballPixelWrapper(gym.Wrapper):
-    def __init__(self, environment, n_frames=1, bw=True):
+    def __init__(self, environment, n_frames=1, bw=False):
         self.frames = deque(maxlen=n_frames)
         self.env = environment
         self.n_frames = n_frames
@@ -348,12 +348,15 @@ class PinballPixelWrapper(gym.Wrapper):
     def black_and_white(self, obs):
         r,g,b = obs[:, :, 0], obs[:, :, 1], obs[:, :, 2]
         noise = np.random.randn(*r.shape) * 1/255
-        return np.clip((0.2989 * r + 0.5870 * g + 0.1140 * b)[np.newaxis] / 255 + noise, 0, 1).astype(np.float32)
+        return np.clip((0.2989 * r + 0.5870 * g + 0.1140 * b)[np.newaxis] + noise, 0, 1).astype(np.float32)
 
     def reset(self, *args, **kwargs):
         self.frames.clear()
         self.env.reset(*args, **kwargs)
         frame = self.env.render()
+
+        # import ipdb; ipdb.set_trace()
+
         if len(self.frames) < self.n_frames:
             self._init_queue(frame)
         self.frames.append(frame)

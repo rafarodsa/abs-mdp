@@ -79,6 +79,7 @@ planner:
     reward_scale: 0. #0.00016666666666666666
     gamma: 0.9997
     goal: 2
+    pixels: false
 
   agent:
     load: null

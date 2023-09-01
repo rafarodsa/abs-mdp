@@ -345,6 +345,7 @@ class AbstractDDQNGrounded(pfrl.agent.Agent):
     def act(self, obs, initset=None):
         with torch.no_grad():
             z = self.encoder(torch.from_numpy(obs).to(self.device))
+            # initset = self.action_mask(z) if initset is None and self.action_mask is not None else initset
         action = self.agent.act(z, initset)
         return action
     

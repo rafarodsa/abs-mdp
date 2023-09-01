@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from src.utils import printarr
+
 class RSSM(nn.Module):
     def __init__(self, latent_dim, act_dim, hidden_dim):
         super().__init__()
@@ -17,6 +19,10 @@ class RSSM(nn.Module):
         if len(input.shape) == 3:
             batched = True
             batch_size = input.shape[0]
+        elif len(input.shape) == 1:
+            batched = False
+            batch_size = 1
+            input = input.unsqueeze(0)
         else: 
             batched = False
             batch_size = 1

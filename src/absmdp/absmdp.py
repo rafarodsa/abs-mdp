@@ -86,24 +86,25 @@ class AbstractMDP(nn.Module, gym.Env):
     @torch.no_grad()
     def step(self, action):
         info = {}
-        action = F.one_hot(action.long(), self.n_options).to(self.current_z.device)
-        next_z = self._transition(self.current_z, action)
-        r = self._reward(self.current_z, action, next_z)
+        action = F.one_hot(action.long(), self.n_options).to(self.current_z.device).unsqueeze(0)
+        z = self.current_z.unsqueeze(0)
+        next_z = self._transition(z, action)
+        r = self._reward(z, action, next_z)[0]
         if self.task_reward is not None:
             r_g, done = self.task_reward(next_z)
-        tau = self._tau(self.current_z, action)
+        tau = self._tau(z, action)[0]
         info['tau'] = tau
         info['env_reward'] = r
         info['task_reward'] = r_g
         info['task_done'] = done
         info['initset_s'] = self.last_initset
-        info['initset_next_s'] = self.initset(next_z)
+        info['initset_next_s'] = self.initset(next_z)[0]
         self.last_initset = info['initset_next_s']
 
         done = done or self.last_initset.sum() == 0
 
         r = self.reward_scale * r + self.gamma ** (tau-1) * r_g  # add task reward
-        self.current_z = next_z
+        self.current_z = next_z.squeeze(0)
 
 
         return self.current_z, r, done, info
@@ -114,6 +115,12 @@ class AbstractMDP(nn.Module, gym.Env):
             ground_state = self.data.sample(1)[0][0][0]
         self.current_z = self.encoder(ground_state)
         self.last_initset = self.initset(self.current_z)
+
+        while self.last_initset.sum() == 0:
+            ground_state = self.data.sample(1)[0][0][0]
+            self.current_z = self.encoder(ground_state)
+            self.last_initset = self.initset(self.current_z)
+
         return self.current_z
 
     def set_task_reward(self, task_reward):

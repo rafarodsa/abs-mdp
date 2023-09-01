@@ -77,7 +77,7 @@ def init_state_sampler(goal, step_size=1/15, tol=0.015, from_pixels=False):
     config = 'envs/pinball/configs/pinball_simple_single.cfg'
     pinball_env = PinballEnvContinuous(config, width=50, height=50, render_mode='rgb_array')
     if from_pixels:
-        env = PinballPixelWrapper(pinball_env)
+        env = PinballPixelWrapper(pinball_env, bw=True)
     def __sampler():
         accepted = False
         while not accepted:
@@ -85,7 +85,7 @@ def init_state_sampler(goal, step_size=1/15, tol=0.015, from_pixels=False):
             accepted = np.linalg.norm(goal[:2]-s[:2]) >= 0.2
 
         if from_pixels:
-            s = env.reset(s)
+            s = env.reset(s).astype(np.float32)
         return s
     return __sampler
 
@@ -125,7 +125,6 @@ def gaussian_ball_goal_fn(phi, goal, goal_tol, n_samples=100, device='cpu', env=
     if env is not None:
         goal = env.reset(goal)
         samples = np.array([env.reset(samples[i]) for i in range(n_samples)])
-
     goal = torch.from_numpy(goal)
     samples = torch.from_numpy(samples)
     encoded_samples = phi(samples)
@@ -168,7 +167,6 @@ CreateContinuousOptions = lambda env: create_position_options(env, translation_d
 
 def make_abstract_env(test=False, test_seed=127, train_seed=255, args=None, reward_scale=0., gamma=0.99, device='cpu', use_ground_init=False, goal_fn=None, from_pixels=False):
     assert goal_fn is not None, 'Must provide a goal function to create the abstract env'
-
 
     print('================ CREATE ENVIRONMENT ================', GOAL_REWARD)
     env_sim = torch.load(args.absmdp)
@@ -217,7 +215,7 @@ def make_ground_env(test=False, test_seed=0, train_seed=1, args=None, reward_sca
         assert initset_fn is not None, 'Must provide initset function'
         env = EnvInitsetWrapper(env, initset_fn)
     if from_pixels:
-        env = PinballPixelWrapper(env)
+        env = PinballPixelWrapper(env, bw=True)
     env.seed(test_seed if test else train_seed)
     return env
 
@@ -431,6 +429,7 @@ def run(planner_config, cli_args, tune=False, trial=None):
             return lambda s: (s-mean)/std
         normalizer = __normalizer(env)
     else:
+        print('not normalizing')
         normalizer = lambda x: x
 
     scores = run_abstract_ddqn(
