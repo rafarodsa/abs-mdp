@@ -1,6 +1,21 @@
+#!/bin/bash -l
+
+#SBATCH --nodes=4             # This needs to match Trainer(num_nodes=...)
+#SBATCH --mem=16g
+#SBATCH --time=2:00:00
+#SBATCH -p batch
 
 
-# input: directory base name (e.g. /users/rrodri19/abs-mdp/experiments/pb_obstacles/fullstate/mdps/pinball_rssm_small*)
+module load python/3.9.0
+module load cuda/11.7.1
+module load cudnn/8.6.0
+module load tmux/2.8
+module load gcc/10.2
+module load opengl/mesa-12.0.6
+module load glew/2.1.0
+source /users/rrodri19/abs-mdp/venv/bin/activate
+export PYTHONPATH=$PYTHONPATH:/users/rrodri19/abs-mdp/:/users/rrodri19/abs-mdp/src/:/users/rrodri19/abs-mdp/tests/
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/users/rrodri19/.mujoco/mujoco210/bin
 
 VIS=''
 MAKE_MDP=''

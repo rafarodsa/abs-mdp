@@ -1,9 +1,9 @@
 experiment_cwd: exp_results/pb_obstacles/pixel/absmdps
-experiment_name: test
+experiment_name: pinball_markov_1024_2__model.latentdim_16__seed_31
 exp_id: test
 fabric:
   accelerator: gpu
-  devices: 1
+  devices: auto
   strategy: auto
 
 experiment:
@@ -11,26 +11,27 @@ experiment:
   gpu: 0
   demo: false
   eval_interval: 1000
-  eval_n_runs: 5
+  eval_n_runs: 10
   log_level: 20
-  checkpoint_frequency: 1000 
+  checkpoint_frequency: 20000 
   max_rollout_len: 64 # max length to rollout the ground env.
-  log_tensorboard: true
+  log_tensorboard: false
   discounted: false
-  steps: 80000
-  train_every: 8
+  steps: 150000
+  train_every: 5
   max_episode_len: 100
   outdir: planning_ddqn
+  num_envs: 1
 
 world_model:
-  ckpt: exp_results/pb_obstacles/pixel/mdps/pinball_rssm_large_pixel_4__model.latentdim_6__seed_0/phi_train/ckpts/last.ckpt
+  ckpt: exp_results/pb_obstacles/pixel/mdps/pinball_markov_1024_2__model.latentdim_16__seed_31/phi_train/ckpts/last.ckpt
   data_path: exp_results/pb_obstacles/pixel/data/trajectories_cont_25_1024.zip
   name: null
   reward_scale: ${planner.env.reward_scale}
   sample_transition: true
   model_success: false
   gamma: ${planner.env.gamma}
-  fixed_modules: [encoder, ]
+  fixed_modules: ['encoder']
   model:
     model_config_dir: experiments/pb_obstacles/pixel/
     n_options: 4
@@ -66,7 +67,7 @@ world_model:
     n_samples: 1
 
   data:
-    buffer_size: 512
+    buffer_size: 1000000
     batch_size: 16
 
 planner:
@@ -83,18 +84,18 @@ planner:
 
   agent:
     load: null
-    final_exploration_steps: 0.3 # proportion of agent trainings steps to decay the epsilon
-    final_epsilon: 0.1
+    final_exploration_steps: 0.4 # proportion of agent trainings steps to decay the epsilon
+    final_epsilon: 0.15
     eval_epsilon: 0.001
     replay_start_size: 1000
     replay_buffer_size: 100000
     target_update_interval: 10000
     update_interval: 5
     num_step_return: 1
-    steps: 1000000
     lr: 1e-4
     eval_random_agent: false
     rollout_len: 100
+    pixels: true
 
   q_func: 
     type: 'mlp'

@@ -1,7 +1,7 @@
 #!/bin/sh
 #SBATCH -n 32
-#SBATCH --mem=64G
-#SBATCH -t 1:00:00
+#SBATCH --mem=32G
+#SBATCH -t 2:00:00
 #SBATCH --output exp_results/antmaze/antmaze-umaze-v2/data/generate_data.log
 #SBATCH -p 3090-gcondo
 # Load modules
@@ -22,16 +22,22 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/users/rrodri19/.mujoco/mujoco210/bin
 sizes=(128 512 1024 4096 8192)
 
 
+ENV='antmaze-umaze-v2'
+while getopts e: flag
+do
+    case "${flag}" in
+        e) ENV=${OPTARG};;
+    esac
+done
 
-
-# for size in "${sizes[@]}"
-# do  
-#     echo "Generating data for $size"
-#     python experiments/antmaze/utils/generate_trajectories.py --max-horizon 64 --n-jobs 32 --num-traj $size --max-exec-time 100 --save-path exp_results/antmaze/antmaze-umaze-v2/data/trajectories_$size.zip
-# done
+for size in "${sizes[@]}"
+do  
+    echo "Generating data for $size"
+    python experiments/antmaze/utils/generate_trajectories.py --max-horizon 64 --n-jobs 32 --num-traj $size --max-exec-time 100 --save-path exp_results/antmaze/${ENV}/data/trajectories_$size.zip --env $ENV
+done
 
 for size in "${sizes[@]}"
 do  
     echo "Generating uniform data for $size"
-    python experiments/antmaze/utils/generate_trajectories.py --max-horizon 64 --n-jobs 32 --num-traj $size --max-exec-time 100 --save-path exp_results/antmaze/antmaze-umaze-v2/data/trajectories_${size}_uniform.zip --uniform
+    python experiments/antmaze/utils/generate_trajectories.py --max-horizon 64 --n-jobs 32 --num-traj $size --max-exec-time 100 --save-path exp_results/antmaze/${ENV}/data/trajectories_${size}_uniform.zip --uniform --env $ENV
 done

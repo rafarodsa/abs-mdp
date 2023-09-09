@@ -106,10 +106,10 @@ for jobname in "${jobnames[@]}"; do
     else
 
         if [[ $((total_cpus + 16)) -le 32 ]]; then
-            onager launch --jobname "$jobname" --backend slurm -p "$partition" --cpus 16 --mem 32 --duration 1-00:00:00 $dryrun
+            onager launch --jobname "$jobname" --backend slurm -p "$partition" --cpus 32 --mem 32 --duration 1-00:00:00 $dryrun
             total_cpus=$((total_cpus + 16))
         else
-            onager launch --jobname "$jobname" --backend slurm -p $partition --cpus 16 --mem 32 --duration 1-00:00:00 $dryrun
+            onager launch --jobname "$jobname" --backend slurm -p $partition --cpus 32 --mem 32 --duration 1-00:00:00 $dryrun
         fi
     fi
 done

@@ -107,7 +107,7 @@ if __name__== "__main__":
 
     trajectories = []  # (o, a, o', rewards, executed, duration, initiation_masks, info)
 
-    env = make_antmaze(args.env, seed=0)
+    env = make_antmaze(args.env)
     options, initset = create_antmaze_options(args=args)
     initset_fn = make_initiation_set(initset, option_name=None, device='cpu')
     max_exec_time = args.max_exec_time

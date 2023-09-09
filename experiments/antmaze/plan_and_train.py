@@ -13,8 +13,8 @@ import numpy as np
 
 
 from omegaconf import OmegaConf as oc
-from experiments.pb_obstacles.plan import make_ground_env, gaussian_ball_goal_fn, GOALS, GOAL_TOL, parse_oc_args, ENV_CONFIG_FILE
-from src.absmdp.absmdp import AbstractMDP
+from experiments.antmaze.plan import make_ground_env, parse_oc_args, gaussian_ball_goal_fn, GOALS, GOAL_TOL
+from src.absmdp.absmdp import AbstractMDPGoal, AbstractMDP
 from src.models import ModuleFactory
 from src.agents.abstract_ddqn import AbstractDDQNGrounded, AbstractDoubleDQN, AbstractLinearDecayEpsilonGreedy
 
@@ -90,8 +90,9 @@ def make_ddqn_agent(agent_cfg, experiment_cfg, world_model):
 def main():
     # parse arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', type=str, default='experiments/pb_obstacles/fullstate/config/online_planner.yaml')
+    parser.add_argument('--config', type=str, default='experiments/antmaze/online_planner.yaml')
     parser.add_argument('--exp-id', type=str, default=None)
+    parser.add_argument('--learn-task-reward', action='store_true')
     
     args, unknown = parser.parse_known_args()
     cli_args = parse_oc_args(unknown)
@@ -117,45 +118,41 @@ def main():
                                     gamma=agent_cfg.env.gamma,
                                     train_seed=train_seed,
                                     device=device,
-                                    from_pixels=agent_cfg.env.pixels
                                 )
 
     test_env = make_ground_env(
                                     test=True,
                                     args=agent_cfg.env,
                                     gamma=agent_cfg.env.gamma,
-                                    test_seed=test_seed,
+                                    train_seed=test_seed,
                                     device=device,
-                                    from_pixels=agent_cfg.env.pixels
                                 )
 
     # initialize fabric for logging and checkpointing
    
     # load world model
+    goal_cfg = world_model_cfg.model.goal_class
+
+    mdp_constructor = AbstractMDPGoal if args.learn_task_reward else AbstractMDP
+
     if world_model_cfg.ckpt is not None:
         print(f'Loading world model from checkpoint at {world_model_cfg.ckpt}')
-        world_model = AbstractMDP.load_from_old_checkpoint(world_model_cfg=world_model_cfg)
+        world_model = mdp_constructor.load_from_old_checkpoint(world_model_cfg=world_model_cfg)
     else:
-        world_model = AbstractMDP(world_model_cfg)
-
+        world_model = mdp_constructor(world_model_cfg, goal_cfg=goal_cfg)
     
     # make task_reward_funcion
-    goal = GOALS[agent_cfg.env.goal]
+    goal = GOALS[agent_cfg.env.envname][agent_cfg.env.goal]
 
-    def make_task_reward(from_pixels=False):
-        env = None
-        if from_pixels:
-            env = PinballEnvContinuous(config=ENV_CONFIG_FILE, gamma=agent_cfg.env.gamma, width=50, height=50, render_mode='rgb_array')
-            env = PinballPixelWrapper(env, bw=True)
-
-        goal_fn = gaussian_ball_goal_fn(world_model.encoder, goal, goal_tol=GOAL_TOL, device=device, env=env)
+    def make_task_reward(envname):
+        goal_fn = gaussian_ball_goal_fn(world_model.encoder, goal, goal_tol=GOAL_TOL, device=device, envname=agent_cfg.env.envname)
         def __r(s):
             r = goal_fn(s)
             return r, r > 0
         return __r
 
-    task_reward = make_task_reward(from_pixels=agent_cfg.env.pixels)
-    world_model.set_task_reward(task_reward)
+    task_reward = make_task_reward(agent_cfg.env.envname)
+    # world_model.set_task_reward(task_reward)
 
     world_model.freeze(world_model_cfg.fixed_modules)
 

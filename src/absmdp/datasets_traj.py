@@ -52,9 +52,9 @@ class Trajectory(NamedTuple):
     executed: torch.Tensor
     duration: torch.Tensor
     initsets: torch.Tensor
-    # info: List[Dict]
     p0: torch.Tensor
     length: torch.Tensor
+    info: List[Dict]
 
 
 def _geometric_return(rewards, gamma):
@@ -135,7 +135,7 @@ def split(_list, batch_size):
 class PinballDatasetTrajectory_(torch.utils.data.Dataset):
     IMG_FORMAT = 'tj_{}_obs_{}.png'
 
-    def __init__(self, path_to_file, transforms=None, obs_type='full', length=32, dtype=torch.float32, noise_level=0., num_workers=1):
+    def __init__(self, path_to_file, transforms=[], obs_type='full', length=32, dtype=torch.float32, noise_level=0., num_workers=1):
         self.zfile_name = path_to_file
         self.transforms = transforms
         self.dtype = dtype
@@ -186,7 +186,7 @@ class PinballDatasetTrajectory_(torch.utils.data.Dataset):
         padding = self.length - length
         assert padding >= 0 and length > 0, f'Padding {padding}, Traj Length {length}, Buffer Length {self.length}'
 
-        s, a, next_s, rewards, done, executed, duration, initsets, _, p0 = zip(*trajectory)
+        s, a, next_s, rewards, done, executed, duration, initsets, info , p0= zip(*trajectory)
         s = torch.stack(list(s) + [torch.zeros_like(s[0]) for _ in range(padding)])
         a = torch.stack(list(a) + [torch.zeros_like(a[0]) for _ in range(padding)])
         next_s = torch.stack(list(next_s) + [torch.zeros_like(next_s[0]) for _ in range(padding)])
@@ -196,9 +196,9 @@ class PinballDatasetTrajectory_(torch.utils.data.Dataset):
         duration = torch.cat([torch.Tensor(duration), torch.zeros(padding)], dim=0)
         initsets = torch.stack(list(initsets) + [torch.zeros_like(initsets[0]) for _ in range(padding)])
         p0 = torch.cat([torch.Tensor(p0), torch.zeros(padding)], dim=0)
-        # info = list(info) + [dict() for _ in range(padding)]
+        info = list(info) + [dict() for _ in range(padding)]
 
-        return Trajectory(s, a, next_s, rewards, done, executed, duration, initsets, p0, length)
+        return Trajectory(s, a, next_s, rewards, done, executed, duration, initsets, p0, length, info)
 
     def __len__(self):
         return len(self.trajectories)

@@ -320,6 +320,7 @@ def multiple_level_exp(args):
     plt.legend()
 
     if args.save_path is not None:
+        os.makedirs(os.path.split(args.save_path)[0], exist_ok=True)
         plt.savefig(args.save_path)
 
     if args.save_curves:
@@ -334,6 +335,8 @@ def compare_pfrl_experiments(args):
     plt.legend()
 
     if args.save_path is not None:
+        path = os.path.split(args.save_path)[0]
+        os.makedirs(path, exist_ok=True)
         plt.savefig(args.save_path)
 
     if args.save_curves:
@@ -381,6 +384,7 @@ def get_curves(args):
                 ylabel=args.ylabel,
                 xlabel=args.xlabel,
                 show=args.show,
+                truncate_max_frames=args.max_x_value,
             )
             for c in curves:
                 groupbys.add(c['label'])
@@ -429,7 +433,10 @@ def plot_subplots(args):
     for j, (group, group_name, offset) in enumerate(zip(curves, curve_names, x_offsets)):
         for curve, xoffset, name in zip(group, offset, group_name):
             identifier = name if name is not None else f"group_{j}"
-            subplot_idx = list(filter(lambda x: x[-1] in curve['label'], enumerate(subplot_groups)))
+
+            regex_pattern = '(.*{}_|.*{}$)'
+
+            subplot_idx = list(filter(lambda x: re.match(regex_pattern.format(x[-1], x[-1]), curve['label']) is not None, enumerate(subplot_groups))) # TODO this fails when a tag 
             if len(subplot_idx) == 0:
                 print(f"Curve {curve['label']} does not match any of the subplots")
                 continue
@@ -437,12 +444,13 @@ def plot_subplots(args):
             label = f"{identifier}_{curve['label']}"
             color = palette[j]  # Assigning color based on curve index
             curve['label'] = label
-            plt.plot(curve["xs"] + xoffset, curve["mean"], color=color, linewidth=0.1, label=label)
+            plt.plot(curve["xs"] + xoffset, curve["mean"], color=color, linewidth=2, label=label)
             plt.fill_between(curve["xs"] + xoffset, curve["top"], curve["bottom"], color=color, alpha=0.2)
             plt.title(subplot_idx[0][1], fontsize=8)
     
     if args.save_path is not None:
         print(f'Saving figure to {args.save_path}')
+        os.makedirs(os.path.split(args.save_path)[0], exist_ok=True)
         plt.savefig(args.save_path)
 
     print_best_scores(curves)
@@ -454,6 +462,7 @@ def parse_args():
     parser.add_argument('--curve-names', nargs='+', type=str, default=None)
     parser.add_argument('--group-by', nargs='+', type=str, default=['',])
     parser.add_argument('--evaluator-dirs', nargs='+', type=str, default=['ground'])
+    parser.add_argument('--max-x-value', type=float, default=-1)
     parser.add_argument('--x-offset', nargs='+', type=float, default=None)
     parser.add_argument('--log-file', type=str, default='scores.txt')
     parser.add_argument('--x-axis', type=str, default='steps')
@@ -463,7 +472,7 @@ def parse_args():
     parser.add_argument('--regex', type=str, default=None)
     parser.add_argument('--save-path', type=str, default=None)
     parser.add_argument('--save-curves', action='store_true')
-    parser.add_argument('--window-size', type=int, default=10)
+    parser.add_argument('--window-size', type=int, default=1)
     parser.add_argument('--show', action='store_true')
     parser.add_argument('--depth', type=int, default=2)
     parser.add_argument('--n-cols', type=int, default=4)

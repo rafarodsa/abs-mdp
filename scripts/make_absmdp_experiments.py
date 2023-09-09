@@ -39,15 +39,17 @@ if args.rssm:
         model = RSSMAbstractModel.load_from_checkpoint(phi_ckpt_path)
     else:
         model = RSSMAbstraction.load_from_checkpoint(phi_ckpt_path)
-else:   
-    model = Abstraction.load_from_checkpoint(phi_ckpt_path) if not args.discrete else DiscreteTPCAbstraction.load_from_checkpoint(phi_ckpt_path)
+else:  
+    model = RSSMAbstraction.load_from_checkpoint(phi_ckpt_path) 
+    # model = Abstraction.load_from_checkpoint(phi_ckpt_path) if not args.discrete else DiscreteTPCAbstraction.load_from_checkpoint(phi_ckpt_path)
 
 
 if len(args.dataset) > 0:
     cfg.data.data_path = args.dataset
 
 print(f'Loading dataset {cfg.data.data_path}')
-data = PinballDataset(cfg.data) if not args.rssm else PinballDatasetTrajectory(cfg.data)
+# data = PinballDataset(cfg.data) if not args.rssm else PinballDatasetTrajectory(cfg.data)
+data = PinballDatasetTrajectory(cfg.data)
 data.setup()
 
 

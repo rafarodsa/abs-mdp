@@ -527,7 +527,7 @@ def setup_optuna(config):
     print(f'Using pruner {config.pruner}')
     print(f'Study storage: {config.storage}')
     storage = optuna.storages.JournalStorage(
-            optuna.storages.JournalFileStorage(config.storage)
+            optuna.storages.JournalFileStorage(f'{config.storage}/{config.study_name}.db')
     )
     study = optuna.create_study(
         study_name=config.study_name,
@@ -545,6 +545,45 @@ def setup_optuna(config):
     ]
 
     return study, callbacks
+
+def _get_score_from_eval_stats_history(
+    eval_stats_history, agg="last", target="eval_score", evaluator_idx=0
+):
+    """Get a scalar score from a list of evaluation statistics dicts."""
+    final_score = None
+    if agg == "last":
+        for stats in reversed(eval_stats_history):
+            stats = stats[evaluator_idx]
+            if target in stats:
+                final_score = stats[target]
+                break
+    elif agg == "mean":
+        scores = []
+        for stats in eval_stats_history:
+            stats = stats[evaluator_idx]
+            if target in stats:
+                score = stats[target]
+                if score is not None:
+                    scores.append(score)
+        if len(scores) > 0:
+            final_score = sum(scores) / len(scores)
+        else:
+            final_score = -1e12
+    elif agg == "best":
+        scores = []
+        for stats in eval_stats_history:
+            stats = stats[evaluator_idx]
+            if target in stats:
+                score = stats[target]
+                if score is not None:
+                    scores.append(score)
+        final_score = max(scores)  # Assuming larger is better
+    else:
+        raise ValueError("Unknown agg method: {}".format(agg))
+
+    if final_score is None:
+        final_score = float("NaN")
+    return final_score
 
 def tune(planner_config, cli_args):
 
@@ -588,10 +627,7 @@ def tune(planner_config, cli_args):
         eval_stats_history = run(_planner_cfg, cli_args, tune=True, trial=trial)
         # get score
         target = 'eval_score'
-
-        window_size = 10
-        stats = [t[target] for t in eval_stats_history if target in t]
-        final_score = sum(stats[-window_size:])/window_size if len(stats) > 0 else -np.inf
+        final_score = _get_score_from_eval_stats_history(eval_stats_history=eval_stats_history, agg=optuna_config.aggregator, target=target)
 
         return final_score
 

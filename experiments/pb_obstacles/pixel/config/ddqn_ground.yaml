@@ -14,16 +14,16 @@ env:
 
 agent:
   load: null
-  final_exploration_steps: 350000
+  final_exploration_steps: 500000
   final_epsilon: 0.1
   eval_epsilon: 0.001
   replay_start_size: 10000
-  replay_buffer_size: 350000
-  target_update_interval: 20000
-  steps: 1000000
+  replay_buffer_size: 500000
+  target_update_interval: 10000
+  steps: 1250000
   update_interval: 5
   num_step_return: 1
-  lr: 0.0001
+  lr: 1e-5
   eval_random_agent: false
   gamma: ${env.gamma}
   normalize_obs: false

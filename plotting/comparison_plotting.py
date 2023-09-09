@@ -191,7 +191,6 @@ def generate_learning_curves(
         for curve in curves:
             print(f"\t{len(curve[0])}")
         truncated_xs, truncated_all_ys = truncate_and_interpolate(curves, max_frames=truncate_max_frames, min_frames=truncate_min_frames)
-        # print(truncated_all_ys.max())
 
         if truncated_xs is None or len(truncated_all_ys) < min_seeds:
             continue

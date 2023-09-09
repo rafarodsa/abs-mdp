@@ -167,7 +167,7 @@ class GroundedPFRLTrainer:
                 action = self.agent.act(obs, initset_s)
 
                 # o_{t+1}, r_{t+1}
-                obs, r, done, info = self.env.step(action.cpu())
+                obs, r, done, info = self.env.step(action)
                 t += 1
                 episode_r += r
                 episode_len += 1
@@ -218,7 +218,7 @@ class GroundedPFRLTrainer:
             raise
 
         # Save the final model
-        # save_agent(self.agent, t, self.outdir, self.logger, suffix="_finish")
+        # save_agent(self.agent, self.ground_step, self.outdir, self.logger, suffix="_finish")
 
         self.current_step += t
 
@@ -327,7 +327,7 @@ def train_agent_with_evaluation(
     checkpoint_freq = config.experiment.checkpoint_frequency
     episode_return = 0
 
-    times_per_loop = deque(maxlen=50)
+    times_per_loop = deque(maxlen=10)
     tic = time.perf_counter()
     init_time = tic
     for timestep in range(max_steps):

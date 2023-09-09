@@ -55,7 +55,7 @@ model:
   latent_dim: 2
   encoder: ${loadcfg:${model_config_dir}/config/models/encoder_mlp.yaml}
   decoder: ${loadcfg:${model_config_dir}/config/models/decoder_mlp_critic.yaml}
-  transition: ${loadcfg:${model_config_dir}/config/models/transition_gaussian.yaml}
+  transition: ${loadcfg:${model_config_dir}/config/models/transition_mixture_gaussian.yaml}
   init_class: ${loadcfg:${model_config_dir}/config/models/init_class_mlp.yaml}
   reward: ${loadcfg:${model_config_dir}/config/models/reward_mlp.yaml}
   tau: ${loadcfg:${model_config_dir}/config/models/tau_mlp.yaml}

@@ -23,6 +23,7 @@ from sklearn import manifold
 
 from collections import namedtuple
 from utils import get_experiment_info, prepare_outdir
+from src.utils import printarr
 
 import os
 
@@ -72,13 +73,14 @@ if __name__ == '__main__':
 
     # Load
     # model = InfomaxAbstraction.load_from_checkpoint(args.from_ckpt, cfg=cfg)
-    if not args.rssm:
-        model = TPCAbstraction.load_from_checkpoint(ckpt_path, cfg=cfg)
-        data = PinballDataset(cfg.data)
-    else:
-        model = RSSMAbstraction.load_from_checkpoint(ckpt_path)
-        data = PinballDatasetTrajectory(cfg.data)
-
+    # if not args.rssm:
+    #     model = TPCAbstraction.load_from_checkpoint(ckpt_path, cfg=cfg)
+    #     data = PinballDataset(cfg.data)
+    # else:
+        # model = RSSMAbstraction.load_from_checkpoint(ckpt_path)
+        # data = PinballDatasetTrajectory(cfg.data)
+    model = RSSMAbstraction.load_from_checkpoint(ckpt_path)
+    data = PinballDatasetTrajectory(cfg.data)
     data.setup()
 
     batches = list(data.test_dataloader())
@@ -93,6 +95,8 @@ if __name__ == '__main__':
     obs, action, next_obs = torch.cat(_obs, dim=0), torch.cat(_action, dim=0), torch.cat(_next_obs, dim=0)
 
 
+    obs_energy = np.abs(obs[..., 0] + obs[..., 1]) # norm 1
+    printarr(obs_energy)
 
     Batch = namedtuple('batch', ['obs', 'action', 'next_obs'])
     batch = Batch(obs, action, next_obs)
@@ -115,6 +119,8 @@ if __name__ == '__main__':
         next_z = next_z.reshape(-1, z.shape[-1])
         predicted_z = predicted_z.reshape(-1, z.shape[-1])
         _action = _action.reshape(-1)
+        obs_energy = obs_energy.reshape(-1)
+        _obs = obs.reshape(-1, obs.shape[-1])
 
     if args.device != 'cpu':
         z = z.cpu()
@@ -125,10 +131,14 @@ if __name__ == '__main__':
 
 
     os.makedirs(save_path, exist_ok=True)
+
+    plt.figure()
+    plt.scatter(_obs[:, 0], _obs[:, 1], s=5, marker='o', c=obs_energy, cmap='viridis')
+    plt.savefig(f'{save_path}/obs.png')
     
     if cfg.model.latent_dim == 2:
-        plt.figure()
-        plt.scatter(z[:, 0], z[:, 1], s=5, marker='o', color='b', label='z')
+        plt.figure() 
+        plt.scatter(z[:, 0], z[:, 1], s=5, marker='o', c=obs_energy, cmap='viridis', label='z')
         action_names = {0: '-y', 1: '+y', 2: '-x', 3: '+x'}
         for a in range(4):
             next_z_a = next_z[_action==a]
@@ -175,7 +185,7 @@ if __name__ == '__main__':
             n_components = 2
             Y = manifold.Isomap(n_neighbors=n_neighbors, n_components=n_components).fit_transform(z)
             plt.figure()
-            plt.scatter(Y[:, 0], Y[:, 1], s=5)
+            plt.scatter(Y[:, 0], Y[:, 1], c=obs_energy, cmap='viridis', s=5)
             plt.grid()
             plt.savefig(f'{save_path}/isomap-z-space.png')
         except:
@@ -225,7 +235,7 @@ if __name__ == '__main__':
             tsne = manifold.TSNE(n_components=n_components, init='pca')
             Z = tsne.fit_transform(z)
             plt.figure()
-            plt.scatter(Z[:, 0], Z[:, 1], s=5)
+            plt.scatter(Z[:, 0], Z[:, 1], c=obs_energy, cmap='viridis',  s=5)
             plt.grid()
             plt.savefig(f'{save_path}/tsne-z-space.png')
         except:
@@ -248,7 +258,7 @@ if __name__ == '__main__':
             print('MDS...')
             Y = manifold.MDS(n_components=n_components, normalized_stress='auto').fit_transform(z)
             plt.figure()
-            plt.scatter(Y[:, 0], Y[:, 1], s=5)
+            plt.scatter(Y[:, 0], Y[:, 1], c=obs_energy, cmap='viridis', s=5)
             plt.grid()
             plt.savefig(f'{save_path}/mds-z-space.png')
         except:

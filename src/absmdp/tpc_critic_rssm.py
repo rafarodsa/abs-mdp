@@ -208,7 +208,7 @@ class RSSMAbstraction(pl.LightningModule):
         return loss
 
     def duration_loss(self, tau_target, z, a):
-        tau = symlog(tau_target)
+        tau = torch.log(tau_target)
         t = self.tau(torch.cat([z, a], dim=-1).detach()).squeeze()
         loss = F.mse_loss(tau.reshape(-1), t.reshape(-1), reduction='none')
 

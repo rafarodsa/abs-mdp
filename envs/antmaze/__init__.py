@@ -3,8 +3,9 @@ import gym
 from .antmaze_wrapper import D4RLAntMazeWrapper
 import pfrl
 import d4rl
+import numpy as np
 
-def make_env(name, start, goal, seed, horizon=1000):
+def make_env(name, seed=None, start=np.array([-10, -10]), goal=np.array([-20, -20]), horizon=1000):
 
   if "antmaze" in name.lower():
     env = gym.make(name)
@@ -16,5 +17,6 @@ def make_env(name, start, goal, seed, horizon=1000):
             )
   # env = pfrl.wrappers.CastObservationToFloat32(env)
   # env = pfrl.wrappers.ContinuingTimeLimit(env, max_episode_steps=horizon)
-  env.env.seed(seed)
+  if seed is not None:
+    env.env.seed(seed)
   return env

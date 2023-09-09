@@ -1,29 +1,31 @@
 # environment.yaml
 # environment.yaml
-experiment_cwd: exp_results/antmaze/antmaze-umaze-v2
-experiment_name: umaze_ground_planninge
+experiment_cwd: exp_results/antmaze/antmaze-umaze-v2/mdps
+experiment_name: umaze_markov_1024_from_success_mixture_uniform_1__model.latentdim_2
 env:
   absmdp: ${experiment_cwd}/${experiment_name}/cont_mdp.pt
-  absgroundmdp: true
+  absgroundmdp: false
+  sample_abstract_transition: true
   render: false
   init_thresh: 0.5
   use_ground_init: false
   reward_scale: 0. #0.00016666666666666666
   gamma: 0.995
-  goal: 0
+  goal: 5
   envname: 'antmaze-umaze-v2'
+
 agent:
   load: null
-  final_exploration_steps: 350000
+  final_exploration_steps: 150000
   final_epsilon: 0.1
   eval_epsilon: 0.001
-  replay_start_size: 1000
-  replay_buffer_size: 100000
-  target_update_interval: 1000
-  steps: 1000000
+  replay_start_size: 20000
+  replay_buffer_size: 1000000
+  target_update_interval: 10000
+  steps: 500000
   update_interval: 5
   num_step_return: 1
-  lr: 5e-4
+  lr: 1e-5
   eval_random_agent: false
   gamma: ${env.gamma}
 
@@ -32,19 +34,19 @@ q_func:
   ground:
     type: 'mlp'
     hidden_dims: [256, 256]
-    activation: relu
+    activation: silu
     output_dim: ${q_func.n_actions}
   abstract:
     type: 'mlp'
     hidden_dims: [256, 256]
-    activation: relu
+    activation: silu
     output_dim: ${q_func.n_actions}
 
 experiment:
-  seed: 31
+  seed: 59
   gpu: -1
   demo: false
-  eval_interval: 5000
+  eval_interval: 10000
   eval_n_runs: 10
   log_level: 20
   checkpoint_frequency: null

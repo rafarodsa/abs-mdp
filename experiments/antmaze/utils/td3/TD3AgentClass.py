@@ -68,7 +68,10 @@ class TD3(object):
         self.T = 0
 
     def act(self, state, evaluation_mode=False):
-        state = torch.FloatTensor(state.reshape(1, -1)).to(self.device)
+        # state = torch.FloatTensor(state.reshape(1, -1)).to(self.device)
+        if isinstance(state, np.ndarray):
+            state = torch.from_numpy(state).float().to(self.device)
+            
         selected_action = self.actor(state)
 
         if self.use_output_normalization:

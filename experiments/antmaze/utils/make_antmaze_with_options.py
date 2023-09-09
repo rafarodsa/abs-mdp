@@ -117,6 +117,7 @@ def make_option_policy(policy, direction, distance, device='cpu'):
         if isinstance(s0, np.ndarray):
             s0 = torch.from_numpy(s0).to(device)
         if len(s.shape) == 1:
+            
             goal = s0[:2] + displacement
             return policy.act(torch.cat([s, goal]))
         goal = s0[:, :2] + displacement[None]
@@ -152,10 +153,10 @@ def create_antmaze_options(args=None):
     #     torch.save(options, args.save_path)
     return options, initset
 
-def make_antmaze_options(envname, device):
+def make_antmaze_options(envname, device, check_can_execute=True):
     configs = ANTMAZE_OPTION_MODELS[envname]
-    initset = Initset.load_from_checkpoint(configs['initset_path'])
-    policy = load_policy(configs['policy_path'])
+    initset = Initset.load_from_checkpoint(configs['initset_path']).to(device)
+    policy = load_policy(configs['policy_path'], device=device)
     options = []
     for dir, option_name in zip(configs['directions'], configs['names']):
         o = Option(
@@ -163,7 +164,8 @@ def make_antmaze_options(envname, device):
             termination_prob=make_termination_probs(dir, configs['distance'], configs['goal_tol'], device=device),
             policy_func_factory=make_option_policy(policy, dir, configs['distance'], device=device),
             max_executing_time=MAX_OPTION_EXECUTING_TIME,
-            name=option_name
+            name=option_name, 
+            check_can_execute=check_can_execute
         )
         options.append(o)
 
@@ -176,7 +178,7 @@ def make_antmaze_with_options(envname, seed=0, options=None, initset=None, devic
     env = EnvInitsetWrapper(env, make_initiation_set(initset, option_name=None, device=device))
     return env
 
-def make_antmaze(envname, seed):
+def make_antmaze(envname, seed=None):
     env = antmaze.make_env(
                 envname,
                 start=np.array([-10, -9]),

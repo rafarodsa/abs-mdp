@@ -23,6 +23,9 @@ class DiagonalNormal(torch.distributions.Distribution):
     def var(self):
         return torch.exp(self._log_var)
     
+    def mode(self):
+        return self.mean
+    
     @property
     def std(self):
         return torch.exp(self._log_var/2)
@@ -224,6 +227,10 @@ class MixtureDiagonalNormal(torch.distributions.Distribution):
     def mean(self):
         weighted_means = [self._pis[..., i:i+1] * self._means[i] for i in range(len(self._components))]
         return sum(weighted_means)
+
+    def mode(self):
+        mixture_mode = torch.argmax(self._pis, dim=-1)
+        return self._means[mixture_mode]
 
     @property
     def var(self):

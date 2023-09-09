@@ -26,6 +26,7 @@ class TrajectoryReplayBuffer:
         self.buffer = deque(maxlen=capacity)
         self.current_trajectory = []
         self.device = device
+        self.data_device = device  # Keep track of which device the data is on
 
     def push(self, state, action, reward, next_state, duration, success, done, info):
         """
@@ -33,6 +34,20 @@ class TrajectoryReplayBuffer:
         """
         self.current_trajectory.append([state, action, reward, next_state, duration, success, done, info])
 
+
+    def push(self, state, action, reward, next_state, duration, success, done, info):
+        """
+        Add a transition to the current trajectory.
+        """
+        state = self._to_torch(state)
+        action = self._to_torch(action)
+        reward = self._to_torch(reward)
+        next_state = self._to_torch(next_state)
+        duration = self._to_torch(duration)
+        success = self._to_torch(success, dtype=torch.float32)
+        done = self._to_torch(done, dtype=torch.float32)
+        
+        self.current_trajectory.append([state, action, reward, next_state, duration, success, done, info])
 
     def end_trajectory(self):
         """
@@ -64,10 +79,11 @@ class TrajectoryReplayBuffer:
         max_length = max([len(trajectory) for trajectory in sampled_trajectories])
 
         tensor_trajectories = []
+        infos = []
         for trajectory in sampled_trajectories:
             
             # Unpack the trajectory
-            states, actions, rewards, next_states, durations, success, done, _ = zip(*trajectory)
+            states, actions, rewards, next_states, durations, success, done, info = zip(*trajectory)
             
             # Create mask for this trajectory
             mask = torch.Tensor([1] * len(trajectory) + [0] * (max_length - len(trajectory)))
@@ -83,9 +99,10 @@ class TrajectoryReplayBuffer:
             # printarr(states, actions, rewards, next_states, durations, success, done, mask)
             tensor_trajectory = (states, actions, rewards, next_states, durations, success, done, mask)
             tensor_trajectories.append(tensor_trajectory)
+            infos.append(info)
 
         tensor_trajectories = [torch.stack(t).to(self.device) for t in zip(*tensor_trajectories)]
-        return tensor_trajectories
+        return tensor_trajectories, infos
 
     def _pad_sequence(self, sequence, max_length, dtype=torch.float32):
         """Pad the sequence with zeros to match max_length."""
@@ -110,5 +127,26 @@ class TrajectoryReplayBuffer:
         """
         return len(self.buffer)
 
+    def _to_torch(self, x, dtype=torch.float32):
+        if isinstance(x, np.ndarray):
+            return torch.from_numpy(x).type(dtype).to(self.device)
+        elif isinstance(x, torch.Tensor):
+            # Only move to device if it's not on the desired device
+            if x.device != self.device:
+                return x.type(dtype).to(self.device)
+            return x
+        elif isinstance(x, (int, float, np.float32, np.float64, bool, np.bool_)):
+            return torch.tensor(x, dtype=dtype).to(self.device)
+        elif isinstance(x, dict):
+            return x
+        else:
+            raise ValueError(f"Unsupported type {type(x)}")
+
     def to(self, device):
+        if device != self.data_device:
+            # Transfer all trajectories to the new device
+            for trajectory in self.buffer:
+                for i in range(len(trajectory)):
+                    trajectory[i] = tuple(self._to_torch(item) for item in trajectory[i])
+            self.data_device = device
         self.device = device
