@@ -83,7 +83,7 @@ for i in range(obs.shape[1]):
         mutual_info_matrix[i, j] = mutual_info_regression(obs[:, i].reshape(-1, 1), z[:, j])[0]
 
 # Plot heatmap using Seaborn
-plt.figure(figsize=(10, 8))
+plt.figure(figsize=(8, 8))
 # cmap = sns.diverging_palette(230, 20, as_cmap=True)
 sns.heatmap(mutual_info_matrix, annot=False, 
             xticklabels=[f"z_{i}" for i in range(z.shape[1])], 

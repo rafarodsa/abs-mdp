@@ -22,6 +22,7 @@ experiment:
   max_episode_len: 100
   outdir: planning_ddqn
   num_envs: 1
+  explore_ground: false
 
 world_model:
   ckpt: exp_results/pb_obstacles/pixel/mdps/pinball_markov_1024_2__model.latentdim_16__seed_31/phi_train/ckpts/last.ckpt

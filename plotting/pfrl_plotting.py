@@ -363,7 +363,11 @@ def get_curves(args):
         args.x_offset = [0] * len(args.base_dirs)
     elif len(args.x_offset) <= len(args.base_dirs):
         args.x_offset = args.x_offset + [0] * (len(args.base_dirs) - len(args.x_offset)) # pad with zeros
+    
+    if len(args.window_size) <= len(args.base_dirs):
+        args.window_size = args.window_size + [1] * (len(args.base_dirs) - len(args.window_size))
         
+
     curve_names = []
     offsets = []
     x_offsets = []
@@ -379,7 +383,7 @@ def get_curves(args):
                 group_keys=args.group_by,
                 summary_fn=lambda csv: get_summary_data(csv, column_keys=[args.x_axis, args.y_axis]),
                 csv_path_fn=csv_fn,
-                smoothen=args.window_size,
+                smoothen=args.window_size[i],
                 save_path=args.save_path,
                 ylabel=args.ylabel,
                 xlabel=args.xlabel,
@@ -472,7 +476,7 @@ def parse_args():
     parser.add_argument('--regex', type=str, default=None)
     parser.add_argument('--save-path', type=str, default=None)
     parser.add_argument('--save-curves', action='store_true')
-    parser.add_argument('--window-size', type=int, default=1)
+    parser.add_argument('--window-size', nargs='+', type=int, default=[])
     parser.add_argument('--show', action='store_true')
     parser.add_argument('--depth', type=int, default=2)
     parser.add_argument('--n-cols', type=int, default=4)

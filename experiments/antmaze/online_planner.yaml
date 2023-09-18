@@ -17,10 +17,11 @@ experiment:
   max_rollout_len: 64 # max length to rollout the ground env.
   log_tensorboard: true
   discounted: false
-  steps: 100000
+  steps: 250000
   train_every: 8
   max_episode_len: 100
   outdir: planning_ddqn
+  explore_ground: false
 
 world_model:
   ckpt: exp_results/antmaze/antmaze-umaze-v2/mdps/umaze_markov_1024_from_success_mixture_uniform_3__model.latentdim_16/phi_train/ckpts/last-v1.ckpt
@@ -91,10 +92,10 @@ planner:
   agent:
     load: null
     final_exploration_steps: 0.4 # proportion of agent trainings steps to decay the epsilon
-    final_epsilon: 0.01
+    final_epsilon: 0.1
     eval_epsilon: 0.001
     replay_start_size: 1000
-    replay_buffer_size: 500000
+    replay_buffer_size: 1000000
     target_update_interval: 5000
     update_interval: 5
     num_step_return: 1

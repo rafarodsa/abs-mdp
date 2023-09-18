@@ -209,8 +209,8 @@ class GroundedPFRLTrainer:
                     episode_r = 0
                     episode_len = 0
                     obs = self.env.reset()
-                if self.checkpoint_freq and self.ground_step % self.checkpoint_freq == 0:
-                    save_agent(self.agent, self.ground_step, self.outdir, self.logger, suffix="_checkpoint")
+                # if self.checkpoint_freq and self.ground_step % self.checkpoint_freq == 0:
+                #     save_agent(self.agent, self.ground_step, self.outdir, self.logger, suffix="_checkpoint")
 
         except (Exception, KeyboardInterrupt):
             # Save the current model before being killed
@@ -286,7 +286,8 @@ def train_agent_with_evaluation(
                                 world_model, 
                                 task_reward,
                                 max_steps,
-                                config
+                                config,
+                                init_state_sampler=None
                             ):
     
     ## Boilerplate: set up logging, evaluator, and checkpointing 
@@ -316,6 +317,7 @@ def train_agent_with_evaluation(
     world_model.set_outdir(world_model_outdir)
     world_model.setup_trainer(config)
     world_model.set_task_reward(task_reward)
+    world_model.set_init_state_sampler(test_env.init_state_sampler if init_state_sampler is None else init_state_sampler)
 
     ## main training loop
 
@@ -333,9 +335,12 @@ def train_agent_with_evaluation(
     for timestep in range(max_steps):
 
         ## rollout agent in ground environment
-        with grounded_agent.eval_mode():
-        # with torch.no_grad():
-            a = grounded_agent.act(s)
+        if config.experiment.explore_ground:
+            with torch.no_grad():
+                a = grounded_agent.act(s)
+        else:
+            with grounded_agent.eval_mode():
+                a = grounded_agent.act(s)
 
         next_s, r, done, info = ground_env.step(a)
         episode_return += r

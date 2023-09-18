@@ -93,6 +93,7 @@ def main():
     parser.add_argument('--config', type=str, default='experiments/antmaze/online_planner.yaml')
     parser.add_argument('--exp-id', type=str, default=None)
     parser.add_argument('--learn-task-reward', action='store_true')
+    parser.add_argument('--no-initset', action='store_true')
     
     args, unknown = parser.parse_known_args()
     cli_args = parse_oc_args(unknown)
@@ -158,6 +159,9 @@ def main():
 
     # make grounded agent
     agent, grounded_agent = make_ddqn_agent(agent_cfg, experiment_cfg=cfg.experiment, world_model=world_model)
+
+    if args.no_initset:
+        world_model.set_no_initset()
 
     # train agent
     train_agent_with_evaluation(

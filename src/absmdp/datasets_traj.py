@@ -197,6 +197,7 @@ class PinballDatasetTrajectory_(torch.utils.data.Dataset):
         initsets = torch.stack(list(initsets) + [torch.zeros_like(initsets[0]) for _ in range(padding)])
         p0 = torch.cat([torch.Tensor(p0), torch.zeros(padding)], dim=0)
         info = list(info) + [dict() for _ in range(padding)]
+        # info = {}
 
         return Trajectory(s, a, next_s, rewards, done, executed, duration, initsets, p0, length, info)
 

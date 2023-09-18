@@ -26,24 +26,8 @@ from scripts.utils import get_experiment_info, prepare_outdir
 from tqdm import tqdm
 import os
 
-def predict_next_states(mdp, states, actions, executed):
-    next_s = []
-    next_z = []
-    for action in actions:
-        actions_ = action * torch.ones(states.shape[0])
-        z = mdp.encoder(states)
-        next_z_ = mdp.transition(z, actions_.long(), executed)
-        next_s.append(mdp.ground(next_z_))
-        next_z.append(next_z_)
-    return next_s, next_z
 
-def states_to_plot(states, n_grids=10):
-    return torch.round(n_grids * states)
-
-def test_grounding(mdp, states):
-    z = mdp.encoder(states)
-    s = mdp.ground(z)
-    return s, z
+from sklearn.feature_selection import mutual_info_regression
 
 if __name__ == '__main__':
     # Arguments
@@ -53,7 +37,7 @@ if __name__ == '__main__':
     parser.add_argument('--device', type=str, default='cpu')
     parser.add_argument('--rssm', action='store_true')
     parser.add_argument('--dataset', type=str, default='')
-    parser.add_argument('--title', type=str, default='Latent Space')
+    parser.add_argument('--title', type=str, default='')
 
     args = parser.parse_args()
 
@@ -91,7 +75,7 @@ if __name__ == '__main__':
         _obs.append(obs[:length].to(args.device))
         _action.append(action[:length].to(args.device))
         _next_obs.append(next_obs[:length].to(args.device))
-        _info.append(b.info)
+        _info.append(b.info[:length])
     obs, action, next_obs = torch.cat(_obs, dim=0), torch.cat(_action, dim=0), torch.cat(_next_obs, dim=0)
 
 
@@ -101,6 +85,7 @@ if __name__ == '__main__':
 
     with torch.no_grad():
         model.eval()
+        model.to(args.device)
         z_q = model.encoder(batch.obs)
         z = z_q
         next_z_q = model.encoder(batch.next_obs)
@@ -134,16 +119,47 @@ if __name__ == '__main__':
     printarr(states, obs, z, energy)
 
 
-    sns.set_context('talk')
+    sns.set_context('talk', font_scale=2)
     sns.set_style("ticks")
     sns.color_palette("husl")
 
 
 
     os.makedirs(save_path, exist_ok=True)
+
+
+        # Prepare an empty matrix to hold mutual information values
+    mutual_info_matrix = np.empty((states.shape[1], z.shape[1]))
+
+    # Compute mutual information for each pair of features
+    for i in range(states.shape[1]):
+        for j in range(z.shape[1]):
+            mutual_info_matrix[i, j] = mutual_info_regression(states[:, i].reshape(-1, 1), z[:, j])[0]
+
+    # Plot heatmap using Seaborn
+    plt.figure(figsize=(9, 9))
+    with sns.axes_style("white"):
+    # cmap = sns.diverging_palette(230, 20, as_cmap=True)
+        sns.heatmap(mutual_info_matrix,
+                    # xticklabels=[f"z_{i}" for i in range(z.shape[1])], 
+                    xticklabels=[],
+                    yticklabels=[],
+                    # yticklabels=[f"s_{i}" for i in range(states.shape[1])],
+                    #robust=True,
+                    #cma=cmap,
+                    # square=True
+                    annot=False, 
+                )
+    plt.xlabel("Abstract Features (z)", labelpad=10)
+    plt.ylabel("Ground Features (s)", labelpad=10)
+    # plt.title("Mutual Information")
+    plt.tight_layout()
+    plt.savefig(f'{save_path}/mutual_info.png', dpi=300)
+    print(f'Mutual Info heatmap saved at {save_path}/mutual_info.png')
+    plt.savefig(f'{save_path}/mutual_info_transparent.png', dpi=300, transparent=True)
     
     if cfg.model.latent_dim == 2:
-        plt.figure()
+        plt.figure(figsize=(8,9))
         plt.scatter(z[:, 0], z[:, 1], s=5, marker='o', color='b', label='z')
         action_names = {0: '-y', 1: '+y', 2: '-x', 3: '+x'}
         for a in range(4):
@@ -154,7 +170,7 @@ if __name__ == '__main__':
         # Plot initial states
         
         acts = [1, 3]
-        plt.figure()
+        plt.figure(figsize=(8,9))
         plt.subplot(1, 2, 1)
 
         for a in acts:
@@ -175,17 +191,29 @@ if __name__ == '__main__':
         # Plot encoder space
         n_neighbors = 10
         n_components = 2
-        plt.figure(figsize=(8,8))
+        plt.figure(figsize=(8,9))
         try:
             print('MDS...')
-            Y = manifold.MDS(n_components=n_components, normalized_stress='auto').fit_transform(z)
-            plt.figure()
+            Y = manifold.MDS(n_components=n_components, normalized_stress='auto').fit_transform(z.double().detach().numpy())
             plt.scatter(Y[:, 0], Y[:, 1], s=3, c=energy, cmap='mako')
             plt.title(args.title)
             plt.gca().set(xticks=[], yticks=[])
-            plt.savefig(f'{save_path}/mds-z-space.png', dpi=500)
-            plt.savefig(f'{save_path}/mds-z-space-transparent.png', dpi=500, transparent=True)
-            plt.show()
+            plt.tight_layout()
+            plt.savefig(f'{save_path}/mds-z-space.png', dpi=300)
+            plt.savefig(f'{save_path}/mds-z-space-transparent.png', dpi=300, transparent=True)
         except Exception as e:
             print('MDS failed...', e)
         print('Done...')
+
+        plt.figure(figsize=(8,9))
+        # plt.title('Ground State Space')
+        plt.scatter(states[:, 0], states[:, 1], s=3, c=energy, cmap='mako')
+        plt.gca().set(xticks=[], yticks=[])
+        plt.tight_layout()
+        plt.savefig(f'{save_path}/ground_space.png', dpi=300)
+        plt.savefig(f'{save_path}/ground_space-transparent.png', dpi=300, transparent=True)
+
+        
+
+
+

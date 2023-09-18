@@ -13,7 +13,7 @@ import numpy as np
 
 
 from omegaconf import OmegaConf as oc
-from experiments.pb_obstacles.plan import make_ground_env, gaussian_ball_goal_fn, GOALS, GOAL_TOL, parse_oc_args, ENV_CONFIG_FILE
+from experiments.pb_obstacles.plan import make_ground_env, gaussian_ball_goal_fn, GOALS, GOAL_TOL, parse_oc_args, ENV_CONFIG_FILE, init_state_sampler
 from src.absmdp.absmdp import AbstractMDP
 from src.models import ModuleFactory
 from src.agents.abstract_ddqn import AbstractDDQNGrounded, AbstractDoubleDQN, AbstractLinearDecayEpsilonGreedy
@@ -170,7 +170,8 @@ def main():
                                 world_model, 
                                 task_reward,
                                 max_steps=cfg.experiment.steps,
-                                config=cfg
+                                config=cfg,
+                                init_state_sampler=init_state_sampler(goal, from_pixels=agent_cfg.env.pixels),
                             )
 
 if __name__ == '__main__':

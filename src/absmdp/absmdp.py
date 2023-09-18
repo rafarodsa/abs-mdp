@@ -77,10 +77,17 @@ class AbstractMDP(nn.Module, gym.Env):
             self.name = self.cfg.name
         else:
             self.name = 'world_model'
+        self.init_state_sampler = None
+        self.initset_thresh = 0.5
 
     def to(self, device):
+        self.device = device
         super().to(device)
         self.data.to(device)
+
+
+    def set_no_initset(self):
+        self.initset_thresh = -1.
 
     @torch.no_grad()
     def step(self, action):
@@ -111,14 +118,26 @@ class AbstractMDP(nn.Module, gym.Env):
     @torch.no_grad()
     def reset(self, ground_state=None):
         if ground_state is None:
-            traj = self.data.sample(1)[0]
-            ground_state = traj[0][0][0]
+            if self.init_state_sampler is None:
+                traj = self.data.sample(1)[0]
+                ground_state = traj[0][0][0]
+            else:
+                # print('sampling')
+                ground_state = self.init_state_sampler()
+                if isinstance(ground_state, np.ndarray):
+                    ground_state = torch.from_numpy(ground_state).to(self.device)
         self.current_z = self.encoder(ground_state)
         self.last_initset = self.initset(self.current_z)
 
         while self.last_initset.sum() == 0:
-            traj = self.data.sample(1)[0]
-            ground_state = traj[0][0][0]
+            if self.init_state_sampler is None:
+                traj = self.data.sample(1)[0]
+                ground_state = traj[0][0][0] 
+            else:
+                # print('sampling')
+                ground_state = self.init_state_sampler()
+                if isinstance(ground_state, np.ndarray):
+                    ground_state = torch.from_numpy(ground_state).to(self.device)
             self.current_z = self.encoder(ground_state)
             self.last_initset = self.initset(self.current_z)
 
@@ -126,6 +145,9 @@ class AbstractMDP(nn.Module, gym.Env):
 
     def set_task_reward(self, task_reward):
         self._task_reward = task_reward
+
+    def set_init_state_sampler(self, init_state_sampler):
+        self.init_state_sampler = init_state_sampler
     
     def task_reward(self, z):
         return self._task_reward(z)
@@ -136,7 +158,7 @@ class AbstractMDP(nn.Module, gym.Env):
     @torch.no_grad()
     def initset(self, z):
         probs = self.initsets(z).sigmoid()
-        return  (probs > 0.5).float()
+        return  (probs > self.initset_thresh).float()
    
     
     def _transition(self, z, a):
@@ -316,6 +338,7 @@ class AbstractMDP(nn.Module, gym.Env):
             'initset_loss': initset_loss.mean(),
             'reward_loss': reward_loss.mean(),
             'tau_loss': tau_loss.mean(),
+            'rbuffer_len': len(self.data)
         }
 
         return loss, log_dict
@@ -509,7 +532,17 @@ class AbstractMDP(nn.Module, gym.Env):
         if ckpt_path is None:
             ckpt_path = f'{self.outdir}/checkpoints/{self.name}.ckpt'
         self.fabric.save(ckpt_path, self.get_model_state())
+    
+    # @staticmethod
+    # def load_checkpoint(self, ckpt_path, fabric=None):
+    #     if fabric is None:
+    #         fabric = L.Fabric()
 
+    #     loaded_ckpt = fabric.load(ckpt_path, {})
+    #     cfg = loaded_ckpt['cfg']
+
+
+        
 
     def freeze(self, modules=[]):
         '''
