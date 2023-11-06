@@ -84,10 +84,11 @@ class GroundedPFRLTrainer:
                     use_tensorboard=False,
                     eval_during_episode=False,
                     logger=None,
-                    discounted=False
+                    discounted=False,
+                    use_initset=True
                  ):
         
-        assert isinstance(agent, AbstractDDQNGrounded) # TODO create abstract class for these agents.
+        # assert isinstance(agent, AbstractDDQNGrounded) # TODO create abstract class for these agents.
         self.grounded_agent = agent # grounded agent
         self.agent = agent.agent # abstract agent
         self.env = env
@@ -105,7 +106,8 @@ class GroundedPFRLTrainer:
         self.step_hooks = step_hooks
         self.evaluation_hooks = evaluation_hooks
         self.save_best_so_far_agent = save_best_so_far_agent
-        self.eval_during_episode = eval_during_episode
+        self.eval_during_episode = eval_during_episode,
+        self.use_initset = use_initset
 
         self.logger = logger or logging.getLogger(__name__)
         # make pfrl evaluators
@@ -162,9 +164,11 @@ class GroundedPFRLTrainer:
             while t < steps_budget:
 
                 # a_t
-                initset_s = self.env.last_initset
-
-                action = self.agent.act(obs, initset_s)
+                if self.use_initset:
+                    initset_s = self.env.last_initset
+                    action = self.agent.act(obs, initset_s)
+                else:
+                    action = self.agent.act(obs)
 
                 # o_{t+1}, r_{t+1}
                 obs, r, done, info = self.env.step(action)
@@ -287,7 +291,9 @@ def train_agent_with_evaluation(
                                 task_reward,
                                 max_steps,
                                 config,
-                                init_state_sampler=None
+                                init_state_sampler=None,
+                                use_initset=True, 
+                                learning_reward=False
                             ):
     
     ## Boilerplate: set up logging, evaluator, and checkpointing 
@@ -313,6 +319,7 @@ def train_agent_with_evaluation(
                                             eval_envs={'ground': test_env},
                                             discounted=config.experiment.discounted,
                                             use_tensorboard=config.experiment.log_tensorboard,
+                                            use_initset=use_initset
                                         )
     world_model.set_outdir(world_model_outdir)
     world_model.setup_trainer(config)
@@ -332,6 +339,7 @@ def train_agent_with_evaluation(
     times_per_loop = deque(maxlen=10)
     tic = time.perf_counter()
     init_time = tic
+    train_agent_in_sim = not learning_reward
     for timestep in range(max_steps):
 
         ## rollout agent in ground environment
@@ -361,12 +369,16 @@ def train_agent_with_evaluation(
             episode_return = 0
             episode_count += 1
             world_model.end_episode(ground_log, step=timestep)
+        if learning_reward: 
+            train_agent_in_sim = timestep > world_model.warmup_steps
+            
 
         if timestep % train_every == 0:
             ## train world model for n gradient steps
             world_model.train_world_model(timestep=timestep)
             ## train agent
-            agent_trainer.train(steps_budget=config.planner.agent.rollout_len)
+            if train_agent_in_sim:
+                agent_trainer.train(steps_budget=config.planner.agent.rollout_len)
             
             ### timing
             toc = time.perf_counter()

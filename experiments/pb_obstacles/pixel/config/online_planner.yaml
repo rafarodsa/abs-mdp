@@ -49,7 +49,7 @@ world_model:
   optimizer:
     type: adam
     params:
-      lr: 1e-4
+      lr: 2e-4
   scheduler:
     type: 'linear_scheduler'
     params:

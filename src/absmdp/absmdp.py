@@ -28,7 +28,7 @@ from lightning.fabric.loggers import TensorBoardLogger
 from lightning.pytorch.loggers import CSVLogger
 import lightning as L
 from lightning.pytorch.utilities.model_summary import ModelSummary
-
+import matplotlib.pyplot as plt
 
 from omegaconf import OmegaConf as oc
 
@@ -79,6 +79,7 @@ class AbstractMDP(nn.Module, gym.Env):
             self.name = 'world_model'
         self.init_state_sampler = None
         self.initset_thresh = 0.5
+        self.device = 'cpu'
 
     def to(self, device):
         self.device = device
@@ -539,10 +540,7 @@ class AbstractMDP(nn.Module, gym.Env):
     #         fabric = L.Fabric()
 
     #     loaded_ckpt = fabric.load(ckpt_path, {})
-    #     cfg = loaded_ckpt['cfg']
-
-
-        
+    #     cfg = loaded_ckpt['cfg']        
 
     def freeze(self, modules=[]):
         '''
@@ -562,7 +560,7 @@ class AbstractMDPGoal(AbstractMDP):
         self.goal_class = build_model(goal_cfg)
         self.warmup_steps = goal_cfg.reward_warmup_steps
         self.timestep = 0
-        
+
 
     def setup_trainer(self, cfg=None, log=True):
         if self.fabric is None:
@@ -574,7 +572,7 @@ class AbstractMDPGoal(AbstractMDP):
 
     def configure_optimizers(self):
         super().configure_optimizers()
-        self.goal_optimizer = torch.optim.Adam(self.goal_class.parameters(), lr=self.lr)
+        self.goal_optimizer = torch.optim.Adam(self.goal_class.parameters(), lr=3e-4)
 
     def task_reward(self, z):
         if self.timestep < self.warmup_steps:
@@ -586,8 +584,8 @@ class AbstractMDPGoal(AbstractMDP):
         self.timestep = timestep
         self.goal_optimizer.zero_grad()
         loss = super().train_world_model(steps, timestep)
-        if self.timestep > self.warmup_steps:
-            self.goal_optimizer.step()
+        # if self.timestep > self.warmup_steps:
+        self.goal_optimizer.step()
         return loss
 
     def goal_training_loss(self, batch):
@@ -596,7 +594,7 @@ class AbstractMDPGoal(AbstractMDP):
         _mask = masks.bool()
         z_c = self.encoder(s)
         z = z_c + self.SMOOTHING_NOISE_STD * torch.randn_like(z_c)
-        _z, goal_reward = self._get_goal_reward(z, info, lengths, _mask)
+        _z, goal_reward = self._get_goal_reward_from_traj(z, info, lengths, _mask)
 
         if _z is not None and goal_reward is not None:
             goal_loss = self.goal_loss(_z, goal_reward)
@@ -635,9 +633,24 @@ class AbstractMDPGoal(AbstractMDP):
 
         initset_loss = self.initset_loss_from_executed(z, action, success, _mask)
 
-        _z, goal_reward = self._get_goal_reward(z, info, lengths, _mask)
-
+        # _z, goal_reward = self._get_goal_reward_from_traj(z, info, lengths, _mask)
+        s, goal_reward = self._get_task_reward_examples()
+        with torch.no_grad():
+            _z = self.encoder(s)
         goal_loss = self.goal_loss(_z, goal_reward) if _z is not None and goal_reward is not None else torch.tensor(0.)
+
+        if self.warmup_steps <= self.timestep <= self.warmup_steps+100:
+            samples, target = self.data.sample_task_reward(2000)
+            plt.figure()
+            plt.subplot(1,2,1)
+            plt.scatter(samples[:, 0], samples[:, 1], c=target, s=1)
+            plt.subplot(1,2,2)
+            with torch.no_grad():
+                _prediction, _ = self.task_reward(self.encoder(samples))
+            printarr(samples, _prediction)
+            plt.scatter(samples[:, 0], samples[:, 1], c=_prediction, s=1)
+            plt.savefig('predition_task_reward.png')
+            plt.close()
 
         loss =  self.hyperparams.grounding_const * grounding_loss.mean() + \
                 self.hyperparams.transition_const * transition_loss.mean() + \
@@ -662,15 +675,17 @@ class AbstractMDPGoal(AbstractMDP):
 
     def goal_loss(self, z, target):
         goal_pred = self.goal_class(z).squeeze(1)
-        n_pos = target.sum(-1, keepdim=True)
-        n_neg = target.shape[0] - n_pos
+        # print(goal_pred, target)
+        # n_pos = target.sum(-1, keepdim=True)
+        # n_neg = target.shape[0] - n_pos
         # if torch.any(n_neg==0):
         #     pos_weight = torch.where(n_pos > 0, n_neg / n_pos, 1.)
         # else:
         #     pos_weight = torch.tensor(1.)
-        pos_weight = torch.where(n_pos > 0, n_neg / n_pos, 1.)
+        # pos_weight = torch.where(n_pos > 0, n_neg / n_pos, 1.)
         try:
-            loss = F.binary_cross_entropy_with_logits(goal_pred, target, pos_weight=pos_weight)
+            # loss = F.binary_cross_entropy_with_logits(goal_pred, target, pos_weight=pos_weight)
+            loss = F.binary_cross_entropy_with_logits(goal_pred, target)
         except Exception as e:
             printarr(z, target, goal_pred)
         # accuracy
@@ -684,8 +699,14 @@ class AbstractMDPGoal(AbstractMDP):
         state =  super().get_model_state()
         state['goal_class'] = self.goal_class
         return state
+    
+    def preload_task_reward_samples(self, positive_samples, negative_samples):
+        for i in range(len(positive_samples)):
+            self.data.push_task_reward_sample(positive_samples[i], pos=True)
+        for i in range(len(negative_samples)):
+            self.data.push_task_reward_sample(negative_samples[i], pos=False)
 
-    def _get_goal_reward(self, z, info, lengths, mask):
+    def _get_goal_reward_from_traj(self, z, info, lengths, mask):
         goal_reached = []
         idx = []
 
@@ -706,6 +727,9 @@ class AbstractMDPGoal(AbstractMDP):
         device = f'cuda:{z.get_device()}' if z.get_device() >= 0 else 'cpu'
         goal_reward = torch.Tensor(goal_reached).to(device)
         return z[mask], goal_reward
+
+    def _get_task_reward_examples(self):
+        return  self.data.sample_task_reward(1024)
 
     @staticmethod
     def load_from_old_checkpoint(world_model_cfg=None, fabric=None):

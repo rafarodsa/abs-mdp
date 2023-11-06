@@ -24,6 +24,8 @@ class TrajectoryReplayBuffer:
         """
         self.capacity = capacity
         self.buffer = deque(maxlen=capacity)
+        self.task_reward_pos = deque(maxlen=capacity)
+        self.task_reward_neg = deque(maxlen=capacity)
         self.current_trajectory = []
         self.device = device
         self.data_device = device  # Keep track of which device the data is on
@@ -33,7 +35,8 @@ class TrajectoryReplayBuffer:
         Add a transition to the current trajectory.
         """
         self.current_trajectory.append([state, action, reward, next_state, duration, success, done, info])
-
+        if 'goal_reached' in info:
+            self.push_task_reward_sample(state, info['goal_reached'] > 0)
 
     def push(self, state, action, reward, next_state, duration, success, done, info):
         """
@@ -46,8 +49,20 @@ class TrajectoryReplayBuffer:
         duration = self._to_torch(duration)
         success = self._to_torch(success, dtype=torch.float32)
         done = self._to_torch(done, dtype=torch.float32)
+
+        if 'goal_reached' in info:
+            self.push_task_reward_sample(state, info['goal_reached'] > 0)
         
         self.current_trajectory.append([state, action, reward, next_state, duration, success, done, info])
+
+    def push_task_reward_sample(self, state, pos=True):
+        if not isinstance(state, torch.Tensor):
+            state = self._to_torch(state)
+        if pos:
+            self.task_reward_pos.append(state)
+        else:
+            self.task_reward_neg.append(state)
+
 
     def end_trajectory(self):
         """
@@ -103,6 +118,18 @@ class TrajectoryReplayBuffer:
 
         tensor_trajectories = [torch.stack(t).to(self.device) for t in zip(*tensor_trajectories)]
         return tensor_trajectories, infos
+    
+    def sample_task_reward(self, batch_size):
+        pos_samples_idx = np.random.choice(len(self.task_reward_pos), batch_size // 2)
+        neg_samples_idx = np.random.choice(len(self.task_reward_neg), batch_size - len(pos_samples_idx))
+
+        pos_samples = [self.task_reward_pos[pos_samples_idx[i]]for i in range(len(pos_samples_idx))]
+        neg_samples = [self.task_reward_neg[neg_samples_idx[i]] for i in range(len(neg_samples_idx))]
+        samples = pos_samples + neg_samples
+        labels = torch.zeros(batch_size)
+        labels[:len(pos_samples)] = 1.
+        return torch.stack(samples).to(self.device), labels.to(self.device)
+
 
     def _pad_sequence(self, sequence, max_length, dtype=torch.float32):
         """Pad the sequence with zeros to match max_length."""

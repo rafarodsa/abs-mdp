@@ -91,12 +91,53 @@ def goal_fn(phi, goal, goal_tol=0.01):
     return _goal
 
 
+def sample_points_in_circle(r, n):
+    # Choose n radii between 0 and r
+    s = r * np.sqrt(np.random.rand(n))
+    # Choose n angles between 0 and 2*pi
+    theta = 2 * np.pi * np.random.rand(n)
+    # Convert polar coordinates to Cartesian coordinates
+    x = s * np.cos(theta)
+    y = s * np.sin(theta)
+    return np.column_stack((x, y))
 
-def gaussian_ball_goal_fn(phi, goal, goal_tol, n_samples=10000, device='cpu', envname='antmaze-umaze-v2'):        
-    goal = np.array(goal).astype(np.float32)
-    samples = np.random.randn(n_samples, 2) * goal_tol + goal[None]
+
+def test_task_reward(goal, phi, abstract_reward_fn, dataset, n_samples=50000):
+    import matplotlib.pyplot as plt
+    # import ipdb; ipdb.set_trace()
+    samples = sample_points_in_circle(GOAL_TOL * 10, n_samples) + goal[None]
     samples = samples.astype(np.float32)
+    __samples = samples
+    samples = torch.from_numpy(samples)
+    
 
+    states = [s[0] for i in range(len(dataset)) for s in dataset.trajectories[i]]
+    states = np.array(states).astype(np.float32)
+    
+    # sample 
+    sample = np.random.choice(len(states), n_samples)
+    samples = np.array([np.concatenate((samples[i], states[sample[i]][2:])) for i in range(n_samples)]).astype(np.float32)
+
+    real_goal = (((__samples[..., :2]-goal[None]) ** 2).sum(-1) < GOAL_TOL ** 2).astype(np.float32)
+    with torch.no_grad():
+        encoded_samples = phi(torch.from_numpy(samples))
+
+    abstract_goal = np.array([abstract_reward_fn(encoded_samples[i]) for i in range(n_samples)])
+    printarr(abstract_goal, real_goal)
+    plt.figure()
+    plt.subplot(1, 2, 1)
+    plt.scatter(samples[:, 0], samples[:, 1], c=abstract_goal, s=3)
+    plt.subplot(1, 2, 2)
+    plt.scatter(samples[:, 0], samples[:, 1], c=real_goal, s=3)
+    # plt.colorbar()
+    plt.savefig('task_reward.png')
+
+
+def gaussian_ball_goal_fn(phi, goal, goal_tol, n_samples=10000, device='cpu', envname='antmaze-umaze-v2', abstract_tol=0.1):        
+    goal = np.array(goal).astype(np.float32)
+    samples = sample_points_in_circle(GOAL_TOL, n_samples) + goal[None]
+    samples = samples.astype(np.float32)
+    real_goal = goal
     
     # load sample datasets
     dataset = PinballDatasetTrajectory_(DATA_PATH[envname], length=64)
@@ -150,9 +191,19 @@ def gaussian_ball_goal_fn(phi, goal, goal_tol, n_samples=10000, device='cpu', en
     encoded_tol = torch.sqrt(((encoded_goal.mean(0, keepdims=True)-encoded_samples) ** 2).sum(-1).mean(0, keepdims=True))
     print(encoded_tol)
     def __goal(z):
+        assert z.shape[-1] == encoded_samples.shape[-1]
+        if len(z.shape) == 1:
+            z = z.unsqueeze(0)
         distances = (encoded_samples-z).pow(2).sum(-1)
-        min_distance = distances.min()
-        return min_distance < -0.1 * np.log(0.01)
+        # printarr(distances, encoded_samples, z)
+        min_distance = distances.min().sqrt()
+        std = 0.1
+        ci=abstract_tol
+        return min_distance <= ci * std
+        # return min_distance / 0.1**2 <= -(np.log(0.9) + 0.5 * np.log(2 * np.pi) + np.log(0.1))
+        # return min_distance / (0.1 ** 2) < 3 ** 2
+
+    test_task_reward(real_goal, phi, __goal, dataset)
 
     return __goal
     

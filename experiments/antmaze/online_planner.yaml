@@ -50,7 +50,7 @@ world_model:
       hidden_dims: [256, 256]
       activation: silu
       output_dim: 1
-      input_dim: 16
+      input_dim: 8
       reward_warmup_steps: 5000
     
 
@@ -87,6 +87,7 @@ planner:
     reward_scale: 0. #0.00016666666666666666
     gamma: 0.995
     goal: 4
+    abstract_goal_tol: 0.1
     envname: 'antmaze-umaze-v2'
 
   agent:
@@ -112,3 +113,9 @@ planner:
     output_dim: ${world_model.model.n_options}
 
 
+  q_func_rainbow:
+    type: 'mlp'
+    n_actions: 8
+    hidden_dims: [256, 256]
+    activation: relu
+    output_dim: 1024

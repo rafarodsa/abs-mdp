@@ -364,7 +364,7 @@ def get_curves(args):
     elif len(args.x_offset) <= len(args.base_dirs):
         args.x_offset = args.x_offset + [0] * (len(args.base_dirs) - len(args.x_offset)) # pad with zeros
     
-    if len(args.window_size) <= len(args.base_dirs):
+    if len(args.window_size) < len(args.base_dirs):
         args.window_size = args.window_size + [1] * (len(args.base_dirs) - len(args.window_size))
         
 
@@ -376,6 +376,7 @@ def get_curves(args):
     for i, base_dir in enumerate(args.base_dirs):
         offsets = []
         curve_names = []
+        print(f'Window size {args.window_size[i]}')
         for evaluator_dir in args.evaluator_dirs:
             csv_fn = partial(gather_evaluator_csv_files_from_base_dir, evaluator_dir=evaluator_dir, file_name=args.log_file, filter_fn=filter_fn)
             curves = generate_learning_curves(

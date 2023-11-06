@@ -116,13 +116,61 @@ def ground_state_sampler(g_sampler, grounding_function, n_samples=1000, device='
         return s
     return __sample
 
+def sample_points_in_circle(r, n):
+    # Choose n radii between 0 and r
+    s = r * np.sqrt(np.random.rand(n))
+    # Choose n angles between 0 and 2*pi
+    theta = 2 * np.pi * np.random.rand(n)
+    # Convert polar coordinates to Cartesian coordinates
+    x = s * np.cos(theta)
+    y = s * np.sin(theta)
+    return np.column_stack((x, y))
 
 
-def gaussian_ball_goal_fn(phi, goal, goal_tol, n_samples=100, device='cpu', env=None):        
+def test_task_reward(goal, goal_tol, phi, abstract_reward_fn, env, device, n_samples=10000):
+    import matplotlib.pyplot as plt
+    samples_obs = []
+    samples_s = []
+    for _ in range(n_samples):
+        obs = env.reset()
+        s = env.pinball.get_state()
+        samples_obs.append(obs)
+        samples_s.append(s)
+    samples_obs = np.stack(samples_obs).astype(np.float32)
+    samples_s = np.stack(samples_s).astype(np.float32)
+
+    
+    with torch.no_grad():
+        encoded_samples = phi(torch.from_numpy(samples_obs)).to(device)
+
+    real_goal = ((samples_s[:, :2] - np.array(goal)[:2]) ** 2).sum(-1) < GOAL_TOL **2 
+
+    abstract_goal = np.array([abstract_reward_fn(encoded_samples[i]).cpu().numpy() for i in range(n_samples)])
+
+
+    tpr = (real_goal * abstract_goal).sum() / real_goal.sum()
+    tnr = ((1-real_goal) * (1-abstract_goal)).sum() / (1-real_goal).sum()
+    acc = (real_goal == abstract_goal).mean()
+    print(f'TPR: {tpr}. TNR: {tnr}, ACC: {acc}')
+
+    printarr(abstract_goal, real_goal, samples_s, real_goal, abstract_goal)
+    plt.figure()
+    plt.subplot(1, 2, 1)
+    plt.scatter(samples_s[:, 0], samples_s[:, 1], c=abstract_goal, s=1)
+    plt.title('Abstract Goal')
+    plt.subplot(1, 2, 2)
+    plt.scatter(samples_s[:, 0], samples_s[:, 1], c=real_goal.astype(np.float32), s=1)
+    plt.title('Real Goal')
+    plt.savefig('task_reward.png')
+
+
+
+def gaussian_ball_goal_fn(phi, goal, goal_tol, n_samples=1000, device='cpu', env=None):        
     goal = np.array(goal).astype(np.float32)
-    samples = np.random.randn(n_samples, 4) * goal_tol + goal[None]
+    samples = np.concatenate([sample_points_in_circle(goal_tol, n_samples), np.random.rand(n_samples, 2)-0.5], axis=-1) + goal[None]
     samples = samples.astype(np.float32)
     printarr(goal,  samples)
+    _g = goal
     if env is not None:
         goal = env.reset(goal)
         samples = np.array([env.reset(samples[i]) for i in range(n_samples)])
@@ -135,10 +183,11 @@ def gaussian_ball_goal_fn(phi, goal, goal_tol, n_samples=100, device='cpu', env=
     encoded_tol, encoded_goal = encoded_tol.to(device), encoded_goal.to(device)
     def __goal(z):
         _d = (((z-encoded_goal)/encoded_tol) ** 2).sum(-1)
-        return torch.exp(-_d) > 0.3
-    return __goal
-    
+        return torch.exp(-_d) > 0.22
 
+    
+    test_task_reward(_g, goal_tol, phi, __goal, env, device)
+    return __goal
 
 def ground_action_mask(state, options, device):
     # print('Warning: Computing ground action mask')

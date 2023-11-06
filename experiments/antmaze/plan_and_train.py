@@ -11,13 +11,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
+from pfrl import explorers
 
 from omegaconf import OmegaConf as oc
-from experiments.antmaze.plan import make_ground_env, parse_oc_args, gaussian_ball_goal_fn, GOALS, GOAL_TOL
+from experiments.antmaze.plan import make_ground_env, parse_oc_args, gaussian_ball_goal_fn, GOALS, GOAL_TOL, DATA_PATH
 from src.absmdp.absmdp import AbstractMDPGoal, AbstractMDP
 from src.models import ModuleFactory
 from src.agents.abstract_ddqn import AbstractDDQNGrounded, AbstractDoubleDQN, AbstractLinearDecayEpsilonGreedy
-
+from src.agents.rainbow import Rainbow, AbstractRainbow
+from src.absmdp.datasets_traj import PinballDatasetTrajectory_
 import pfrl
 from pfrl.q_functions import DiscreteActionValueHead
 from pfrl import replay_buffers, utils
@@ -87,6 +89,62 @@ def make_ddqn_agent(agent_cfg, experiment_cfg, world_model):
 
     return agent, grounded_agent
 
+
+def make_rainbow_agent(agent_cfg, experiment_cfg, world_model):
+    agent_cfg.q_func_rainbow.input_dim = world_model.latent_dim
+    q_func = ModuleFactory.build(agent_cfg.q_func_rainbow)
+
+    training_steps = experiment_cfg.steps // experiment_cfg.train_every
+    agent_total_steps = agent_cfg.agent.rollout_len * training_steps
+
+    betasteps = agent_total_steps / agent_cfg.agent.update_interval
+
+
+    explorer = explorers.LinearDecayEpsilonGreedy(
+            1.0,
+            agent_cfg.agent.final_epsilon,
+            agent_total_steps * agent_cfg.agent.final_exploration_steps,
+            lambda: np.random.choice(agent_cfg.q_func.n_actions)
+    )
+
+    agent = Rainbow(
+        q_func, # TODO change config for this
+        n_actions=agent_cfg.q_func.n_actions,
+        betasteps=betasteps,
+        lr=agent_cfg.agent.lr,
+        n_steps=agent_cfg.agent.num_step_return,
+        replay_start_size=agent_cfg.agent.replay_start_size,
+        target_update_interval=agent_cfg.agent.update_interval,
+        gamma=agent_cfg.env.gamma,
+        gpu=experiment_cfg.gpu,
+        update_interval=agent_cfg.agent.update_interval,
+        explorer=explorer
+    )
+    device = f'cuda:{experiment_cfg.gpu}' if experiment_cfg.gpu >= 0 else 'cpu'
+
+    grounded_agent = AbstractRainbow(agent=agent, encoder=world_model.encoder, action_mask=world_model.initset, device=device)
+
+    return agent, grounded_agent
+
+def get_goal_examples(goal, n_samples=10000, device='cpu', envname='antmaze-umaze-v2', abstract_tol=0.1):        
+    goal = np.array(goal).astype(np.float32)
+
+    
+    # load sample datasets
+    dataset = PinballDatasetTrajectory_(DATA_PATH[envname], length=64)
+
+    states = [s[0] for i in range(len(dataset)) for s in dataset.trajectories[i]]
+    states = np.array(states).astype(np.float32)
+
+    distances = ((states[..., :2] - goal) ** 2).sum(-1) < GOAL_TOL ** 2
+
+    #plot to test
+    import matplotlib.pyplot as plt
+    plt.scatter(states[:, 0], states[:, 1], c=distances)
+    plt.savefig('samples_goal.png')
+    return states[distances], states[~distances]
+
+    
 def main():
     # parse arguments
     parser = argparse.ArgumentParser()
@@ -94,6 +152,7 @@ def main():
     parser.add_argument('--exp-id', type=str, default=None)
     parser.add_argument('--learn-task-reward', action='store_true')
     parser.add_argument('--no-initset', action='store_true')
+    parser.add_argument('--agent', type=str, default='ddqn', choices=['rainbow', 'ddqn'])
     
     args, unknown = parser.parse_known_args()
     cli_args = parse_oc_args(unknown)
@@ -136,6 +195,7 @@ def main():
 
     mdp_constructor = AbstractMDPGoal if args.learn_task_reward else AbstractMDP
 
+
     if world_model_cfg.ckpt is not None:
         print(f'Loading world model from checkpoint at {world_model_cfg.ckpt}')
         world_model = mdp_constructor.load_from_old_checkpoint(world_model_cfg=world_model_cfg)
@@ -144,23 +204,36 @@ def main():
     
     # make task_reward_funcion
     goal = GOALS[agent_cfg.env.envname][agent_cfg.env.goal]
+    if args.learn_task_reward:
+        pos_samples, neg_samples = get_goal_examples(goal, n_samples=5000)
+        world_model.preload_task_reward_samples(pos_samples, neg_samples)
 
-    def make_task_reward(envname):
-        goal_fn = gaussian_ball_goal_fn(world_model.encoder, goal, goal_tol=GOAL_TOL, device=device, envname=agent_cfg.env.envname)
+
+    def make_task_reward(envname, abstract_goal_tol):
+        goal_fn = gaussian_ball_goal_fn(world_model.encoder, goal, goal_tol=GOAL_TOL, device=device, envname=agent_cfg.env.envname, abstract_tol=abstract_goal_tol)
         def __r(s):
             r = goal_fn(s)
             return r, r > 0
         return __r
 
-    task_reward = make_task_reward(agent_cfg.env.envname)
+    task_reward = make_task_reward(agent_cfg.env.envname, agent_cfg.env.abstract_goal_tol)
     # world_model.set_task_reward(task_reward)
 
     world_model.freeze(world_model_cfg.fixed_modules)
 
     # make grounded agent
-    agent, grounded_agent = make_ddqn_agent(agent_cfg, experiment_cfg=cfg.experiment, world_model=world_model)
-
+    use_initset = True
+    if args.agent == 'rainbow':
+        agent, grounded_agent = make_rainbow_agent(agent_cfg, experiment_cfg=cfg.experiment, world_model=world_model)
+        use_initset = False
+        # world_model.set_no_initset()
+    elif args.agent == 'ddqn':
+        agent, grounded_agent = make_ddqn_agent(agent_cfg, experiment_cfg=cfg.experiment, world_model=world_model)
+    else:
+        raise ValueError(f'Agent {args.agent} not implemented')
+    
     if args.no_initset:
+        use_initset = False
         world_model.set_no_initset()
 
     # train agent
@@ -171,7 +244,9 @@ def main():
                                 world_model, 
                                 task_reward,
                                 max_steps=cfg.experiment.steps,
-                                config=cfg
+                                config=cfg,
+                                use_initset=use_initset,
+                                learning_reward=args.learn_task_reward
                             )
 
 if __name__ == '__main__':

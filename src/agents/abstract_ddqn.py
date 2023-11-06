@@ -65,7 +65,7 @@ def batch_experiences(experiences, device, phi, gamma, batch_states=batch_states
         ),
         "reward": torch.as_tensor(
             [
-                sum((gamma ** i) * exp[i]["reward"] for i in range(len(exp)))
+                sum((gamma ** (exp[i-1]['tau']*(float(i>0)))) * exp[i]["reward"] for i in range(len(exp)))
                 for exp in experiences
             ],
             dtype=torch.float32,
@@ -83,7 +83,7 @@ def batch_experiences(experiences, device, phi, gamma, batch_states=batch_states
             device=device,
         ),
         "discount": torch.as_tensor(
-            [(gamma ** elem[0]['tau']) for elem in experiences],
+            [gamma ** sum([exp[i]['tau'] for i in range(len(exp))]) for exp in experiences],
             dtype=torch.float32,
             device=device,
         ),
@@ -91,7 +91,7 @@ def batch_experiences(experiences, device, phi, gamma, batch_states=batch_states
             [elem[0]["initset_s"] for elem in experiences], device=device
         ),
         "initset_next_s": batch_initset(
-            [elem[0]["initset_next_s"] for elem in experiences], device=device
+            [elem[-1]["initset_next_s"] for elem in experiences], device=device
         )
 
     }
@@ -345,7 +345,6 @@ class AbstractDDQNGrounded(pfrl.agent.Agent):
     def act(self, obs, initset=None):
         with torch.no_grad():
             z = self.encoder(torch.from_numpy(obs).to(self.device))
-            # initset = self.action_mask(z) if initset is None and self.action_mask is not None else initset
         action = self.agent.act(z, initset)
         return action
     
@@ -365,33 +364,3 @@ class AbstractDDQNGrounded(pfrl.agent.Agent):
     
     def getattr(self, name):
         return getattr(self.agent, name)
-    
-# class GroundedHierarchicalAgent(pfrl.Agent):
-#     def __init__(self, agent, encoder, initset_fn):
-#         self.agent = agent
-#         self._encoder = encoder
-#         self._initset_fn = initset_fn
-    
-#     def act(self, obs):
-#         z = self.encoder(obs)
-#         return self.agent.act(z)
-    
-#     def observe(self, obs, reward, done, reset, info):
-#         z = self.encoder(obs)
-#         self.agent.observe(z, reward, done, reset, info)
-
-#     @property
-#     def encoder(self):
-#         return self._encoder
-    
-#     @property
-#     def initset_fn(self):
-#         return self._initset_fn
-
-#     @encoder.setter
-#     def encoder(self, encoder):
-#         self._encoder = encoder
-    
-#     @initset_fn.setter
-#     def initset_fn(self, initset_fn):
-#         self._initset_fn = initset_fn
