@@ -88,7 +88,7 @@ planner:
     gamma: 0.995
     goal: 4
     abstract_goal_tol: 0.1
-    envname: 'antmaze-umaze-v2'
+    envname: 'antmaze-medium-play-v2'
 
   agent:
     load: null
