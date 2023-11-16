@@ -1,5 +1,6 @@
 import tensorflow as tf
 from tensorflow.keras import mixed_precision as prec
+import numpy as np
 
 from dreamerv2 import common
 from dreamerv2 import expl
@@ -79,7 +80,8 @@ class Agent(common.Module):
 
 
 class WorldModel(common.Module):
-
+  SMOOTHING_NOISE_STD = 0.2
+  
   def __init__(self, config, obs_space, tfstep):
     shapes = {k: tuple(v.shape) for k, v in obs_space.items()}
     self.config = config
@@ -101,17 +103,42 @@ class WorldModel(common.Module):
     modules = [self.encoder, self.rssm, *self.heads.values()]
     metrics.update(self.model_opt(model_tape, model_loss, modules))
     return state, outputs, metrics
+  
+
+  def grounding_loss(self, post):
+    # use embedding or h_t instead? or feats (??)
+    pass
+
+  def tpc_loss(self, prior, post):
+    transition_dist = self.rssm.get_dist(prior) # batch x len x k
+    next_z = post['stoch'] # batch x len x k
+    logprob = transition_dist.log_prob(next_z[tf.newaxis]) # batch_size x distr_batch_size x len 
+    diag  = tf.transpose(tf.linalg.diag_part(logprob)) #len x batch_size
+    loss = diag - (tf.math.reduce_logsumexp(logprob, axis=1) - np.log(next_z.shape[1])) # batch_size x len
+    return tf.reduce_mean(tf.reduce_sum(loss, axis=-1))
+
+  def transition_loss(self, prior, post):
+    transition_dist = self.rssm.get_dist(prior)
+    return -transition_dist.log_prob(post['stoch'])
+  
 
   def loss(self, data, state=None):
     data = self.preprocess(data)
     embed = self.encoder(data)
     post, prior = self.rssm.observe(
         embed, data['action'], data['is_first'], state)
-    kl_loss, kl_value = self.rssm.kl_loss(post, prior, **self.config.kl)
-    assert len(kl_loss.shape) == 0
+    
+    # prior is the T(z'| h, a) and post is q(z'| x', h)
+    # deter is the recurrent state and stoch is the sample z state.
+    transition_loss = self.transition_loss(prior, post)
+    tpc_loss = self.tpc_loss(prior, post)
+    grounding_loss = self.grounding_loss(post)
+
+    assert len(transition_loss.shape) == 0 and  len(grounding_loss.shape) == 0 and  len(tpc_loss.shape) == 0
     likes = {}
-    losses = {'kl': kl_loss}
+    losses = {'grounding': grounding_loss, 'tpc': tpc_loss, 'transition': transition_loss}
     feat = self.rssm.get_feat(post)
+
     for name, head in self.heads.items():
       grad_head = (name in self.config.grad_heads)
       inp = feat if grad_head else tf.stop_gradient(feat)
@@ -125,9 +152,8 @@ class WorldModel(common.Module):
         self.config.loss_scales.get(k, 1.0) * v for k, v in losses.items())
     outs = dict(
         embed=embed, feat=feat, post=post,
-        prior=prior, likes=likes, kl=kl_value)
+        prior=prior, likes=likes)
     metrics = {f'{name}_loss': value for name, value in losses.items()}
-    metrics['model_kl'] = kl_value.mean()
     metrics['prior_ent'] = self.rssm.get_dist(prior).entropy().mean()
     metrics['post_ent'] = self.rssm.get_dist(post).entropy().mean()
     last_state = {k: v[:, -1] for k, v in post.items()}
