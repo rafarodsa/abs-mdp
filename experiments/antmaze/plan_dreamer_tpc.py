@@ -54,7 +54,9 @@ sys.path.append(str(pathlib.Path(__file__).parent.parent))
 import numpy as np
 import ruamel.yaml as yaml
 
-from dreamerv2 import agent
+import src.agents.dreamer as agent
+
+from src.agents.dreamer import GymWrapperOptions as GymWrapper
 from dreamerv2 import common
 
 def random_selection_initset(initset_s):
@@ -69,7 +71,6 @@ def random_selection_initset(initset_s):
 def get_goal_examples(goal, n_samples=10000, device='cpu', envname='antmaze-umaze-v2', abstract_tol=0.1):        
     goal = np.array(goal).astype(np.float32)
 
-    
     # load sample datasets
     dataset = PinballDatasetTrajectory_(DATA_PATH[envname], length=64)
 
@@ -85,10 +86,7 @@ def get_goal_examples(goal, n_samples=10000, device='cpu', envname='antmaze-umaz
     return states[distances], states[~distances]
 
 
-
 def train_dreamer(train_env, eval_env, config, pretrain_path=None, model_pretraining=False):
-
-
     # configs = yaml.safe_load((
     #     pathlib.Path(sys.argv[0]).parent / 'configs.yaml').read_text())
     # parsed, remaining = common.Flags(configs=['defaults']).parse(known_only=True)
@@ -135,7 +133,7 @@ def train_dreamer(train_env, eval_env, config, pretrain_path=None, model_pretrai
 
     def make_env(mode):
         env = train_env if mode == 'train' else eval_env
-        env = common.GymWrapper(env, obs_key='joints')
+        env = GymWrapper(env, obs_key='joints')
         if hasattr(env.act_space['action'], 'n'):
             env = common.OneHotAction(env)
         else:
@@ -292,37 +290,36 @@ def main():
 
 
     # train_env = GymWrapper(train_env, obs_key='joints', act_key='direction')
-    import dreamerv2.api as dv2
     discrete = False
-    config, unknown = dv2.defaults.update({
+    configs = yaml.safe_load((
+        pathlib.Path('/users/rrodri19/abs-mdp/src/agents') / 'configs.yaml').read_text())
+    config = common.Config(configs['defaults'])
+    config, unknown = config.update({
         'logdir': f'exp_results/dreamer/{agent_cfg.env.envname}_{args.exp_id}',
         'log_every': 1e3,
         'train_every': 10,
         'actor_ent': 3e-3,
         'loss_scales.kl': 1.0,
-        'discount': 0.99,
+        'discount': 0.9995,
         'encoder.mlp_keys': '.*',
         'encoder.cnn_keys': '$^',
-        'decoder.mlp_keys': '.*',
-        'decoder.cnn_keys': '$^',
         'replay.minlen': 1,
         'steps': 1e6,
         'prefill': 512 * 64,
         'pretrain': 20000,
-        'model_opt.lr': 1e-4,
-        'actor_opt.lr': 1e-5,
-        'critic_opt.lr': 1e-5,
+        'model_opt.lr': 3e-4,
+        'actor_opt.lr': 1e-4,
+        'critic_opt.lr': 1e-4,
         'kl.free': 1.0,
         'rssm': {'hidden': 200, 'deter': 200, 'discrete': discrete},
         'reward_head': {'dist': 'binary'},
-        'clip_rewards': 'identity',
         'eval_every': 1e4,
         'time_limit': 100,
-        'eval_eps': 10
+        'eval_eps': 10,
+        'clip_rewards': 'identity'
     }).parse_flags(known_only=True)
 
     pretrain_path = pathlib.Path(args.model_path).expanduser() if args.model_path != "none" else None
-    # print(args.pretrain_path)
     train_dreamer(train_env, test_env, config, pretrain_path=pretrain_path, model_pretraining=args.model_pretraining)
 
 if __name__ == '__main__':

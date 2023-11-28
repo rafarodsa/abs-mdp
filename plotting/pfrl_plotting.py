@@ -460,6 +460,7 @@ def plot_subplots(args):
 
     print_best_scores(curves)
 
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('script', type=str, choices=['compare', 'multiple_level', 'subplot'], default='compare')
