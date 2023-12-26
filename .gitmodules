@@ -1,3 +1,6 @@
 [submodule "dreamerv2"]
 	path = dreamerv2
 	url = https://github.com/rafarodsa/dreamerv2.git
+[submodule "dreamerv3"]
+	path = dreamerv3
+	url = https://github.com/rafarodsa/dreamerv3.git

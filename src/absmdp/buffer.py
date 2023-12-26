@@ -120,13 +120,16 @@ class TrajectoryReplayBuffer:
         return tensor_trajectories, infos
     
     def sample_task_reward(self, batch_size):
-        pos_samples_idx = np.random.choice(len(self.task_reward_pos), batch_size // 2)
-        neg_samples_idx = np.random.choice(len(self.task_reward_neg), batch_size - len(pos_samples_idx))
-
-        pos_samples = [self.task_reward_pos[pos_samples_idx[i]]for i in range(len(pos_samples_idx))]
-        neg_samples = [self.task_reward_neg[neg_samples_idx[i]] for i in range(len(neg_samples_idx))]
+        pos_samples = []
+        neg_samples = []
+        if len(self.task_reward_pos) > 0:
+            pos_samples_idx = np.random.choice(len(self.task_reward_pos), batch_size // 2)
+            pos_samples = [self.task_reward_pos[pos_samples_idx[i]]for i in range(len(pos_samples_idx))]
+        if len(self.task_reward_neg) > 0:
+            neg_samples_idx = np.random.choice(len(self.task_reward_neg), batch_size // 2)
+            neg_samples = [self.task_reward_neg[neg_samples_idx[i]] for i in range(len(neg_samples_idx))]
         samples = pos_samples + neg_samples
-        labels = torch.zeros(batch_size)
+        labels = torch.zeros(len(samples))
         labels[:len(pos_samples)] = 1.
         return torch.stack(samples).to(self.device), labels.to(self.device)
 
