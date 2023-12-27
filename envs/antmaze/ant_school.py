@@ -17,10 +17,10 @@ from scipy.spatial.transform import Rotation as rot
 
 
 class Walk(composer.Task):
-    def __init__(self, walker, desired_vel=1., desired_distance=1, freq=50):
+    def __init__(self, walker, arena, desired_vel=1., desired_distance=1, freq=50):
         self._walker = walker
         self._desired_displacement = desired_distance
-        self._arena = Floor()
+        self._arena = arena
         self._arena.add_free_entity(self._walker)
         self._arena.mjcf_model.worldbody.add('light', pos=(0, 0, 4))
         self._prev_vel = 0.
@@ -79,10 +79,54 @@ class Walk(composer.Task):
     def initialize_episode_mjcf(self, random_state):
         self._mjcf_variator.apply_variations(random_state)
 
+class WalkDistance(Walk):
+    def get_reward(self, physics):
+        vel = self._walker.observables.sensors_velocimeter(physics)
+        forward_velocity = vel[0]
+        
+        pos = np.array(self._walker.get_pose(physics)[0][:2])
+        position_penalty = -0.5 * ((pos-self.target_position) ** 2).sum()
+
+        forward_vel_penalty = -0.1 * (0. - forward_velocity) ** 2
+
+        tilt_penalty = -0.05 * (self._walker.observables.gyro_backward_roll(physics))**2
+        rotation_penalty = -0.05 * (self._walker.observables.gyro_anticlockwise_spin(physics))**2
+        lateral_vel_penalty = -0.05 * (abs(vel[1]) + abs(vel[2])) ** 2
+
+        return  tilt_penalty + lateral_vel_penalty + forward_vel_penalty + rotation_penalty + position_penalty
+
+    def initialize_episode(self, physics, random_state):
+        # import ipdb; ipdb.set_trace()
+        self._walker.initialize_episode(physics, random_state)
+        vel_dir =  random_state.uniform(0., 1., (2,))
+        vel_dir = vel_dir / np.linalg.norm(vel_dir)
+        physics.named.data.qvel[:2] = random_state.uniform(0, 2) * vel_dir
+
+
+        n_joints = 4 ## TODO this is only for ant
+        offset = 7
+        for i in range(n_joints):
+            leg_angle = np.array([0., random_state.uniform(0., 0.3490)])
+            physics.named.data.qpos[i*2+offset:i*2+offset+2] = leg_angle
+        u3 = random_state.uniform(-np.pi, np.pi)
+        quat = np.array([np.cos(u3/2),
+                         0.,
+                         0.,
+                         np.sin(u3/2)])
+
+        physics.named.data.qpos[3:7] = quat
+        initial_position = np.array(self._walker.get_pose(physics)[0])
+        self.target_position = initial_position[:2] + self._desired_displacement * np.array([np.cos(u3), np.sin(u3)])
+
+        self._prev_vel = 0.
+        self._total_displacement = 0.
+
+
+
 class Rotate(composer.Task):
-    def __init__(self, walker, desired_angle=10, freq=50):
+    def __init__(self, walker, arena, desired_angle=10, freq=50):
         self._walker = walker
-        self._arena = Floor()
+        self._arena = arena
         self._arena.add_free_entity(self._walker)
         self._arena.mjcf_model.worldbody.add('light', pos=(0, 0, 4))
         self._prev_vel = 0.
@@ -113,7 +157,7 @@ class Rotate(composer.Task):
         R = R.reshape(3,3)
         yaw = np.arctan2(R[1, 0], R[0, 0])
 
-        set_point = -0.1 * (yaw - (np.mod(self._init_angle + self._desired_angle, 2*np.pi)-np.pi)) ** 2
+        set_point = -0.1 * (np.mod(yaw, 2*np.pi) - self.target_angle) ** 2
         vel = self._walker.observables.sensors_velocimeter(physics)
         vel_penalty = -0.01 * (vel ** 2).sum()
         rot_direction = -0.1 * (np.sign(self._walker.observables.gyro_anticlockwise_spin(physics)) - np.sign(self._desired_angle)) ** 2
@@ -146,10 +190,10 @@ class Rotate(composer.Task):
         self._total_displacement = 0.
         self._episode_started = False
         self._init_angle = u3
+        self.target_angle = np.mod(self._init_angle + self._desired_angle, 2*np.pi)
 
     def get_metrics(self):
-        target_angle = np.mod(self._init_angle + self._desired_angle, 2*np.pi)-np.pi
-        return dict(target_angle=target_angle)
+        return dict(target_angle=np.array([self.target_angle]))
 
     def initialize_episode_mjcf(self, random_state):
         self._mjcf_variator.apply_variations(random_state)
@@ -176,12 +220,15 @@ class EgocentricMazeSchool(LocoNav):
             camera = self.DEFAULT_CAMERAS.get(walker, 0)
         self._walker = self._make_walker(walker)
         self._task = task
+        arena = self._make_arena('empty')
         if task == 'walkforward':
-            task = Walk(walker=self._walker, freq=freq)
+            task = Walk(walker=self._walker, arena=arena, freq=freq)
+        elif task == 'walkdistance':
+            task = WalkDistance(walker=self._walker, arena=arena, freq=freq)
         elif task == 'rotatecw':
-            task = Rotate(walker=self._walker, desired_angle=0.25, freq=freq)
+            task = Rotate(walker=self._walker, arena=arena, desired_angle=0.39, freq=freq)
         elif task == 'rotateccw':
-            task = Rotate(walker=self._walker, desired_angle=-0.25, freq=freq)
+            task = Rotate(walker=self._walker, arena=arena, desired_angle=-0.39, freq=freq)
         else:
             raise ValueError(f'{task} not implemented')
         self.task = task
@@ -205,20 +252,20 @@ class EgocentricMazeSchool(LocoNav):
         yaw = np.arctan2(R[1, 0], R[0, 0])
         yaw_vel = np.array(self._walker.observables.gyro_anticlockwise_spin(physics))
         obs = dict(log_vel=vel, log_yaw=yaw, log_yaw_vel=yaw_vel)
-        obs.update(**self.task.get_metrics())
+        # obs.update(**self.task.get_metrics())
         # from jax.tree_util import tree_map
         # print(tree_map(lambda x: type(x), obs))
         return obs
     
     
-    @property
-    def obs_space(self):
-        if self._task == 'walkforward':
-            return super().obs_space
-        return {
-            **super().obs_space,
-            'target_angle': director.embodied.Space(np.float32, low=-np.pi, high=np.pi),
-        }
+    # @property
+    # def obs_space(self):
+    #     if self._task == 'walkforward':
+    #         return super().obs_space
+    #     return {
+    #         **super().obs_space,
+    #         'target_angle': director.embodied.Space(np.float32, shape=(1,), low=-np.pi, high=np.pi),
+    #     }
 
 
 if __name__=='__main__':
