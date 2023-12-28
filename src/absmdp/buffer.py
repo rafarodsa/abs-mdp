@@ -3,6 +3,10 @@ from collections import deque
 import torch
 from dataclasses import dataclass
 from src.utils import printarr
+
+from jax.tree_util import tree_map
+import copy
+
 @dataclass
 class Transition:
     state: any
@@ -42,13 +46,14 @@ class TrajectoryReplayBuffer:
         """
         Add a transition to the current trajectory.
         """
-        state = self._to_torch(state)
-        action = self._to_torch(action)
-        reward = self._to_torch(reward)
-        next_state = self._to_torch(next_state)
-        duration = self._to_torch(duration)
-        success = self._to_torch(success, dtype=torch.float32)
-        done = self._to_torch(done, dtype=torch.float32)
+        _copy = copy.deepcopy
+        state = tree_map(self._to_torch, _copy(state))
+        action = self._to_torch(_copy(action))
+        reward = self._to_torch(_copy(reward))
+        next_state = tree_map(self._to_torch, _copy(next_state))
+        duration = self._to_torch(_copy(duration))
+        success = self._to_torch(_copy(success), dtype=torch.float32)
+        done = self._to_torch(_copy(done), dtype=torch.float32)
 
         if 'goal_reached' in info:
             self.push_task_reward_sample(state, info['goal_reached'] > 0)
@@ -110,13 +115,13 @@ class TrajectoryReplayBuffer:
             durations = self._pad_sequence(durations, max_length)
             success = self._pad_sequence(success, max_length, dtype=torch.float32)
             done = self._pad_sequence(done, max_length, dtype=torch.float32)
-
             # printarr(states, actions, rewards, next_states, durations, success, done, mask)
             tensor_trajectory = (states, actions, rewards, next_states, durations, success, done, mask)
             tensor_trajectories.append(tensor_trajectory)
             infos.append(info)
 
-        tensor_trajectories = [torch.stack(t).to(self.device) for t in zip(*tensor_trajectories)]
+        tensor_trajectories = [tree_map(lambda *tensors: torch.stack(tensors).to(self.device), *t) for t in zip(*tensor_trajectories)]
+
         return tensor_trajectories, infos
     
     def sample_task_reward(self, batch_size):
@@ -131,15 +136,16 @@ class TrajectoryReplayBuffer:
         samples = pos_samples + neg_samples
         labels = torch.zeros(len(samples))
         labels[:len(pos_samples)] = 1.
-        return torch.stack(samples).to(self.device), labels.to(self.device)
+        return tree_map(lambda *tensors: torch.stack(tensors), *samples), labels.to(self.device)
 
 
     def _pad_sequence(self, sequence, max_length, dtype=torch.float32):
         """Pad the sequence with zeros to match max_length."""
+        
         pad_size = max_length - len(sequence)
-        _sequence = list(map(lambda x: self._to_torch(x, dtype=dtype), sequence))
-        padded_sequence = _sequence + [torch.zeros_like(_sequence[0], dtype=dtype)] * pad_size
-        return torch.stack(padded_sequence)
+        _sequence = tree_map(lambda x: self._to_torch(x, dtype=dtype), sequence)
+        padded_sequence = _sequence + tree_map(lambda x: torch.zeros_like(x, dtype=dtype), _sequence[0:1]) * pad_size
+        return tree_map(lambda *tensors: torch.stack(tensors), *padded_sequence)
 
     def _to_torch(self, x, dtype=torch.float32):
         if isinstance(x, np.ndarray):

@@ -341,10 +341,20 @@ class AbstractDDQNGrounded(pfrl.agent.Agent):
         self.device = device
         self.agent.device = device
         print(self.gamma)
+
+    def preprocess(self, obs):
+        if isinstance(obs, dict):
+            return obs
+        elif isinstance(obs, np.ndarray):
+            return torch.from_numpy(obs).to(self.device)
+        elif isinstance(obs, torch.Tensor):
+            return obs.to(self.device)
+        return obs
         
     def act(self, obs, initset=None):
+        obs = self.preprocess(obs)
         with torch.no_grad():
-            z = self.encoder(torch.from_numpy(obs).to(self.device))
+            z = self.encoder(obs)
         action = self.agent.act(z, initset)
         return action
     
@@ -352,8 +362,9 @@ class AbstractDDQNGrounded(pfrl.agent.Agent):
         self.agent.load(dirname)
     
     def observe(self, obs, reward, done, reset, info):
+        obs = self.preprocess(obs)
         with torch.no_grad():
-            z = self.encoder(torch.from_numpy(obs).to(self.device))
+            z = self.encoder(obs)
         self.agent.observe(z, reward, done, reset, info)
     
     def save(self, dirname):

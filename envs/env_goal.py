@@ -29,7 +29,7 @@ class EnvGoalWrapper(gym.Wrapper):
         if self.goal_fn(next_s): # check goal condition
             r = r + self.goal_reward * (self.gamma ** (tau-1)) if self.discounted else r + self.goal_reward
             done = True
-            print(f'goal reached {next_s[:2]}')
+            # print(f'goal reached {next_s[:2]}')
             info['goal_reached'] = True
             info['task_reward'] = self.goal_reward 
         else:

@@ -40,8 +40,9 @@ class Option:
         self._step += 1
         if not self.is_recurrent:
             action = self.policy(state) 
-        action, policy_state = self.policy(state, self.policy_state)
-        self.policy_state = policy_state
+        else:
+            action, policy_state = self.policy(state, self.policy_state)
+            self.policy_state = policy_state
         return action if self.executing else None
     
     def __repr__(self) -> str:

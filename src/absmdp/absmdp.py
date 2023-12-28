@@ -611,7 +611,7 @@ class AbstractMDPGoal(AbstractMDP):
         z = z_c + self.SMOOTHING_NOISE_STD * torch.randn_like(z_c)
         next_z = next_z_c + self.SMOOTHING_NOISE_STD * torch.randn_like(next_z_c)
 
-        batch_size, length = s.shape[0], s.shape[1]
+        # batch_size, length = action.shape[0], action.shape[1]
     
         # transition
         next_z_dist = self.transition.distribution(torch.cat([z, action], dim=-1))
