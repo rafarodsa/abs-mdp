@@ -4,26 +4,37 @@ import gym
 
 class EmbodiedEnv(gym.Env):
 
-    mapping = dict(done='is_terminal', reward='reward', is_first='is_first', is_last='is_last')
+    mapping = dict(done='is_terminal', reward='reward', is_last='is_last')
 
-    def __init__(self, env, action_key='action'):
+    def __init__(self, env, gamma=0.995, action_key='action', ignore_obs_keys=[]):
         self.env = env
-        self.action_space = env.act_space[action_key]
+        self.action_space = self._convert_space(env.act_space[action_key])
         self.action_key = action_key
-        self.observation_space = {k:v for k,v in env.obs_space.items() if k not in self.mapping.values()}
+        self.ignore_obs_keys = ignore_obs_keys
+        self.observation_space = gym.spaces.Dict({k:self._convert_space(v) for k,v in env.obs_space.items() if k != 'reward' and not k in self.ignore_obs_keys})
+        self.gamma = gamma
     
     def step(self, action):
-        obs = self.env.step({self.action_key: action, 'reset': False})
+        if isinstance(action, dict):
+            assert 'reset' in action.keys() and self.action_key in action.keys()
+        else:
+            action = {self.action_key: action, 'reset': False}
+        obs = self.env.step(action) 
         done = obs[self.mapping['done']]
         reward = obs[self.mapping['reward']]
-        obs = {k: v  for k, v in obs.items() if k not in self.mapping.values()}
+        obs = {k: v  for k, v in obs.items() if k != 'reward' and not k in self.ignore_obs_keys}
         return obs, reward, done, False, {}
 
     def reset(self, state=None):
-        obs = self.env.step({self.action_key: None, 'reset': True})
-        obs = {k: v  for k, v in obs.items() if k not in self.mapping.values()}
+        obs = self.env.step({self.action_key: None, 'reset': True}) 
+        obs = {k: v  for k, v in obs.items() if k != 'reward' and not k in self.ignore_obs_keys}
         return obs
     
     def render(self, mode='human'):
         return self.env.render()
+
+    def _convert_space(self, space):
+        if space._discrete and len(space._shape) <= 1:
+            return gym.spaces.Discrete(space._high)
+        return gym.spaces.Box(space._low, space._high, space._shape)
     

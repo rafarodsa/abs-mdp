@@ -4,3 +4,6 @@
 [submodule "dreamerv3"]
 	path = dreamerv3
 	url = https://github.com/rafarodsa/dreamerv3.git
+[submodule "gym-treasure-game"]
+	path = gym-treasure-game
+	url = https://github.com/sd-james/gym-treasure-game.git

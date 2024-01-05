@@ -1,0 +1,23 @@
+features:
+  type: multiencoder
+  outdim: ${model.latent_dim}
+  cnn:
+    type: doubling_residual
+    in_width: 50
+    in_height: 50
+    color_channels: 1
+    depth: 24
+    cnn_blocks: 2
+    min_resolution: 4
+    mlp_layers: [256,]
+    mlp_activation: silu
+    cnn_activation: silu
+    keys: '^image$'
+  mlp:
+    type: mlp
+    input_dim: ${model.obs_dims}
+    hidden_dims:
+    - 256
+    - 256
+    activation: silu
+    keys: '.*'

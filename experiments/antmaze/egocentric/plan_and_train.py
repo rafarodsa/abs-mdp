@@ -28,10 +28,7 @@ import lightning as L
 
 from src.agents.train_agent_online import train_agent_with_evaluation
 
-from envs.pinball.pinball_gym import PinballPixelWrapper
-from envs.pinball import PinballEnvContinuous
-
-from director.embodied.envs import loconav as nav
+from experiments.antmaze.egocentric.maze import EgocentricMaze
 from experiments.antmaze.egocentric.env_adaptor import EmbodiedEnv
 from envs.env_options import EnvOptionWrapper
 from envs.env_goal import EnvGoalWrapper
@@ -149,45 +146,46 @@ def get_pose(env):
     return list(map(np.array, env._walker.get_pose(physics)))
         
 def make_reward_function(goal, env, tol=0.5):
-    target_pos = env._arena.grid_to_world_positions([goal])[0][:2]
+    target_pos = np.array(env._arena.grid_to_world_positions([goal])[0][:2])
+    print(f'Goal Position: {target_pos}')
     def reward_fn(obs):
         pos = np.array(get_pose(env)[0])[:2]
+        print(pos)
         return ((pos - target_pos) ** 2).sum() < tol ** 2
     return reward_fn
 
 GOALS = {
     'ant_maze_xl': [[14, 14], [8, 14], [2, 14], [8, 8], [2, 8]],
-    'ant_empty': [[14, 14], [8, 14], [2, 14], [8, 8], [2, 8]]
+    'ant_empty': [[14, 14], [8, 14], [2, 14], [8, 8], [2, 8]],
+    'ant_maze_s': [[8, 4], ]
 }
 
-def make_egocentric_maze(name, goal):
+def make_egocentric_maze(name, goal, test=False, gamma=0.995):
     
-    base_env = nav.LocoNav(name) 
-    env = EmbodiedEnv(base_env)
-    # dummy options to test.
-
-    options = make_dummy_options(env.action_space)
-
+    from experiments.antmaze.egocentric.options import make_options
     # goal space.
     assert name in GOALS and len(GOALS[name]) > goal
     goal = GOALS[name][goal]
+    print(f'GOAL: {goal}')
+    base_env = EgocentricMaze(name, goal) 
+    env = EmbodiedEnv(base_env, ignore_obs_keys=['walker/egocentric_camera'])
+
+    options = list(make_options(base_env, max_exec_time=100).values()) # mapping name->option
+
+
     task_reward = make_reward_function(goal, base_env)
 
-    # i need to save global position to easily design reward function
-    # array of goals for all mazes?
-    # randomize initial position ??
-    # make env
-    env = EnvOptionWrapper(options, env)
-    env = EnvGoalWrapper(env, task_reward)
+
+    env = EnvOptionWrapper(options, env, discounted=(not test))
+    env = EnvGoalWrapper(env, task_reward, discounted=(not test), gamma=gamma)
     return env
 
     
 def main():
     # parse arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', type=str, default='experiments/antmaze/online_planner.yaml')
+    parser.add_argument('--config', type=str, default='experiments/antmaze/egocentric/online_planner.yaml')
     parser.add_argument('--exp-id', type=str, default=None)
-    parser.add_argument('--learn-task-reward', action='store_true')
     parser.add_argument('--no-initset', action='store_true')
     parser.add_argument('--agent', type=str, default='ddqn', choices=['rainbow', 'ddqn'])
     
@@ -207,22 +205,25 @@ def main():
 
     device = f'cuda:{cfg.experiment.gpu}' if cfg.experiment.gpu >= 0 else 'cpu'
 
-    train_env = make_egocentric_maze('ant_maze_xl', goal=1)
-    test_env = make_egocentric_maze('ant_maze_xl', goal=1)
+    train_env = make_egocentric_maze(cfg.planner.env.envname, goal=cfg.planner.env.goal, gamma=cfg.planner.env.gamma, test=False)
+    test_env = make_egocentric_maze(cfg.planner.env.envname, goal=cfg.planner.env.goal, gamma=cfg.planner.env.gamma, test=True)
 
     # initialize fabric for logging and checkpointing
    
     # load world model
     goal_cfg = world_model_cfg.model.goal_class
 
-    mdp_constructor = AbstractMDPGoal if args.learn_task_reward else AbstractMDP
-
-
+    # mdp_constructor = AbstractMDPGoal if args.learn_task_reward else AbstractMDP
+    mdp_constructor = AbstractMDPGoal
     if world_model_cfg.ckpt != 'none':
         print(f'Loading world model from checkpoint at {world_model_cfg.ckpt}')
         world_model = mdp_constructor.load_from_old_checkpoint(world_model_cfg=world_model_cfg)
     else:
         world_model = mdp_constructor(world_model_cfg, goal_cfg=goal_cfg)
+
+
+    # TODO add prefill 
+    # TODO parallelize env 
     
     # # make task_reward_funcion
     # goal = GOALS[agent_cfg.env.envname][agent_cfg.env.goal]
@@ -232,7 +233,7 @@ def main():
 
 
     world_model.freeze(world_model_cfg.fixed_modules)
-
+    world_model.to(device)
     # make grounded agent
     use_initset = True
     if args.agent == 'rainbow':
@@ -258,7 +259,7 @@ def main():
                                 max_steps=cfg.experiment.steps,
                                 config=cfg,
                                 use_initset=use_initset,
-                                learning_reward=args.learn_task_reward
+                                learning_reward=True
                             )
 
 if __name__ == '__main__':

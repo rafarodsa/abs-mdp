@@ -674,6 +674,7 @@ class AbstractMDPGoal(AbstractMDP):
         return loss, log_dict
 
     def goal_loss(self, z, target):
+
         goal_pred = self.goal_class(z).squeeze(1)
         # print(goal_pred, target)
         # n_pos = target.sum(-1, keepdim=True)

@@ -136,7 +136,7 @@ class TrajectoryReplayBuffer:
         samples = pos_samples + neg_samples
         labels = torch.zeros(len(samples))
         labels[:len(pos_samples)] = 1.
-        return tree_map(lambda *tensors: torch.stack(tensors), *samples), labels.to(self.device)
+        return tree_map(lambda *tensors: torch.stack(tensors).to(self.device), *samples), labels.to(self.device)
 
 
     def _pad_sequence(self, sequence, max_length, dtype=torch.float32):

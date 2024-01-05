@@ -46,18 +46,14 @@ class Walk(composer.Task):
     def get_reward(self, physics):
         vel = self._walker.observables.sensors_velocimeter(physics)
         forward_velocity = vel[0]
-        displacement = 0.
         
         forward_vel_penalty = -0.1 * (self._target_velocity - forward_velocity) ** 2
 
-        tilt_penalty = -0.05 * abs(self._walker.observables.gyro_backward_roll(physics))
-        rotation_penalty = -0.05 * abs(self._walker.observables.gyro_anticlockwise_spin(physics))
-        lateral_vel_penalty = -0.05 * (abs(vel[1]) + abs(vel[2]))
+        tilt_penalty = -0.05 * self._walker.observables.gyro_backward_roll(physics) ** 2
+        rotation_penalty = -0.05 * self._walker.observables.gyro_anticlockwise_spin(physics) ** 2
+        lateral_vel_penalty = -0.05 * (vel[1:] ** 2).sum()
 
-        displacement = -0.1 * (displacement - self._desired_displacement) ** 2
-        self._prev_vel = forward_velocity
-
-        return  0. * displacement + tilt_penalty + lateral_vel_penalty + forward_vel_penalty + rotation_penalty
+        return  float(tilt_penalty + lateral_vel_penalty + forward_vel_penalty + rotation_penalty)
 
     def initialize_episode(self, physics, random_state):
         # import ipdb; ipdb.set_trace()
@@ -70,9 +66,17 @@ class Walk(composer.Task):
         n_joints = 4 ## TODO this is only for ant
         offset = 7
         for i in range(n_joints):
-            leg_angle = np.array([0., random_state.uniform(0., 0.3490)])
+            leg_angle = np.array([random_state.uniform(0., 0.3490), random_state.uniform(0., 0.3490)])
             physics.named.data.qpos[i*2+offset:i*2+offset+2] = leg_angle
         
+        u3 = random_state.uniform(-np.pi, np.pi)
+        quat = np.array([np.cos(u3/2),
+                         0.,
+                         0.,
+                         np.sin(u3/2)])
+
+        physics.named.data.qpos[3:7] = quat
+        physics.named.data.qvel[0:3] = np.array([random_state.uniform(-0.5, 0.5), random_state.uniform(-0.5, 0.5), random_state.uniform(-1, 1)])
         self._prev_vel = 0.
         self._total_displacement = 0.
 
@@ -85,15 +89,16 @@ class WalkDistance(Walk):
         forward_velocity = vel[0]
         
         pos = np.array(self._walker.get_pose(physics)[0][:2])
-        position_penalty = -0.5 * ((pos-self.target_position) ** 2).sum()
+        distance_to_target = ((pos-self.target_position) ** 2).sum()
+        position_penalty = -0.5 * distance_to_target
 
-        forward_vel_penalty = -0.1 * (0. - forward_velocity) ** 2
+        forward_vel_penalty = -0.1 * (0. - forward_velocity) ** 2 * (distance_to_target < 0.1).astype(np.float32)
 
         tilt_penalty = -0.05 * (self._walker.observables.gyro_backward_roll(physics))**2
         rotation_penalty = -0.05 * (self._walker.observables.gyro_anticlockwise_spin(physics))**2
         lateral_vel_penalty = -0.05 * (abs(vel[1]) + abs(vel[2])) ** 2
 
-        return  tilt_penalty + lateral_vel_penalty + forward_vel_penalty + rotation_penalty + position_penalty
+        return  tilt_penalty + lateral_vel_penalty + rotation_penalty + position_penalty + forward_vel_penalty
 
     def initialize_episode(self, physics, random_state):
         # import ipdb; ipdb.set_trace()
@@ -123,7 +128,7 @@ class WalkDistance(Walk):
 
 
 
-class Rotate(composer.Task):
+class RotateAngle(composer.Task):
     def __init__(self, walker, arena, desired_angle=10, freq=50):
         self._walker = walker
         self._arena = arena
@@ -199,6 +204,155 @@ class Rotate(composer.Task):
         self._mjcf_variator.apply_variations(random_state)
 
 
+class Rotate(composer.Task):
+    def __init__(self, walker, arena, desired_vel=0.39, freq=50):
+        self._walker = walker
+        self._arena = arena
+        self._arena.add_free_entity(self._walker)
+        self._arena.mjcf_model.worldbody.add('light', pos=(0, 0, 4))
+        self._prev_vel = 0.
+        self._total_displacement = 0.
+        self._dt = 1./freq
+        self._target_velocity = 0.
+        self._desired_vel = desired_vel
+        self._task_observables = {}
+        for observable in (self._walker.observables.proprioception +
+                       self._walker.observables.kinematic_sensors +
+                       self._walker.observables.dynamic_sensors):
+            observable.enabled = True   
+        self._walker.observables.egocentric_camera.enabled = True
+        self._mjcf_variator = MJCFVariator()
+        self._init_angle = 0.
+        self._episode_started = False
+    
+    @property
+    def root_entity(self):
+        return self._arena
+
+    @property
+    def task_observables(self):
+        return self._task_observables
+
+    def get_reward(self, physics):
+        # R = self._walker.observables.orientation(physics)
+        # R = R.reshape(3,3)
+        # yaw = np.arctan2(R[1, 0], R[0, 0])
+
+        vel = self._walker.observables.sensors_velocimeter(physics)
+        vel_penalty = -0.1 * (vel ** 2).sum()
+        rotation_vel = -0.1 * (self._walker.observables.gyro_anticlockwise_spin(physics) - self._desired_vel) ** 2
+
+        return float(vel_penalty + rotation_vel)
+
+    def initialize_episode(self, physics, random_state):
+        # import ipdb; ipdb.set_trace()
+        self._walker.initialize_episode(physics, random_state)
+        vel_dir =  random_state.uniform(0., 1., (2,))
+        vel_dir = vel_dir / np.linalg.norm(vel_dir)
+        physics.named.data.qvel[:2] = random_state.uniform(0, 2) * vel_dir
+        n_joints = 4 ## TODO this is only for ant
+        offset = 7
+
+        u3 = random_state.uniform(-np.pi, np.pi)
+        quat = np.array([np.cos(u3/2),
+                         0.,
+                         0.,
+                         np.sin(u3/2)])
+
+        physics.named.data.qpos[3:7] = quat
+
+
+        for i in range(n_joints):
+            leg_angle = np.array([random_state.uniform(0., 0.3490), random_state.uniform(0., 0.3490)])
+            physics.named.data.qpos[i*2+offset:i*2+offset+2] = leg_angle
+    
+        self._prev_vel = 0.
+        self._total_displacement = 0.
+        self._episode_started = False
+        self._init_angle = u3
+        # self.target_angle = np.mod(self._init_angle + self._desired_angle, 2*np.pi)
+
+    def get_metrics(self):
+        return dict(target_angle=np.array([self.target_angle]))
+
+    def initialize_episode_mjcf(self, random_state):
+        self._mjcf_variator.apply_variations(random_state)
+
+
+class Stop(composer.Task):
+    def __init__(self, walker, arena, freq=50):
+        self._walker = walker
+        self._arena = arena
+        self._arena.add_free_entity(self._walker)
+        self._arena.mjcf_model.worldbody.add('light', pos=(0, 0, 4))
+        self._prev_vel = 0.
+        self._total_displacement = 0.
+        self._dt = 1./freq
+        self._target_velocity = 0.
+        self._task_observables = {}
+        for observable in (self._walker.observables.proprioception +
+                       self._walker.observables.kinematic_sensors +
+                       self._walker.observables.dynamic_sensors):
+            observable.enabled = True   
+        self._walker.observables.egocentric_camera.enabled = True
+        self._mjcf_variator = MJCFVariator()
+        self._init_angle = 0.
+        self._episode_started = False
+    
+    @property
+    def root_entity(self):
+        return self._arena
+
+    @property
+    def task_observables(self):
+        return self._task_observables
+
+    def get_reward(self, physics):
+        # R = self._walker.observables.orientation(physics)
+        # R = R.reshape(3,3)
+        # yaw = np.arctan2(R[1, 0], R[0, 0])
+
+        vel = self._walker.observables.sensors_velocimeter(physics)
+        vel_penalty = -0.1 * (vel ** 2).sum()
+        rotation_vel = -0.1 * (self._walker.observables.gyro_anticlockwise_spin(physics)) ** 2
+        tilt_penalty = -0.05 * (self._walker.observables.gyro_backward_roll(physics) ** 2)
+
+        return float(vel_penalty + rotation_vel + tilt_penalty)
+
+    def initialize_episode(self, physics, random_state):
+        # import ipdb; ipdb.set_trace()
+        self._walker.initialize_episode(physics, random_state)
+        vel_dir =  random_state.uniform(0., 1., (2,))
+        vel_dir = vel_dir / np.linalg.norm(vel_dir)
+        physics.named.data.qvel[:2] = random_state.uniform(0, 2) * vel_dir
+        n_joints = 4 ## TODO this is only for ant
+        offset = 7
+
+        u3 = random_state.uniform(-np.pi, np.pi)
+        quat = np.array([np.cos(u3/2),
+                         0.,
+                         0.,
+                         np.sin(u3/2)])
+
+        physics.named.data.qpos[3:7] = quat
+        physics.named.data.qvel[0:3] = np.array([random_state.uniform(-0.5, 0.5), random_state.uniform(-0.5, 0.5), random_state.uniform(-1, 1)])
+
+        for i in range(n_joints):
+            leg_angle = np.array([random_state.uniform(0., 0.3490), random_state.uniform(0., 0.3490)])
+            physics.named.data.qpos[i*2+offset:i*2+offset+2] = leg_angle
+    
+        self._prev_vel = 0.
+        self._total_displacement = 0.
+        self._episode_started = False
+        self._init_angle = u3
+        # self.target_angle = np.mod(self._init_angle + self._desired_angle, 2*np.pi)
+
+    def get_metrics(self):
+        return dict(target_angle=np.array([self.target_angle]))
+
+    def initialize_episode_mjcf(self, random_state):
+        self._mjcf_variator.apply_variations(random_state)
+
 class EgocentricMazeSchool(LocoNav):
     def __init__(
       self, name, task='walkforward', repeat=1, size=(64, 64), camera=3, again=False,
@@ -222,13 +376,19 @@ class EgocentricMazeSchool(LocoNav):
         self._task = task
         arena = self._make_arena('empty')
         if task == 'walkforward':
-            task = Walk(walker=self._walker, arena=arena, freq=freq)
+            task = Walk(walker=self._walker, arena=arena, freq=freq, desired_vel=2.)
         elif task == 'walkdistance':
             task = WalkDistance(walker=self._walker, arena=arena, freq=freq)
         elif task == 'rotatecw':
-            task = Rotate(walker=self._walker, arena=arena, desired_angle=0.39, freq=freq)
+            task = Rotate(walker=self._walker, arena=arena, desired_vel=0.39*5, freq=freq)
         elif task == 'rotateccw':
-            task = Rotate(walker=self._walker, arena=arena, desired_angle=-0.39, freq=freq)
+            task = Rotate(walker=self._walker, arena=arena, desired_vel=-0.39*5, freq=freq)
+        elif task == 'rotatecwangle':
+            task = RotateAngle(walker=self._walker, arena=arena, desired_angle=0.39,  freq=freq)
+        elif task == 'rotateccwangle':
+            task = RotateAngle(walker=self._walker, arena=arena, desired_angle=-0.39, freq=freq)
+        elif task == 'stop':
+            task = Stop(walker=self._walker, arena=arena, freq=freq)
         else:
             raise ValueError(f'{task} not implemented')
         self.task = task
@@ -271,7 +431,7 @@ class EgocentricMazeSchool(LocoNav):
 if __name__=='__main__':
     from dm_control.locomotion.walkers.ant import Ant
     ant = Ant()
-    task = Rotate(walker=ant)
+    task = RotateAngle(walker=ant)
     env = composer.Environment(task)
     env.reset()
     env.step(env.action_spec().maximum)

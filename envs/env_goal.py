@@ -35,7 +35,6 @@ class EnvGoalWrapper(gym.Wrapper):
         else:
             info['goal_reached'] = False
             info['task_reward'] = 0.
-
         return next_s, r, done, info
 
     def reset(self, state=None):

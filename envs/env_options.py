@@ -22,7 +22,6 @@ class EnvOptionWrapper(gym.Wrapper):
         info['success'] = not truncated
         self._last_initset = next_initset
         self.state = next_s
-
         next_s =  next_s.astype(np.float32) if isinstance(next_s, np.ndarray) else next_s
         return next_s, r, done, truncated, info
     
@@ -35,7 +34,7 @@ class EnvOptionWrapper(gym.Wrapper):
         return initiation
 
     def _execute_option(self, option):
-        s = np.array(self.state)
+        s = np.array(self.state) if isinstance(self.state, np.ndarray) else self.state
         execute = option.execute(s)
         execute = True
         done = False

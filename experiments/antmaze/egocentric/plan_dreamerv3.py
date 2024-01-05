@@ -17,9 +17,9 @@ sys.path.append(str(directory.parent.parent.parent))
 __package__ = directory.name
 
 from dreamerv3 import embodied
-from dreamerv3.embodied import wrappers
-from experiments.antmaze.utils import JSONLOutputRepeated
+from embodied import wrappers
 
+from experiments.antmaze.utils import JSONLOutputRepeated
 
 def main(argv=None):
   from dreamerv3 import agent as agt
@@ -37,20 +37,22 @@ def main(argv=None):
       'run.eval_every': int(1e4),
       'run.eval_eps': 10,
       'run.train_ratio': 512,
-      'task': 'ant_walkforward',
+      'task': 'antmaze_t',
       'wrapper.length': 100,
-      'envs.amount': 8,
-      'encoder.cnn_keys': '$^',
-      'decoder.cnn_keys': '$^',
-      '.*\.cnn_depth': 0,
-      '.*\.layers': 1,
-      '.*\.units': 128,
-      '.*\.deter': 128,
-      '.*\.mlp_units': 128,
+      'envs.amount': 1,
+      'encoder.cnn_keys': '.*',
+      'decoder.cnn_keys': '.*',
+      '.*\.cnn_depth': 24,
+      '.*\.layers': 2,
+      '.*\.units': 512,
+      '.*\.deter': 512,
+      '.*\.mlp_units': 512,
       '.*\.mlp_layers': 2
   }) 
+
+
   config, other = embodied.Flags(config, exp_id='test', env_goal=0).parse_known(other)
-  config = config.update(logdir=f'exp_results/antmaze/egocentric/{config.exp_id}')
+  config = config.update(logdir=f'exp_results/dreamerv3/{config.exp_id}')
 
   args = embodied.Config(
       **config.run, logdir=config.logdir,
@@ -84,8 +86,8 @@ def main(argv=None):
     elif args.script == 'train_eval':
       replay = make_replay(config, logdir / 'replay')
       eval_replay = make_replay(config, logdir / 'eval_replay', is_eval=True)
-      env = make_envs(config)
-      eval_env = make_envs(config)  # mode='eval'
+      env = make_envs(config, mode='train')
+      eval_env = make_envs(config, mode='eval')  # mode='eval'
       cleanup += [env, eval_env]
       agent = agt.Agent(env.obs_space, env.act_space, step, config)
       embodied.run.train_eval(
@@ -136,7 +138,7 @@ def make_logger(parsed, logdir, step, config):
       embodied.logger.TerminalOutput(config.filter),
       JSONLOutputRepeated(logdir, 'metrics.jsonl'),
       embodied.logger.JSONLOutput(logdir, 'scores.jsonl', 'episode/score'),
-      embodied.logger.TensorBoardOutput(logdir, fps=50),
+      embodied.logger.TensorBoardOutput(logdir),
       # embodied.logger.WandBOutput(logdir.name, config),
       # embodied.logger.MLFlowOutput(logdir.name),
   ], multiplier)
@@ -180,16 +182,32 @@ def make_envs(config, **overrides):
 
 
 def make_env(config, **overrides):
-    from experiments.antmaze.plan import make_ground_env
+    from experiments.antmaze.egocentric.plan_and_train import make_egocentric_maze
     from omegaconf import OmegaConf as oc
-    from envs.antmaze.ant_school import EgocentricMazeSchool
-    env = EgocentricMazeSchool(name=config.task)
+    from dreamerv3.embodied.envs import FromGym
+
+    env_config = f"""
+                    sample_abstract_transition: true
+                    render: false
+                    init_thresh: 0.5
+                    reward_scale: 0. #0.00016666666666666666
+                    gamma: 0.9999
+                    goal: {config['env_goal']}
+                    abstract_goal_tol: 0.1
+                    envname: 'ant_maze_s'    
+                """
+    
+    train_seed = 2**31 - 1 - config.seed if overrides['mode'] == 'train' else config.seed
+    env_cfg = oc.create(env_config)
+    env = make_egocentric_maze(name=env_cfg.envname, goal=env_cfg.goal, test=overrides['mode']=='test', gamma=env_cfg.gamma)
+    
+    env = FromGym(env)
     return wrap_env(env, config)
+
 
 
 def wrap_env(env, config):
   args = config.wrapper
-  
   for name, space in env.act_space.items():
     if name == 'reset':
       continue

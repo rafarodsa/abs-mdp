@@ -1,20 +1,20 @@
-experiment_cwd: exp_results/antmaze/antmaze-umaze-v2/absmdps
+experiment_cwd: exp_results/antmaze/egocentric/absmdps
 experiment_name: test
 exp_id: test
 fabric:
-  accelerator: cpu
+  accelerator: gpu
   devices: 1
   strategy: auto
 
 experiment:
   seed: 31
-  gpu: -1
+  gpu: 0
   demo: false
   eval_interval: 5000
   eval_n_runs: 10
   log_level: 20
   checkpoint_frequency: 10000 
-  max_rollout_len: 64 # max length to rollout the ground env.
+  max_rollout_len:  # max length to rollout the ground env.
   log_tensorboard: true
   discounted: false
   steps: 250000
@@ -35,7 +35,7 @@ world_model:
   
   model:
     model_config_dir: experiments/antmaze
-    n_options: 4
+    n_options: 3
     obs_dims: 29
     latent_dim: 16
     trajectory_len: 64
@@ -77,7 +77,7 @@ world_model:
 
   data:
     buffer_size: 100000
-    batch_size: 16
+    batch_size: 2
 
 planner:
   env:
@@ -85,10 +85,10 @@ planner:
     render: false
     init_thresh: 0.5
     reward_scale: 0. #0.00016666666666666666
-    gamma: 0.995
-    goal: 4
+    gamma: 0.99995
+    goal: 0
     abstract_goal_tol: 0.1
-    envname: 'antmaze-medium-play-v2'
+    envname: 'ant_maze_xl'
 
   agent:
     load: null
@@ -107,7 +107,7 @@ planner:
 
   q_func: 
     type: 'mlp'
-    n_actions: 8
+    n_actions: 3
     hidden_dims: [256, 256]
     activation: silu
     output_dim: ${world_model.model.n_options}
@@ -115,7 +115,7 @@ planner:
 
   q_func_rainbow:
     type: 'mlp'
-    n_actions: 8
+    n_actions: 3
     hidden_dims: [256, 256]
     activation: relu
     output_dim: 1024

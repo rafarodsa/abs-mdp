@@ -32,6 +32,7 @@ from pfrl.utils.recurrent import pack_and_forward
 from pfrl.replay_buffers import PrioritizedReplayBuffer
 
 from pfrl.utils.batch_states import batch_states
+import jax 
 
 def batch_initset(batch_initset, device='cpu'):
     batch_initset = [t.to(device) if isinstance(t, torch.Tensor) else torch.from_numpy(t).to(device) for t in batch_initset]
@@ -340,19 +341,16 @@ class AbstractDDQNGrounded(pfrl.agent.Agent):
         self.gamma = agent.gamma
         self.device = device
         self.agent.device = device
-        print(self.gamma)
 
     def preprocess(self, obs):
-        if isinstance(obs, dict):
-            return obs
-        elif isinstance(obs, np.ndarray):
-            return torch.from_numpy(obs).to(self.device)
+        if isinstance(obs, np.ndarray):
+            return torch.from_numpy(obs.copy()).to(self.device)
         elif isinstance(obs, torch.Tensor):
             return obs.to(self.device)
         return obs
         
     def act(self, obs, initset=None):
-        obs = self.preprocess(obs)
+        obs = jax.tree_map(self.preprocess, obs)
         with torch.no_grad():
             z = self.encoder(obs)
         action = self.agent.act(z, initset)
