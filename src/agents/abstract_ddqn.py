@@ -351,19 +351,23 @@ class AbstractDDQNGrounded(pfrl.agent.Agent):
         
     def act(self, obs, initset=None):
         obs = jax.tree_map(self.preprocess, obs)
+        if not isinstance(obs, list):
+            obs = [obs]
         with torch.no_grad():
-            z = self.encoder(obs)
-        action = self.agent.act(z, initset)
-        return action
+            z = jax.tree_map(self.encoder, obs, is_leaf=lambda x: isinstance(x, dict))
+            action = self.agent.batch_act(z, initset)
+        return action if len(action) > 1 else action[0]
     
     def load(self, dirname):
         self.agent.load(dirname)
     
     def observe(self, obs, reward, done, reset, info):
         obs = self.preprocess(obs)
+        if not isinstance(obs, list):
+            obs = [obs]
         with torch.no_grad():
-            z = self.encoder(obs)
-        self.agent.observe(z, reward, done, reset, info)
+            z = jax.tree_map(self.encoder, obs, is_leaf=lambda x: isinstance(x, dict))
+        self.agent.batch_observe(z, reward, done, reset, info)
     
     def save(self, dirname):
         self.agent.save(dirname)

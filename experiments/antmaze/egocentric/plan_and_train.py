@@ -150,7 +150,6 @@ def make_reward_function(goal, env, tol=0.5):
     print(f'Goal Position: {target_pos}')
     def reward_fn(obs):
         pos = np.array(get_pose(env)[0])[:2]
-        print(pos)
         return ((pos - target_pos) ** 2).sum() < tol ** 2
     return reward_fn
 
@@ -161,7 +160,7 @@ GOALS = {
     'ant_maze_m': [[2, 5], [8, 5], [2,8], [8,8]]
 }
 
-def make_egocentric_maze(name, goal, test=False, gamma=0.995):
+def make_egocentric_maze(name, goal, test=False, gamma=0.995, test_seed=None, train_seed=None):
     
     from experiments.antmaze.egocentric.options import make_options
     # goal space.
@@ -170,16 +169,25 @@ def make_egocentric_maze(name, goal, test=False, gamma=0.995):
     print(f'GOAL: {goal}')
     base_env = EgocentricMaze(name, goal) 
     env = EmbodiedEnv(base_env, ignore_obs_keys=['walker/egocentric_camera'])
-
     options = list(make_options(base_env, max_exec_time=100).values()) # mapping name->option
-
-
     task_reward = make_reward_function(goal, base_env)
-
-
     env = EnvOptionWrapper(options, env, discounted=(not test))
     env = EnvGoalWrapper(env, task_reward, discounted=(not test), gamma=gamma)
     return env
+
+
+def make_batched_ground_env(make_env, num_envs, seeds):
+    from src.agents.multiprocess_env import MultiprocessVectorEnv
+    from functools import partial
+
+
+    vec_env = MultiprocessVectorEnv(
+        [
+            partial(make_env, train_seed=seeds[i])
+            for i in range(num_envs)
+        ]
+    )
+    return vec_env
 
     
 def main():
@@ -188,7 +196,7 @@ def main():
     parser.add_argument('--config', type=str, default='experiments/antmaze/egocentric/online_planner.yaml')
     parser.add_argument('--exp-id', type=str, default=None)
     parser.add_argument('--no-initset', action='store_true')
-    parser.add_argument('--agent', type=str, default='ddqn', choices=['rainbow', 'ddqn'])
+    parser.add_argument('--agent', type=str, default='rainbow', choices=['rainbow', 'ddqn'])
     
     args, unknown = parser.parse_known_args()
     cli_args = parse_oc_args(unknown)
@@ -206,7 +214,7 @@ def main():
 
     device = f'cuda:{cfg.experiment.gpu}' if cfg.experiment.gpu >= 0 else 'cpu'
 
-    train_env = make_egocentric_maze(cfg.planner.env.envname, goal=cfg.planner.env.goal, gamma=cfg.planner.env.gamma, test=False)
+    train_env = make_batched_ground_env(lambda *args, **kwargs: make_egocentric_maze(cfg.planner.env.envname, goal=cfg.planner.env.goal, gamma=cfg.planner.env.gamma, test=False), seeds=[23,53], num_envs=2)
     test_env = make_egocentric_maze(cfg.planner.env.envname, goal=cfg.planner.env.goal, gamma=cfg.planner.env.gamma, test=True)
 
     # initialize fabric for logging and checkpointing
@@ -226,6 +234,9 @@ def main():
     # TODO add prefill 
     # TODO parallelize env 
     
+
+
+
     # # make task_reward_funcion
     # goal = GOALS[agent_cfg.env.envname][agent_cfg.env.goal]
     # if args.learn_task_reward:

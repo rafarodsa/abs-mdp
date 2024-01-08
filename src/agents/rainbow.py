@@ -10,6 +10,7 @@ from pfrl.wrappers import atari_wrappers
 from src.agents.dueling_dqn import DistributionalDuelingDQN
 from pfrl.utils import batch_states as pfrl_batch_states
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple  
+import jax
 
 from pfrl.utils.recurrent import (
     get_recurrent_state_at,
@@ -418,19 +419,28 @@ class AbstractRainbow(pfrl.agent.Agent):
         self.device = device
         self.agent.device = device
         print(self.gamma)
+    
+    def preprocess(self, obs):
+        if isinstance(obs, np.ndarray):
+            return torch.from_numpy(obs.copy()).to(self.device)
+        elif isinstance(obs, torch.Tensor):
+            return obs.to(self.device)
+        return obs
         
     def act(self, obs, initset=None):
+        obs = jax.tree_map(self.preprocess, obs)
         with torch.no_grad():
-            z = self.encoder(torch.from_numpy(obs).to(self.device))
-        action = self.agent.act(z)
+            z = self.encoder(obs)
+        action = self.agent.act(z, initset)
         return action
     
     def load(self, dirname):
         self.agent.load(dirname)
     
     def observe(self, obs, reward, done, reset, info):
+        obs = self.preprocess(obs)
         with torch.no_grad():
-            z = self.encoder(torch.from_numpy(obs).to(self.device))
+            z = self.encoder(obs)
         self.agent.observe(z, reward, done, reset, info)
     
     def save(self, dirname):

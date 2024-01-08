@@ -350,12 +350,18 @@ def train_agent_with_evaluation(
             with grounded_agent.eval_mode():
                 a = grounded_agent.act(s)
 
-        next_s, r, done, info = ground_env.step(a)
+        next_s, r, done, info = ground_env.step(a) # this might return tuples/lists of steps per env if env is batched.
+        # TODO buffer must keep track of the N trajectories.
+        # TODO we need a train ratio (??)
+        # TODO the reward below does not make sense because is a list
+
+        import ipdb; ipdb.set_trace()
         episode_return += r
 
         world_model.observe(s, a, info['env_reward'], next_s, done, info['tau'], info['success'], info=info)
         s = next_s
         episode_len += 1
+        
         if done or episode_len >= max_rollout_len:
             ground_log = {
                 'ground_env/episode_return': episode_return,
