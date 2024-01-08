@@ -157,14 +157,15 @@ def make_reward_function(goal, env, tol=0.5):
 GOALS = {
     'ant_maze_xl': [[14, 14], [8, 14], [2, 14], [8, 8], [2, 8]],
     'ant_empty': [[14, 14], [8, 14], [2, 14], [8, 8], [2, 8]],
-    'ant_maze_s': [[8, 4], ]
+    'ant_maze_s': [[8, 4] ],
+    'ant_maze_m': [[2, 5], [8, 5], [2,8], [8,8]]
 }
 
 def make_egocentric_maze(name, goal, test=False, gamma=0.995):
     
     from experiments.antmaze.egocentric.options import make_options
     # goal space.
-    assert name in GOALS and len(GOALS[name]) > goal
+    assert name in GOALS and len(GOALS[name]) > goal, f'Goal {goal} in maze {name} not defined!'
     goal = GOALS[name][goal]
     print(f'GOAL: {goal}')
     base_env = EgocentricMaze(name, goal) 

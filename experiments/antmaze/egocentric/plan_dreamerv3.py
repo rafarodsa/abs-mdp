@@ -51,8 +51,8 @@ def main(argv=None):
   }) 
 
 
-  config, other = embodied.Flags(config, exp_id='test', env_goal=0).parse_known(other)
-  config = config.update(logdir=f'exp_results/dreamerv3/{config.exp_id}')
+  config, other = embodied.Flags(config, exp_id='test', env_goal=0, envname='ant_maze_xl').parse_known(other)
+  config = config.update(logdir=f'exp_results/dreamerv3/egocentric/{config.exp_id}')
 
   args = embodied.Config(
       **config.run, logdir=config.logdir,
@@ -194,9 +194,9 @@ def make_env(config, **overrides):
                     gamma: 0.9999
                     goal: {config['env_goal']}
                     abstract_goal_tol: 0.1
-                    envname: 'ant_maze_s'    
+                    envname: {config['envname']}    
                 """
-    
+    print(f"ENVNAME: {config['envname']}")
     train_seed = 2**31 - 1 - config.seed if overrides['mode'] == 'train' else config.seed
     env_cfg = oc.create(env_config)
     env = make_egocentric_maze(name=env_cfg.envname, goal=env_cfg.goal, test=overrides['mode']=='test', gamma=env_cfg.gamma)

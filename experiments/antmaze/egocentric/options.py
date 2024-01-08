@@ -425,6 +425,6 @@ def test_rotation_error(direction='rotateccw'):
 # run random policy over options.
 
 if __name__ == '__main__':
-    test_rotation_error()
+    # test_rotation_error()
 
-    # test_walking_distance_error()
+    test_walking_distance_error()
