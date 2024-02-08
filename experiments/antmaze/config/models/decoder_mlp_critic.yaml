@@ -1,11 +1,8 @@
 
-type: mlp_critic
-input_dim: ${model.obs_dims}
-latent_dim: ${model.latent_dim}
+type: mlp
+input_dim: 64
 output_dim: 1
 hidden_dims:
-  - 64
-  - 64
-  - 64
-  - 64
-activation: relu
+  - 512
+  - 512
+activation: silu

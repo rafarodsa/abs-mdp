@@ -5,6 +5,7 @@ import gym
 class EmbodiedEnv(gym.Env):
 
     mapping = dict(done='is_terminal', reward='reward', is_last='is_last')
+    infos = ('log_global_pos', 'log_global_orientation', 'log_topview')
 
     def __init__(self, env, gamma=0.995, action_key='action', ignore_obs_keys=[]):
         self.env = env
@@ -20,14 +21,16 @@ class EmbodiedEnv(gym.Env):
         else:
             action = {self.action_key: action, 'reset': False}
         obs = self.env.step(action) 
-        done = obs[self.mapping['done']]
+        done = obs[self.mapping['done']] or obs['is_last']
         reward = obs[self.mapping['reward']]
-        obs = {k: v  for k, v in obs.items() if k != 'reward' and not k in self.ignore_obs_keys}
-        return obs, reward, done, False, {}
+        
+        info = {k: v  for k, v in obs.items() if k != 'reward' and k in  self.infos  and not k in self.ignore_obs_keys}
+        obs = {k: v  for k, v in obs.items() if k != 'reward' and k not in self.infos  and not k in self.ignore_obs_keys}
+        return obs, reward, done, False, info
 
     def reset(self, state=None):
         obs = self.env.step({self.action_key: None, 'reset': True}) 
-        obs = {k: v  for k, v in obs.items() if k != 'reward' and not k in self.ignore_obs_keys}
+        obs = {k: v  for k, v in obs.items() if k != 'reward' and not k in self.ignore_obs_keys  and k not in self.infos}
         return obs
     
     def render(self, mode='human'):

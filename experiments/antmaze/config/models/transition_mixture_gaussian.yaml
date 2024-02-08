@@ -2,8 +2,8 @@ features:
   type: dynamics_mlp
   latent_dim: ${model.latent_dim}
   n_options: ${model.n_options}
-  hidden_dims: [128, 128]
-  activation: relu
+  hidden_dims: [512, 512]
+  activation: mish
 dist:
   type: mixture_gaussian
   n_components: 4

@@ -227,8 +227,10 @@ class Rainbow:
 
     @staticmethod
     def batch_states(states, device, phi):
-        # assert isinstance(states, list), type(states)
-        # assert isinstance(states[0], atari_wrappers.LazyFrames), type(states[0])
+
+        if isinstance(states[0], torch.Tensor):
+            return torch.stack(states)
+        
         features = np.array([phi(s) for s in states])
         return torch.as_tensor(features).to(device)
 
@@ -237,6 +239,12 @@ class Rainbow:
         """ Observation pre-processing for convolutional layers. """
         # return np.asarray(x, dtype=np.float32) / 255.
         return x
+    
+    def batch_act(self, state, initset=None):
+        return self.agent.batch_act(state)
+    
+    def batch_observe(self, state, reward, done, reset, info=None):
+        return self.agent.batch_observe(state, reward, done, reset, info)
 
     def act(self, state):
         """ Action selection method at the current state. """
@@ -411,37 +419,80 @@ class Rainbow:
         self.agent.save(dirname)
     
 class AbstractRainbow(pfrl.agent.Agent):
-    def __init__(self, encoder, agent, action_mask=None, device='cpu'):
+    def __init__(self, encoder, agent, action_mask=None, device='cpu', recurrent=False):
         self.agent = agent
         self.encoder = encoder
         self.action_mask = action_mask
         self.gamma = agent.gamma
         self.device = device
         self.agent.device = device
+        self.recurrent = recurrent
+        if self.recurrent:
+            assert isinstance(self.encoder, tuple) and len(self.encoder) == 2
+            self.encoder, self.transition = encoder
+            self._state = None
         print(self.gamma)
+
     
-    def preprocess(self, obs):
+    def _preprocess(self, obs):
         if isinstance(obs, np.ndarray):
             return torch.from_numpy(obs.copy()).to(self.device)
         elif isinstance(obs, torch.Tensor):
             return obs.to(self.device)
         return obs
+
+    def preprocess(self, obs):
+        return jax.tree_map(self._preprocess, obs)
         
     def act(self, obs, initset=None):
-        obs = jax.tree_map(self.preprocess, obs)
+        # obs = jax.tree_map(self.preprocess, obs)
+        obs = self.preprocess(obs)
+        if not isinstance(obs, list):
+            obs = [obs]
         with torch.no_grad():
-            z = self.encoder(obs)
-        action = self.agent.act(z, initset)
-        return action
+            if self.recurrent and self._state is None:
+                self._state = self.transition.feats._init_state(len(obs), batched=True)
+                self._hidden = self._state
+            z = jax.tree_map(self.encoder, obs, is_leaf=lambda x: isinstance(x, dict))
+            feats = [torch.cat([z, self._state[0, i]], dim=-1) for i, z in enumerate(z)] if self.recurrent else z
+            action = self.agent.batch_act(feats, initset)
+            self.update_hidden(z, action)
+        return action if len(obs) > 1 else action[0]
     
+    @torch.no_grad()
+    def update_hidden(self, z, action):
+        if not self.recurrent:
+            return 
+        _inp = torch.stack([torch.cat([_z, torch.nn.functional.one_hot(torch.tensor(a), 3).to(_z.device)], dim=-1) for _z, a in zip(z, action)])
+        hidden, last_hidden = self.transition.feats.gru(_inp.unsqueeze(1), self._state)
+        hidden = self.transition.feats.transition(hidden)
+        self._state = hidden.permute(1, 0, 2)
+        self._hidden = last_hidden
+
+    @torch.no_grad()
+    def batch_reset(self, mask):
+        if not self.recurrent:
+            return 
+        for i in range(len(mask)):
+            if not mask[i]:
+                self._state[:, i] = torch.Tensor(self.transition.feats._init_state(batched=True)[:, 0])
+                self._hidden[:, i] = torch.Tensor(self._state[:, i])
+
+
     def load(self, dirname):
         self.agent.load(dirname)
     
     def observe(self, obs, reward, done, reset, info):
         obs = self.preprocess(obs)
+        if not isinstance(obs, list):
+            obs = [obs]
+            reward = [reward]
+            done = [done]
+            reset = [reset]
+            info = [info]
         with torch.no_grad():
-            z = self.encoder(obs)
-        self.agent.observe(z, reward, done, reset, info)
+            z = jax.tree_map(lambda obs: self.encoder(obs), obs, is_leaf=lambda x: isinstance(x, dict))
+        self.agent.batch_observe(z, reward, done, reset, info)
     
     def save(self, dirname):
         self.agent.save(dirname)

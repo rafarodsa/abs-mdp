@@ -6,10 +6,10 @@ features:
     in_width: 50
     in_height: 50
     color_channels: 1
-    depth: 24
+    depth: 48
     cnn_blocks: 2
     min_resolution: 4
-    mlp_layers: [256,]
+    mlp_layers: [512,]
     mlp_activation: silu
     cnn_activation: silu
     keys: '^image$'
@@ -17,7 +17,7 @@ features:
     type: mlp
     input_dim: ${model.obs_dims}
     hidden_dims:
-    - 256
-    - 256
+    - 512
+    - 512
     activation: silu
     keys: '.*'

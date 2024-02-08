@@ -356,7 +356,7 @@ class AbstractDDQNGrounded(pfrl.agent.Agent):
         with torch.no_grad():
             z = jax.tree_map(self.encoder, obs, is_leaf=lambda x: isinstance(x, dict))
             action = self.agent.batch_act(z, initset)
-        return action if len(action) > 1 else action[0]
+        return action 
     
     def load(self, dirname):
         self.agent.load(dirname)

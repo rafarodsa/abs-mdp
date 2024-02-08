@@ -33,6 +33,7 @@ from experiments.antmaze.egocentric.env_adaptor import EmbodiedEnv
 from envs.env_options import EnvOptionWrapper
 from envs.env_goal import EnvGoalWrapper
 
+import pprint
 
 def random_selection_initset(initset_s):
     # TODO this works only with single samples.
@@ -94,7 +95,8 @@ def make_ddqn_agent(agent_cfg, experiment_cfg, world_model):
 
 
 def make_rainbow_agent(agent_cfg, experiment_cfg, world_model):
-    agent_cfg.q_func_rainbow.input_dim = world_model.latent_dim
+
+    agent_cfg.q_func_rainbow.input_dim = world_model.n_feats
     q_func = ModuleFactory.build(agent_cfg.q_func_rainbow)
 
     training_steps = experiment_cfg.steps // experiment_cfg.train_every
@@ -111,7 +113,7 @@ def make_rainbow_agent(agent_cfg, experiment_cfg, world_model):
     )
 
     agent = Rainbow(
-        q_func, # TODO change config for this
+        q_func, 
         n_actions=agent_cfg.q_func.n_actions,
         betasteps=betasteps,
         lr=agent_cfg.agent.lr,
@@ -121,11 +123,12 @@ def make_rainbow_agent(agent_cfg, experiment_cfg, world_model):
         gamma=agent_cfg.env.gamma,
         gpu=experiment_cfg.gpu,
         update_interval=agent_cfg.agent.update_interval,
-        explorer=explorer
+        explorer=None #explorer
     )
     device = f'cuda:{experiment_cfg.gpu}' if experiment_cfg.gpu >= 0 else 'cpu'
 
-    grounded_agent = AbstractRainbow(agent=agent, encoder=world_model.encoder, action_mask=world_model.initset, device=device)
+    encoder = world_model.encoder if not world_model.recurrent else (world_model.encoder, world_model.transition)
+    grounded_agent = AbstractRainbow(agent=agent, encoder=encoder, action_mask=world_model.initset, device=device, recurrent=world_model.recurrent)
 
     return agent, grounded_agent
 
@@ -154,33 +157,31 @@ def make_reward_function(goal, env, tol=0.5):
     return reward_fn
 
 GOALS = {
-    'ant_maze_xl': [[14, 14], [8, 14], [2, 14], [8, 8], [2, 8]],
-    'ant_empty': [[14, 14], [8, 14], [2, 14], [8, 8], [2, 8]],
+    'ant_maze_xl': [[14, 14], [8, 14], [2, 14], [14, 8], [2, 8]],
+    'ant_empty': [[14, 14], [8, 14], [2, 14], [8, 9], [2, 8]],
     'ant_maze_s': [[8, 4] ],
     'ant_maze_m': [[2, 5], [8, 5], [2,8], [8,8]]
 }
 
-def make_egocentric_maze(name, goal, test=False, gamma=0.995, test_seed=None, train_seed=None):
+def make_egocentric_maze(name, goal, test=False, gamma=0.995, test_seed=None, train_seed=None, reward_scale=0.):
     
     from experiments.antmaze.egocentric.options import make_options
     # goal space.
     assert name in GOALS and len(GOALS[name]) > goal, f'Goal {goal} in maze {name} not defined!'
     goal = GOALS[name][goal]
-    print(f'GOAL: {goal}')
+    print(f'ENV: {name}, GOAL: {goal}')
     base_env = EgocentricMaze(name, goal) 
     env = EmbodiedEnv(base_env, ignore_obs_keys=['walker/egocentric_camera'])
     options = list(make_options(base_env, max_exec_time=100).values()) # mapping name->option
-    task_reward = make_reward_function(goal, base_env)
+    task_reward = make_reward_function(goal, base_env, tol=1.8)
     env = EnvOptionWrapper(options, env, discounted=(not test))
-    env = EnvGoalWrapper(env, task_reward, discounted=(not test), gamma=gamma)
+    env = EnvGoalWrapper(env, task_reward, discounted=(not test), gamma=gamma, reward_scale=reward_scale)
     return env
 
 
 def make_batched_ground_env(make_env, num_envs, seeds):
     from src.agents.multiprocess_env import MultiprocessVectorEnv
     from functools import partial
-
-
     vec_env = MultiprocessVectorEnv(
         [
             partial(make_env, train_seed=seeds[i])
@@ -202,51 +203,49 @@ def main():
     cli_args = parse_oc_args(unknown)
     
     print(f'Loading experiment config from {args.config}')
+    torch.set_float32_matmul_precision('medium')
 
     # load configs  
     cfg = oc.load(args.config)
     cfg = oc.merge(cfg, cli_args)
+
+    pprint.pprint(oc.to_container(cfg))
+
     agent_cfg = cfg.planner
     world_model_cfg = cfg.world_model
     # make envs.
     train_seed = cfg.experiment.seed
     test_seed = 2**31 - 1 - cfg.experiment.seed
+    process_seeds = np.arange(cfg.planner.env.n_envs).astype(np.int64) + cfg.experiment.seed * cfg.planner.env.n_envs
+    print(f'Process seeds: {process_seeds}')
+    assert process_seeds.max() < 2**32
+    process_seeds = [int(s) for s in process_seeds]
 
     device = f'cuda:{cfg.experiment.gpu}' if cfg.experiment.gpu >= 0 else 'cpu'
-
-    train_env = make_batched_ground_env(lambda *args, **kwargs: make_egocentric_maze(cfg.planner.env.envname, goal=cfg.planner.env.goal, gamma=cfg.planner.env.gamma, test=False), seeds=[23,53], num_envs=2)
-    test_env = make_egocentric_maze(cfg.planner.env.envname, goal=cfg.planner.env.goal, gamma=cfg.planner.env.gamma, test=True)
+    reward_scale = cfg.planner.env.reward_scale
+    
+    train_env = make_batched_ground_env(lambda *args, **kwargs: make_egocentric_maze(cfg.planner.env.envname, goal=cfg.planner.env.goal, gamma=cfg.planner.env.gamma, test=False, reward_scale=reward_scale), seeds=process_seeds, num_envs=cfg.planner.env.n_envs)
+    test_env = make_egocentric_maze(cfg.planner.env.envname, goal=cfg.planner.env.goal, gamma=cfg.planner.env.gamma, test=True, reward_scale=reward_scale)
 
     # initialize fabric for logging and checkpointing
-   
-    # load world model
+    
+    mdp_constructor = AbstractMDPGoal
     goal_cfg = world_model_cfg.model.goal_class
 
-    # mdp_constructor = AbstractMDPGoal if args.learn_task_reward else AbstractMDP
-    mdp_constructor = AbstractMDPGoal
     if world_model_cfg.ckpt != 'none':
         print(f'Loading world model from checkpoint at {world_model_cfg.ckpt}')
         world_model = mdp_constructor.load_from_old_checkpoint(world_model_cfg=world_model_cfg)
     else:
         world_model = mdp_constructor(world_model_cfg, goal_cfg=goal_cfg)
-
-
-    # TODO add prefill 
-    # TODO parallelize env 
-    
-
-
-
-    # # make task_reward_funcion
-    # goal = GOALS[agent_cfg.env.envname][agent_cfg.env.goal]
-    # if args.learn_task_reward:
-    #     pos_samples, neg_samples = get_goal_examples(goal, n_samples=5000)
-    #     world_model.preload_task_reward_samples(pos_samples, neg_samples)
+        # world_model = mdp_constructor(world_model_cfg)
 
 
     world_model.freeze(world_model_cfg.fixed_modules)
     world_model.to(device)
     # make grounded agent
+    print(world_model)
+    
+
     use_initset = True
     if args.agent == 'rainbow':
         agent, grounded_agent = make_rainbow_agent(agent_cfg, experiment_cfg=cfg.experiment, world_model=world_model)
@@ -267,7 +266,7 @@ def main():
                                 train_env,
                                 test_env, 
                                 world_model, 
-                                task_reward=None, # handcrafted reward
+                                task_reward=True, # handcrafted reward
                                 max_steps=cfg.experiment.steps,
                                 config=cfg,
                                 use_initset=use_initset,

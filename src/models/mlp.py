@@ -9,8 +9,40 @@ import torch
 from torch import nn
 from .configs import MLPConfig
 from src.utils.printarr import printarr
+from src.models.simnorm import SimNorm
 
-def _MLP(input_dim: int, hidden_dim: List[int], output_dim: int = None, activation: str = 'relu'):
+def get_act(activation):
+    actlayer = None
+    if activation == 'relu':
+        actlayer = nn.ReLU()
+    elif activation == 'sigmoid':
+        actlayer = nn.Sigmoid()
+    elif activation == 'tanh':
+        actlayer = nn.Tanh()
+    elif activation == 'leaky_relu':
+        actlayer = nn.LeakyReLU()
+    elif activation == 'elu':
+        actlayer = nn.ELU()
+    elif activation == 'selu':
+        actlayer = nn.SELU()
+    elif activation == 'gelu':
+        actlayer = nn.GELU()
+    elif activation == 'glu':
+        actlayer = nn.GLU()
+    elif activation == 'silu':
+        actlayer = nn.SiLU()
+    elif activation == 'mish':
+        actlayer = nn.Mish()
+    elif activation == 'simnorm':
+        actlayer = SimNorm()
+    elif activation == 'none':
+        actlayer == nn.Identity()
+    else:
+        raise ValueError(f'Invalid activation function {activation}')
+    
+    return actlayer
+
+def _MLP(input_dim: int, hidden_dim: List[int], output_dim: int = None, activation: str = 'relu', normalize=True, outact='none'):
     layers = []
     n = 1 if activation != 'glu' else 2
     for i in range(len(hidden_dim)):
@@ -18,30 +50,17 @@ def _MLP(input_dim: int, hidden_dim: List[int], output_dim: int = None, activati
             layers.append(nn.Linear(input_dim, hidden_dim[i] * n))
         else:
             layers.append(nn.Linear(hidden_dim[i-1], hidden_dim[i] * n))
-        if activation == 'relu':
-            layers.append(nn.ReLU())
-        elif activation == 'sigmoid':
-            layers.append(nn.Sigmoid())
-        elif activation == 'tanh':
-            layers.append(nn.Tanh())
-        elif activation == 'leaky_relu':
-            layers.append(nn.LeakyReLU())
-        elif activation == 'elu':
-            layers.append(nn.ELU())
-        elif activation == 'selu':
-            layers.append(nn.SELU())
-        elif activation == 'gelu':
-            layers.append(nn.GELU())
-        elif activation == 'glu':
-            layers.append(nn.GLU())
-        elif activation == 'silu':
-            layers.append(nn.SiLU())
-        elif activation == 'none':
-            pass
-        else:
-            raise ValueError('Invalid activation function')
+        
+        if normalize:
+            layers.append(nn.LayerNorm(hidden_dim[i] * n))
+
+        layers.append(get_act(activation=activation))
+
     if output_dim is not None:
         layers.append(nn.Linear(hidden_dim[-1], output_dim) if len(hidden_dim)  > 0 else nn.Linear(input_dim, output_dim)) 
+    if outact != 'none':
+        layers.append(get_act(outact))
+
     return nn.Sequential(*layers)
 
 class ResidualMLP(nn.Module):
@@ -53,7 +72,9 @@ class ResidualMLP(nn.Module):
         return self.mlp(x) + self.residual(x)
 
 def MLP(cfg: MLPConfig):
-    return _MLP(cfg.input_dim, cfg.hidden_dims, cfg.output_dim, cfg.activation)
+    normalize = cfg.normalize if 'normalize' in cfg else True
+    outact = cfg.outact if 'outact' in cfg else 'none'
+    return _MLP(cfg.input_dim, cfg.hidden_dims, cfg.output_dim, cfg.activation, normalize=normalize, outact=outact)
 
 def DynamicsMLP(cfg):
     return _MLP(cfg.latent_dim + cfg.n_options, cfg.hidden_dims, output_dim=cfg.latent_dim, activation=cfg.activation)

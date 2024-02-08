@@ -6,18 +6,26 @@ features:
     in_width: 64
     in_height: 64
     color_channels: 3
-    depth: 24
+    depth: 48
     cnn_blocks: 2
     min_resolution: 4
-    mlp_layers: [256,]
-    mlp_activation: silu
-    cnn_activation: silu
-    obs_keys: '^image$'
+    mlp_layers: [1024,]
+    mlp_activation: mish
+    cnn_activation: mish
+    obs_keys: 'image.*'
   mlp:
     type: mlp
     input_dim: 153
     hidden_dims:
-    - 256
-    - 256
-    activation: silu
+    - 512
+    - 512
+    activation: mish
     obs_keys: '.*'
+  final_mlp:
+    type: mlp
+    input_dim: ${model.latent_dim}
+    output_dim: ${model.latent_dim}
+    hidden_dims:
+    - 512
+    - 512
+    activation: mish

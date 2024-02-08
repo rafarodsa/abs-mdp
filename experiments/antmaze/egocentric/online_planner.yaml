@@ -14,21 +14,22 @@ experiment:
   eval_n_runs: 10
   log_level: 20
   checkpoint_frequency: 10000 
-  max_rollout_len:  # max length to rollout the ground env.
+  max_rollout_len: 64 # max length to rollout the ground env.
   log_tensorboard: true
   discounted: false
-  steps: 250000
-  train_every: 8
+  steps: 1000000
+  train_every: 32
   max_episode_len: 100
   outdir: planning_ddqn
   explore_ground: false
+  prefill: 512
 
 world_model:
   ckpt: none
   data_path: none
   name: null
   reward_scale: ${planner.env.reward_scale}
-  sample_transition: false
+  sample_transition: true
   model_success: false
   gamma: ${planner.env.gamma}
   fixed_modules: []
@@ -37,27 +38,143 @@ world_model:
     model_config_dir: experiments/antmaze
     n_options: 3
     obs_dims: 29
-    latent_dim: 16
+    latent_dim: 32
     trajectory_len: 64
-    encoder: ${loadcfg:${model.model_config_dir}/config/models/multiencoder.yaml}
-    decoder: ${loadcfg:${model.model_config_dir}/config/models/decoder_mlp_critic.yaml}
-    transition: ${loadcfg:${model.model_config_dir}/config/models/transition_gaussian.yaml}
-    init_class: ${loadcfg:${model.model_config_dir}/config/models/init_class_mlp.yaml}
-    reward: ${loadcfg:${model.model_config_dir}/config/models/reward_mlp.yaml}
-    tau: ${loadcfg:${model.model_config_dir}/config/models/tau_mlp.yaml}
-    goal_class: 
-      type: 'mlp'
-      hidden_dims: [256, 256]
-      activation: silu
-      output_dim: 1
-      input_dim: 16
-      reward_warmup_steps: 5000
-    
+    encoder: 
+      features:
+        type: multiencoder
+        outdim: ${model.latent_dim}
+        cnn:
+          type: doubling_residual
+          in_width: 64
+          in_height: 64
+          color_channels: 3
+          depth: 48
+          cnn_blocks: 2
+          min_resolution: 4
+          mlp_layers: [1024,]
+          mlp_activation: mish
+          cnn_activation: mish
+          obs_keys: '^image$'
+        mlp:
+          type: mlp
+          input_dim: 153
+          hidden_dims:
+          - 512
+          - 512
+          activation: mish
+          obs_keys: '.*'
+        final_mlp:
+          type: mlp
+          input_dim: ${model.latent_dim}
+          output_dim: ${model.latent_dim}
+          hidden_dims:
+          - 512
+          - 512
+          activation: mish
+          outact: none
 
+    decoder:
+      type: mlp
+      input_dim: ${eval:${model.latent_dim}*2}
+      output_dim: 1
+      hidden_dims: [512, 512]
+      activation: mish
+    # transition:
+    #   features:
+    #     type: dynamics_mlp
+    #     latent_dim: ${model.latent_dim}
+    #     n_options: ${model.n_options}
+    #     hidden_dims: [512, 512]
+    #     activation: mish
+    #   dist:
+    #     type: diag_gaussian
+    #     output_dim: ${model.latent_dim}
+    #     input_dim: ${model.latent_dim}
+    #     min_std: 0.001
+    #     max_std: 100 
+      # features:
+      #   type: dynamics_mlp
+      #   latent_dim: ${model.latent_dim}
+      #   n_options: ${model.n_options}
+      #   hidden_dims: [512, 512]
+      #   activation: mish
+      # dist:
+      #   type: mixture_gaussian
+      #   n_components: 8
+      #   output_dim: ${model.latent_dim}
+      #   input_dim: ${model.latent_dim}
+      #   min_std: 0.001
+      #   max_std: 100
+      # features:
+      #   type: dynamics_mlp
+      #   latent_dim: ${model.latent_dim}
+      #   n_options: ${model.n_options}
+      #   hidden_dims: [512, 512]
+      #   activation: mish
+      # dist:
+      #   type: deterministic
+    transition:
+      features:
+        type: rssm
+        latent_dim: ${model.latent_dim}
+        n_options: ${model.n_options}
+        hidden_dim: 1024
+        activation: mish
+        mlp:
+          type: mlp
+          input_dim: ${eval:1*${model.transition.features.hidden_dim}}
+          output_dim: ${model.transition.features.hidden_dim}
+          hidden_dims: [512, 512]
+          activation: mish
+      # dist:
+      #   type: mixture_gaussian
+      #   n_components: 6
+      #   output_dim: ${model.latent_dim}
+      #   input_dim: ${model.transition.features.hidden_dim}
+      #   min_std: 0.001
+      #   max_std: 100
+      dist:
+        type: diag_gaussian
+        output_dim: ${model.latent_dim}
+        input_dim: ${model.transition.features.hidden_dim}
+        min_std: 0.001
+        max_std: 10
+    init_class:
+      type: mlp
+      input_dim: ${model.latent_dim}
+      output_dim: ${model.n_options}
+      hidden_dims:
+        - 256
+        - 256
+      activation: mish
+    reward:
+      type: mlp
+      input_dim: ${eval:${model.latent_dim}*2+${model.n_options}}
+      output_dim: 1
+      hidden_dims:
+        - 256
+        - 256
+      activation: mish
+    tau:
+      type: mlp
+      input_dim: ${eval:${model.latent_dim}+${model.n_options}}
+      output_dim: 1
+      hidden_dims:
+      - 256
+      - 256
+      activation: mish
+    goal_class: 
+      type: mlp
+      hidden_dims: [256, 256]
+      activation: mish
+      output_dim: 1
+      reward_warmup_steps: 60000
+    
   optimizer:
     type: adam
     params:
-      lr: 1e-4
+      lr: 5e-4
   scheduler:
     type: 'linear_scheduler'
     params:
@@ -67,17 +184,19 @@ world_model:
 
   loss:
     grounding_const: 1.
-    tpc_const: 1
+    tpc_const: 1.
     kl_const: 1
     transition_const: 1.
-    reward_const: 1
-    tau_const: 1.
-    initset_const: 1
+    reward_const: 1.
+    tau_const: 0.001
+    initset_const: 1.
+    norm2_const: 0.
+    goal_class_const: 1.
     n_samples: 1
 
   data:
     buffer_size: 100000
-    batch_size: 2
+    batch_size: 16
 
 planner:
   env:
@@ -89,6 +208,7 @@ planner:
     goal: 0
     abstract_goal_tol: 0.1
     envname: 'ant_maze_xl'
+    n_envs: 1
 
   agent:
     load: null
@@ -112,10 +232,9 @@ planner:
     activation: silu
     output_dim: ${world_model.model.n_options}
 
-
   q_func_rainbow:
     type: 'mlp'
     n_actions: 3
     hidden_dims: [256, 256]
-    activation: relu
+    activation: mish
     output_dim: 1024

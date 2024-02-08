@@ -48,6 +48,13 @@ class EnvOptionWrapper(gym.Wrapper):
                 if action is None:
                     break
                 next_s, _r, done, truncated, info = self.env.step(action)
+                # if _r > 0:
+                #     base_env = self.env.env
+                #     physics = base_env._env._env._physics
+                #     pos, orientation = list(map(np.array, base_env._walker.get_pose(physics)))
+                #     distance_to_goal = np.sqrt(((np.array([0., -7.2]) - pos[:2]) ** 2).sum())
+                #     print(distance_to_goal, done)
+
                 r = r + self.env.gamma ** t * _r  if self.discounted else r + _r# accumulate discounted reward
                 t += 1
             if t >= option.max_executing_time and not done:

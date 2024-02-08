@@ -7,6 +7,7 @@ import time
 import numpy as np
 from src.utils.printarr import printarr
 import pfrl
+import torch
 
 
 def _run_episodes(
@@ -41,8 +42,10 @@ def _run_episodes(
             tau_total = 0
         
         initset = env.last_initset
+
         a = agent.act(obs, initset)
-        obs, r, done, info = env.step(a.cpu())
+        a = a.cpu() if isinstance(a, torch.Tensor) else a
+        obs, r, done, info = env.step(a)
         
         episode_len += 1
         timestep += 1

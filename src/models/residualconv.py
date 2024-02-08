@@ -87,6 +87,7 @@ ACTIVATION_LAYERS = {
     'tanh' : nn.Tanh,
     'sigmoid': nn.Sigmoid,
     'elu': nn.ELU,
+    'mish': nn.Mish
 }
 
 def get_activation_layer(activation : str):

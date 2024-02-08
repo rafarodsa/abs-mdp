@@ -4,4 +4,5 @@ input_dim: ${eval:${model.latent_dim}+${model.n_options}}
 output_dim: 1
 hidden_dims:
 - 256
-activation: relu
+- 256
+activation: silu

@@ -19,16 +19,30 @@ MAPS = {
     'maze_m': (
         '6 6 6 6 8 8 8 7 7 7 7',
         '6 . . . . . . . . . 7',
-        '6 . . P . . . . . . 7',
+        '6 . P . . . P . . . 7',
         '6 . . . . . . . . . 7',
         '6 6 6 5 5 5 5 . . . 4',
         '            5 . P . 4',
         '1 1 1 1 5 5 5 . . . 4',
         '1 . . . . . . . . . 3',
-        '1 . P . . . . . . . 3',
+        '1 . P . . . P . . . 3',
         '1 . . . . . . . . . 3',
         '1 1 1 1 2 2 2 3 3 3 3',
     ),
+
+    # 'maze_m': (
+    #     '8 8 8 8 9 9 9 A A A B',
+    #     '7 . . . . . . . . . B',
+    #     '7 . . P . . . . . . B',
+    #     '7 . . . . . . . . . B',
+    #     '6 6 6 5 5 5 5 . . . C',
+    #     '            4 . P . C',
+    #     '2 2 2 2 3 3 3 . . . C',
+    #     '1 . . . . . . . . . D',
+    #     '1 . P . . . . . . . D',
+    #     '1 . . . . . . . . . D',
+    #     'F F F F F E E E E E D',
+    # ),
 
     'maze_l': (
         '8 8 8 8 7 7 7 6 6 6 6 . . .',
@@ -54,15 +68,15 @@ MAPS = {
         '9 . . . . . . . . . 8 . 4 . P . 4',
         '6 . . . 7 7 7 8 8 8 8 . 5 . . . 3',
         '6 . P . 7 . . . . . . . 5 . . . 3',
-        '6 . . . 7 7 7 5 5 5 5 5 5 . . . 3',
+        '6 . . . 7 7 7 5 5 5 5 5 5 . P . 3',
         '5 . . . . . . . . . . . . . . . 3',
-        '5 . . . . . . . P . . . . . . . 3',
+        '5 . P . . . . . P . . . . . P . 3',
         '5 . . . . . . . . . . . . . . . 3',
         '5 5 5 5 4 4 4 . . . 6 6 6 . . . 3',
-        '. . . . . . 4 . . . 6 . 6 . . . 3',
+        '. . . . . . 4 . . . 6 . 6 . P . 3',
         '1 1 1 1 4 4 4 . P . 6 . 6 . . . 3',
         '1 . . . . . . . . . 2 . 1 . . . 1',
-        '1 . P . . . . . . . 2 . 1 . P . 1',
+        '1 . P . . P . . . . 2 . 1 . P . 1',
         '1 . . . . . . . . . 2 . 1 . . . 1',
         '1 1 1 1 1 1 1 2 2 2 2 . 1 1 1 1 1',
     ),
@@ -131,24 +145,28 @@ class EgocentricMaze(nav.LocoNav):
                     'texture', type='2d', name='wall', builtin='flat',
                     rgb1=color, width=100, height=100)]
         wall_textures = {'*': WallTexture([0.8, 0.8, 0.8])}
-        cmap = plt.get_cmap('tab10')
-        for index in range(9):
-            wall_textures[str(index + 1)] = WallTexture(cmap(index)[:3])
+        cmap = plt.get_cmap('tab20')
+        for i, index in enumerate(list(range(9)) + ['A', 'B', 'C', 'D', 'E', 'F']):
+            if isinstance(index, int):
+                wall_textures[str(i + 1)] = WallTexture(cmap(i)[:3])
+            else:
+                wall_textures[index] = WallTexture(cmap(i)[:3])
+
 
         lines = [line[::2].replace('.', ' ') for line in MAPS[name]]
         lines[self._goal[0]] = lines[self._goal[0]][:self._goal[1]] + 'G' + lines[self._goal[0]][self._goal[1]+1:]
-        print(lines)
+
         layout = ''.join([
             l + '\n' for l in lines])
         
-
-
+        print(layout)
         maze = labmaze.FixedMazeWithRandomGoals(
             entity_layer=layout,
             num_spawns=None, num_objects=1, random_state=None)
         arena = mazes.MazeWithTargets(
             maze, xy_scale=1.2, z_height=2.0, aesthetic='default',
             wall_textures=wall_textures, name='maze')
+        
         
         return arena
 

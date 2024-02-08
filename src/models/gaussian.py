@@ -11,10 +11,15 @@ from src.utils.printarr import printarr
 
 
 class DiagonalNormal(torch.distributions.Distribution):
-    def __init__(self, mean, std):
+    def __init__(self, mean, std, feats):
+        self._feats = feats
         self._mean = mean
         self._log_var = torch.log(std) * 2
         self.dist = Normal(mean, std)
+
+    @property
+    def feats(self):
+        return self._feats
 
     @property
     def mean(self):
@@ -97,28 +102,28 @@ class DiagonalGaussianModule(nn.Module):
         log_var = self.max_var - F.softplus(self.max_var - log_var)
         log_var = self.min_var + F.softplus(log_var - self.min_var)
        
-        return mean, log_var
+        return (mean, log_var), feats
 
     def sample_n_dist(self, input, n_samples=1):
  
-        mean, log_var = self.forward(input)
+        (mean, log_var), feats = self.forward(input)
         std = torch.exp(log_var / 2)
         std_normal = DiagonalNormal(torch.zeros_like(mean), torch.ones_like(std))
-        q = DiagonalNormal(mean, std)
+        q = DiagonalNormal(mean, std, feats)
         z = q.sample(n_samples)
         return z, q, std_normal
     
     def sample(self, input, n_samples=1):
-        mean, log_var = self.forward(input)
+        (mean, log_var), feats = self.forward(input)
         std = torch.exp(log_var / 2)
-        q = DiagonalNormal(mean, std)
+        q = DiagonalNormal(mean, std, feats)
         z = q.sample(n_samples)
         return z
     
     def distribution(self, input):
-        mean, log_var = self.forward(input)
+        (mean, log_var), feats = self.forward(input)
         std = torch.exp(log_var / 2)
-        q = DiagonalNormal(mean, std)
+        q = DiagonalNormal(mean, std, feats)
         return q
     
     def freeze(self):
@@ -169,22 +174,22 @@ class FixedVarGaussian(DiagonalGaussianModule):
     def sample_n_dist(self, input, n_samples=1):
         mean = self.forward(input)
         std = torch.exp(self.log_var / 2) * torch.ones_like(mean)
-        std_normal = DiagonalNormal(torch.zeros_like(mean), torch.ones_like(std))
-        q = DiagonalNormal(mean, std)
+        std_normal = DiagonalNormal(torch.zeros_like(mean), torch.ones_like(std), torch.zeros_like(mean))
+        q = DiagonalNormal(mean, std, mean)
         z = q.sample(n_samples)
         return z, q, std_normal
 
     def sample(self, input, n_samples):
         mean = self.forward(input)
         std = torch.exp(self.log_var / 2) * torch.ones_like(mean)
-        q = DiagonalNormal(mean, std)
+        q = DiagonalNormal(mean, std, mean)
         z = q.sample(n_samples)
         return z
     
     def distribution(self, input):
         mean = self.forward(input)
         std = torch.exp(self.log_var / 2) * torch.ones_like(mean)
-        q = DiagonalNormal(mean, std)
+        q = DiagonalNormal(mean, std, mean)
         return q
 
 def DiagonalGaussian(config: DiagGaussianConfig):
@@ -194,7 +199,7 @@ def SphericalGaussian(config: DiagGaussianConfig):
     return partial(SphericalGaussianModule, config=config)
 
 def Deterministic(config: DiagGaussianConfig):
-    config.var = 1e-15
+    config.var = 1.
     return partial(FixedVarGaussian, config=config)
 
 
@@ -202,14 +207,18 @@ def Deterministic(config: DiagGaussianConfig):
 ### Gaussian Mixture 
 class MixtureDiagonalNormal(torch.distributions.Distribution):
 
-    def __init__(self, means, stds, pis):
+    def __init__(self, means, stds, pis, feats):
         super(MixtureDiagonalNormal, self).__init__()
+        self._feats = feats
         self._means = means # list
         self._stds = stds # list
         self._pis = pis # (..., K)
-        
         # Create DiagonalNormal components
-        self._components = [DiagonalNormal(mean, std) for mean, std in zip(self._means, self._stds)]
+        self._components = [DiagonalNormal(mean, std, feats) for mean, std in zip(self._means, self._stds)]
+
+    @property
+    def feats(self):
+        return self._feats
 
     @property
     def means(self):
@@ -305,27 +314,27 @@ class MixtureDiagonalGaussianModule(nn.Module):
             log_vars.append(log_var)
 
         pis = F.softmax(self.mixing_coeffs(F.elu(feats)), dim=-1)
-        return means, log_vars, pis
+        return (means, log_vars, pis), feats
 
     def sample_n_dist(self, input, n_samples=1):
-        means, log_vars, pis = self.forward(input)
+        (means, log_vars, pis), feats = self.forward(input)
         stds = [torch.exp(log_var / 2) for log_var in log_vars]
-        mixture_dist = MixtureDiagonalNormal(means, stds, pis)
+        mixture_dist = MixtureDiagonalNormal(means, stds, pis, feats)
         z = mixture_dist.sample(n_samples)
         std_normal = DiagonalNormal(torch.zeros_like(means[0]), torch.ones_like(stds[0]))
         return z, mixture_dist, std_normal
 
     def sample(self, input, n_samples=1):
-        means, log_vars, pis = self.forward(input)
+        (means, log_vars, pis), feats = self.forward(input)
         stds = [torch.exp(log_var / 2) for log_var in log_vars]
-        mixture_dist = MixtureDiagonalNormal(means, stds, pis)
+        mixture_dist = MixtureDiagonalNormal(means, stds, pis, feats)
         z = mixture_dist.sample(n_samples)
         return z
 
     def distribution(self, input):
-        means, log_vars, pis = self.forward(input)
+        (means, log_vars, pis), feats = self.forward(input)
         stds = [torch.exp(log_var / 2) for log_var in log_vars]
-        mixture_dist = MixtureDiagonalNormal(means, stds, pis)
+        mixture_dist = MixtureDiagonalNormal(means, stds, pis, feats)
         return mixture_dist
     
     def freeze(self):

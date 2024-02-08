@@ -18,6 +18,31 @@ from src.agents.abstract_ddqn import AbstractDDQNGrounded
 from tqdm import tqdm
 import time, datetime
 from collections import deque
+import numpy as np
+
+import pathlib
+
+
+class Every:
+
+  def __init__(self, every, initial=True):
+    self._every = every
+    self._initial = initial
+    self._prev = None
+
+  def __call__(self, step):
+    step = int(step)
+    if self._every < 0:
+      return True
+    if self._every == 0:
+      return False
+    if self._prev is None:
+      self._prev = (step // self._every) * self._every
+      return self._initial
+    if step >= self._prev + self._every:
+      self._prev += self._every
+      return True
+    return False
 
 
 ''' 
@@ -26,7 +51,6 @@ from collections import deque
     task_reward: reward function for the task
     config: configuration object
 '''
-
 
 def rollout(grounded_agent, ground_env, world_model, n_steps=1, max_rollout_len=64):
     """
@@ -302,84 +326,118 @@ def train_agent_with_evaluation(
     basedir, world_model_outdir, agent_outdir = makeoutdirs(config)
 
     # set trainer in imagination
-    # TODO add "real steps" to agent trainer to log evaluation correctly.
+
     # TODO trigger evaluation by hand or align with steps in real env.
+
+    
+    warmup_steps = world_model.warmup_steps
+
+    if (pathlib.Path(world_model_outdir) / 'checkpoints/world_model.ckpt').exists():
+        world_model = world_model.load_checkpoint(pathlib.Path(world_model_outdir) / 'checkpoints/world_model.ckpt', goal_cfg=world_model.goal_cfg)
+        grounded_agent.encoder = world_model.encoder
+        grounded_agent.action_mask = world_model.initset
+        print(f"Loading checkpoint at {pathlib.Path(world_model_outdir) / 'checkpoints/world_model.ckpt'}")
+
     agent_trainer = GroundedPFRLTrainer(
-                                            agent=grounded_agent,
-                                            env=world_model,
-                                            steps=max_steps,
-                                            eval_n_steps=None,
-                                            eval_n_episodes=config.experiment.eval_n_runs,
-                                            eval_interval=config.experiment.eval_interval,
-                                            outdir=agent_outdir,
-                                            checkpoint_freq=config.experiment.checkpoint_frequency,
-                                            train_max_episode_len=config.experiment.max_episode_len,
-                                            step_offset=0,
-                                            eval_max_episode_len=config.experiment.max_episode_len,
-                                            eval_envs={'ground': test_env},
-                                            discounted=config.experiment.discounted,
-                                            use_tensorboard=config.experiment.log_tensorboard,
-                                            use_initset=use_initset
-                                        )
+                                        agent=grounded_agent,
+                                        env=world_model,
+                                        steps=max_steps,
+                                        eval_n_steps=None,
+                                        eval_n_episodes=config.experiment.eval_n_runs,
+                                        eval_interval=config.experiment.eval_interval,
+                                        outdir=agent_outdir,
+                                        checkpoint_freq=config.experiment.checkpoint_frequency,
+                                        train_max_episode_len=config.experiment.max_episode_len,
+                                        step_offset=0,
+                                        eval_max_episode_len=config.experiment.max_episode_len,
+                                        eval_envs={'ground': test_env},
+                                        discounted=config.experiment.discounted,
+                                        use_tensorboard=config.experiment.log_tensorboard,
+                                        use_initset=use_initset
+    )
+    
     world_model.set_outdir(world_model_outdir)
     world_model.setup_trainer(config)
     world_model.set_task_reward(task_reward)
-    world_model.set_init_state_sampler(test_env.init_state_sampler if init_state_sampler is None else init_state_sampler)
+    world_model.setup_replay()
+    # world_model.set_init_state_sampler(test_env.init_state_sampler if init_state_sampler is None else init_state_sampler)
 
     ## main training loop
 
     episode_len = 0
     episode_count = 0
-    s = ground_env.reset()
+    ss = ground_env.reset()
     max_rollout_len = config.experiment.max_rollout_len
     train_every = config.experiment.train_every
     checkpoint_freq = config.experiment.checkpoint_frequency
-    episode_return = 0
+    prefill = config.experiment.prefill
+    episode_return = []
 
     times_per_loop = deque(maxlen=10)
     tic = time.perf_counter()
     init_time = tic
     train_agent_in_sim = not learning_reward
-    for timestep in range(max_steps):
+    timestep = world_model.timestep   
+    # timestep=0
+
+    should_train = Every(train_every)
+    should_checkpoint = Every(checkpoint_freq)
+
+
+    while timestep < max_steps:
 
         ## rollout agent in ground environment
         if config.experiment.explore_ground:
             with torch.no_grad():
-                a = grounded_agent.act(s)
+                actions = grounded_agent.act(ss)
         else:
             with grounded_agent.eval_mode():
-                a = grounded_agent.act(s)
+                actions = grounded_agent.act(ss)
 
-        next_s, r, done, info = ground_env.step(a) # this might return tuples/lists of steps per env if env is batched.
-        # TODO buffer must keep track of the N trajectories.
-        # TODO we need a train ratio (??)
-        # TODO the reward below does not make sense because is a list
+        next_ss, rs, dones, infos = ground_env.step(actions) # this might return tuples/lists of steps per env if env is batched.
+        # print(actions, rs, infos)
 
-        import ipdb; ipdb.set_trace()
-        episode_return += r
-
-        world_model.observe(s, a, info['env_reward'], next_s, done, info['tau'], info['success'], info=info)
-        s = next_s
-        episode_len += 1
+        if len(episode_return) == 0:
+            episode_return = [0. for _ in range(len(rs))]
+            episode_len = [0. for _ in range(len(rs))]
+        episode_return = [rs + r for rs, r in zip(episode_return, rs)]
+        episode_len = [ep_len + 1 for ep_len in episode_len]
+        env_rewards = [info['env_reward'] for info in infos]
+        taus = [info['tau'] for info in infos]
+        successes = [info['success'] for info in infos]
         
-        if done or episode_len >= max_rollout_len:
-            ground_log = {
-                'ground_env/episode_return': episode_return,
-                'ground_env/episode_length': episode_len,
-                'ground_env/success': float(info['goal_reached'])
-            }
-            # log 
-            print(f'[rollout] timestep {timestep} episode {episode_count}, length {episode_len}, return {episode_return}')
-            s = ground_env.reset()
-            episode_len = 0
-            episode_return = 0
-            episode_count += 1
-            world_model.end_episode(ground_log, step=timestep)
+        last = np.logical_or(dones, np.array(episode_len) >= max_rollout_len)
+        world_model.observe(ss, actions, env_rewards, next_ss, dones, taus, successes, info=infos, last=last)
+
+        ss = ground_env.reset(~last)
+        if world_model.recurrent:
+            grounded_agent.batch_reset(~last)
+        # episode_count += last.sum()
+
+        for i in range(len(episode_len)):
+            timestep += 1
+            if last[i]:
+                episode_count += 1
+                ground_log = {
+                    'ground_env/episode_return': episode_return[i],
+                    'ground_env/episode_length': episode_len[i],
+                    'ground_env/success': float(infos[i]['goal_reached'])
+                }
+                # log 
+                print(f'[rollout] timestep {timestep} episodes {len(world_model.data)}, length {episode_len[i]}, return {episode_return[i]}')
+                world_model.log(ground_log, timestep)
+                episode_len[i] = 0
+                episode_return[i] = 0
+
+
+        agent_trainer.update_ground_step(len(ss))
+        
+        
         if learning_reward: 
-            train_agent_in_sim = timestep > world_model.warmup_steps
+            train_agent_in_sim = timestep > warmup_steps
             
 
-        if timestep % train_every == 0:
+        if should_train(timestep) and len(world_model.data) > prefill:
             ## train world model for n gradient steps
             world_model.train_world_model(timestep=timestep)
             ## train agent
@@ -392,14 +450,13 @@ def train_agent_with_evaluation(
             tic = toc
             avg_time_per_loop = sum(times_per_loop) / len(times_per_loop)
             estimate = avg_time_per_loop * (max_steps - timestep) / train_every
-            print(f'\t\tAverage time per loop: {avg_time_per_loop} seconds. Estimated time to complete: {datetime.timedelta(seconds=estimate)}')
-        
-        if timestep % checkpoint_freq == 0:
+            print(f'\tAverage time per loop: {avg_time_per_loop} seconds. Estimated time to complete: {datetime.timedelta(seconds=estimate)}')
+
+        if should_checkpoint(timestep):
             # save world model.
             world_model.save_checkpoint()
+            print('Checkpointing world model...')
         
-        agent_trainer.update_ground_step()
-
     # final steps
 
     agent_trainer.train(steps_budget=config.planner.agent.rollout_len) # train & evaluate finally
