@@ -8,15 +8,27 @@ from pfrl import replay_buffers
 from pfrl import agents, explorers
 from pfrl.wrappers import atari_wrappers
 from src.agents.dueling_dqn import DistributionalDuelingDQN
+from src.agents import DictTensor
 from pfrl.utils import batch_states as pfrl_batch_states
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple  
 import jax
+from contextlib import contextmanager
 
 from pfrl.utils.recurrent import (
     get_recurrent_state_at,
     recurrent_state_as_numpy,
 )
 
+    
+def to_tensor(s):
+    if isinstance(s, np.ndarray):
+        return torch.from_numpy(np.array(s))
+    if isinstance(s, (np.bool_, bool, int, float, np.intc)):
+        return torch.from_numpy(np.array(s)).float()
+    if isinstance(s, torch.Tensor):
+        return s
+    
+    
 class AbstractCategoricalDDQN(agents.CategoricalDoubleDQN):
     def observe(self, obs, r, done, reset, info=None):
         self.batch_observe([obs], [r], [done], [reset], [info])
@@ -70,7 +82,7 @@ class AbstractCategoricalDDQN(agents.CategoricalDoubleDQN):
             self.replay_updater.update_if_necessary(self.t)
     
     def _batch_observe_eval(self, batch_obs: Sequence[Any], batch_reward: Sequence[float], batch_done: Sequence[bool], batch_reset: Sequence[bool], batch_info: Sequence[Dict] = None) -> None:
-        self._batch_observe_eval(batch_obs, batch_reward, batch_done, batch_reset)
+        super()._batch_observe_eval(batch_obs, batch_reward, batch_done, batch_reset)
     
     def update(
         self, experiences: List[List[Dict[str, Any]]], errors_out: Optional[list] = None
@@ -224,13 +236,29 @@ class Rainbow:
 
         self.T = 0
         self.device = torch.device(f"cuda:{gpu}" if gpu > -1 else "cpu")
-
+    
+    @contextmanager
+    def eval_mode(self):
+        orig_mode = self.agent.training
+        try:
+            self.agent.training = False
+            yield
+        finally:
+            self.agent.training = orig_mode
+    
     @staticmethod
     def batch_states(states, device, phi):
-
-        if isinstance(states[0], torch.Tensor):
-            return torch.stack(states)
-        
+    
+        # if isinstance(states[0], torch.Tensor):
+        #     return torch.stack(states)
+        def preprocess(state):
+            if isinstance(state, torch.Tensor):
+                return state.cpu().numpy()
+            return state
+        if isinstance(states[0], dict):
+            states = jax.tree_map(to_tensor, states)
+            return DictTensor(jax.tree_map(lambda *s: torch.stack(s).to(device), *states))
+        states = list(map(preprocess, states))
         features = np.array([phi(s) for s in states])
         return torch.as_tensor(features).to(device)
 
@@ -246,7 +274,7 @@ class Rainbow:
     def batch_observe(self, state, reward, done, reset, info=None):
         return self.agent.batch_observe(state, reward, done, reset, info)
 
-    def act(self, state):
+    def act(self, state, initset=None):
         """ Action selection method at the current state. """
         return torch.tensor(self.agent.act(state))
 

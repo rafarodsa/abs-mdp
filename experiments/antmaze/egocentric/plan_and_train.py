@@ -1,8 +1,4 @@
-'''
-    Plan with DDQN and train world model
-    author: Rafael Rodriguez-Sanchez
-    date: 26 August 2023
-'''
+
 import os
 import argparse
 
@@ -22,18 +18,12 @@ from src.agents.rainbow import Rainbow, AbstractRainbow
 from src.absmdp.datasets_traj import PinballDatasetTrajectory_
 import pfrl
 from pfrl.q_functions import DiscreteActionValueHead
-from pfrl import replay_buffers, utils
-
-import lightning as L
+from pfrl import replay_buffers
 
 from src.agents.train_agent_online import train_agent_with_evaluation
 
-from experiments.antmaze.egocentric.maze import EgocentricMaze
-from experiments.antmaze.egocentric.env_adaptor import EmbodiedEnv
-from envs.env_options import EnvOptionWrapper
-from envs.env_goal import EnvGoalWrapper
-
 import pprint
+from .env_config import make_egocentric_maze
 
 def random_selection_initset(initset_s):
     # TODO this works only with single samples.
@@ -119,6 +109,7 @@ def make_rainbow_agent(agent_cfg, experiment_cfg, world_model):
         lr=agent_cfg.agent.lr,
         n_steps=agent_cfg.agent.num_step_return,
         replay_start_size=agent_cfg.agent.replay_start_size,
+        replay_buffer_size=agent_cfg.agent.replay_buffer_size,
         target_update_interval=agent_cfg.agent.update_interval,
         gamma=agent_cfg.env.gamma,
         gpu=experiment_cfg.gpu,
@@ -129,6 +120,51 @@ def make_rainbow_agent(agent_cfg, experiment_cfg, world_model):
 
     encoder = world_model.encoder if not world_model.recurrent else (world_model.encoder, world_model.transition)
     grounded_agent = AbstractRainbow(agent=agent, encoder=encoder, action_mask=world_model.initset, device=device, recurrent=world_model.recurrent)
+
+    return agent, grounded_agent
+
+def make_ppo_agent(agent_cfg, experiment_cfg, world_model):
+    from pfrl.policies import SoftmaxCategoricalHead
+    from src.agents.ppo import AbstractPPO, PPO
+
+    agent_cfg.q_func_rainbow.input_dim = world_model.n_feats
+    model_feats = ModuleFactory.build(agent_cfg.q_func_rainbow)
+
+    model = torch.nn.Sequential(
+        model_feats,
+        nn.Tanh(),
+        pfrl.nn.Branched(
+            nn.Sequential(
+                nn.Linear(agent_cfg.q_func_rainbow.output_dim, agent_cfg.q_func_rainbow.n_actions),
+                SoftmaxCategoricalHead()
+            ),
+            nn.Linear(agent_cfg.q_func_rainbow.output_dim, 1)
+        )
+    )
+    
+
+    opt = torch.optim.Adam(model.parameters(), lr=agent_cfg.agent.lr, eps=1e-5)
+
+    agent = PPO(
+        model,
+        opt,
+        gpu=experiment_cfg.gpu,
+        phi=lambda x: x,
+        update_interval=128,
+        minibatch_size=8,
+        epochs=10,
+        clip_eps=0.1,
+        clip_eps_vf=None,
+        standardize_advantages=True,
+        entropy_coef=1e-2,
+        recurrent=False,
+        max_grad_norm=0.5,
+        gamma=agent_cfg.env.gamma
+    )
+    device = f'cuda:{experiment_cfg.gpu}' if experiment_cfg.gpu >= 0 else 'cpu'
+
+    encoder = world_model.encoder if not world_model.recurrent else (world_model.encoder, world_model.transition)
+    grounded_agent = AbstractPPO(agent=agent, encoder=encoder, action_mask=world_model.initset, device=device, recurrent=world_model.recurrent)
 
     return agent, grounded_agent
 
@@ -143,41 +179,6 @@ def make_dummy_options(act_space, n_options=4):
         opt = Option(dummy_init, dummy_policy, dummy_termination)
         options.append(opt)
     return options
-
-def get_pose(env):
-    physics = env._env._env._physics
-    return list(map(np.array, env._walker.get_pose(physics)))
-        
-def make_reward_function(goal, env, tol=0.5):
-    target_pos = np.array(env._arena.grid_to_world_positions([goal])[0][:2])
-    print(f'Goal Position: {target_pos}')
-    def reward_fn(obs):
-        pos = np.array(get_pose(env)[0])[:2]
-        return ((pos - target_pos) ** 2).sum() < tol ** 2
-    return reward_fn
-
-GOALS = {
-    'ant_maze_xl': [[14, 14], [8, 14], [2, 14], [14, 8], [2, 8]],
-    'ant_empty': [[14, 14], [8, 14], [2, 14], [8, 9], [2, 8]],
-    'ant_maze_s': [[8, 4] ],
-    'ant_maze_m': [[2, 5], [8, 5], [2,8], [8,8]]
-}
-
-def make_egocentric_maze(name, goal, test=False, gamma=0.995, test_seed=None, train_seed=None, reward_scale=0.):
-    
-    from experiments.antmaze.egocentric.options import make_options
-    # goal space.
-    assert name in GOALS and len(GOALS[name]) > goal, f'Goal {goal} in maze {name} not defined!'
-    goal = GOALS[name][goal]
-    print(f'ENV: {name}, GOAL: {goal}')
-    base_env = EgocentricMaze(name, goal) 
-    env = EmbodiedEnv(base_env, ignore_obs_keys=['walker/egocentric_camera'])
-    options = list(make_options(base_env, max_exec_time=100).values()) # mapping name->option
-    task_reward = make_reward_function(goal, base_env, tol=1.8)
-    env = EnvOptionWrapper(options, env, discounted=(not test))
-    env = EnvGoalWrapper(env, task_reward, discounted=(not test), gamma=gamma, reward_scale=reward_scale)
-    return env
-
 
 def make_batched_ground_env(make_env, num_envs, seeds):
     from src.agents.multiprocess_env import MultiprocessVectorEnv
@@ -197,7 +198,7 @@ def main():
     parser.add_argument('--config', type=str, default='experiments/antmaze/egocentric/online_planner.yaml')
     parser.add_argument('--exp-id', type=str, default=None)
     parser.add_argument('--no-initset', action='store_true')
-    parser.add_argument('--agent', type=str, default='rainbow', choices=['rainbow', 'ddqn'])
+    parser.add_argument('--agent', type=str, default='rainbow', choices=['rainbow', 'ddqn', 'ppo'])
     
     args, unknown = parser.parse_known_args()
     cli_args = parse_oc_args(unknown)
@@ -253,6 +254,9 @@ def main():
         # world_model.set_no_initset()
     elif args.agent == 'ddqn':
         agent, grounded_agent = make_ddqn_agent(agent_cfg, experiment_cfg=cfg.experiment, world_model=world_model)
+    elif args.agent == 'ppo':
+        agent, grounded_agent = make_ppo_agent(agent_cfg, experiment_cfg=cfg.experiment, world_model=world_model)
+        use_initset = False
     else:
         raise ValueError(f'Agent {args.agent} not implemented')
     

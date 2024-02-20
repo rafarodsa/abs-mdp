@@ -1,0 +1,72 @@
+seed: 0
+
+rainbow:
+  q_func:
+    type: multicnnencoder
+    n_cnns: 2
+    n_actions: 3
+    cnn:
+      type: doubling_residual
+      in_width: 64
+      in_height: 64
+      color_channels: 3
+      depth: 24
+      cnn_blocks: 2
+      min_resolution: 4
+      mlp_layers: [1024,]
+      mlp_activation: mish
+      cnn_activation: mish
+      outdim: 32
+      obs_keys: 'image'
+    mlp:
+      type: mlp
+      input_dim: 153
+      hidden_dims:
+      - 512
+      - 512
+      activation: mish
+      output_dim: 32
+      obs_keys: '.*'
+    final_mlp:
+      type: mlp
+      output_dim: 1024
+      hidden_dims:
+      - 512
+      - 512
+      activation: mish
+      outact: none
+  experiment:
+    load: null
+    final_exploration_steps: 0.4 # proportion of agent trainings steps to decay the epsilon
+    final_epsilon: 0.1
+    eval_epsilon: 0.001
+    replay_start_size: 100
+    replay_buffer_size: 100000
+    target_update_interval: 5000
+    update_interval: 5
+    num_step_return: 1
+    steps: ${trainer.steps}
+    lr: 3e-4
+    gpu: ${trainer.gpu}
+    gamma: ${env.gamma}
+env:
+  sample_abstract_transition: true
+  render: false
+  init_thresh: 0.5
+  reward_scale: 0. #0.00016666666666666666
+  gamma: 0.997 #0.9998
+  goal: 3
+  envname: 'ant_maze_xl'
+  n_envs: 32
+
+trainer:
+  steps: 1000000
+  checkpoint_frequency: 10000
+  eval_n_runs: 10
+  eval_interval: 10000
+  outdir: exp_results/egocentric/baselines
+  log_tensorboard: true
+  max_episode_len: 100
+  log_interval: 1000
+  gpu: 0
+

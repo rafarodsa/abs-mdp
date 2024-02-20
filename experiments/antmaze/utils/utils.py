@@ -16,3 +16,10 @@ def parse_oc_args(oc_args):
     oc_args = ['='.join([oc_args[i].split('--')[-1], oc_args[i+1]]) for i in range(len(oc_args)) if i%2==0]
     cli_config = oc.from_cli(oc_args)
     return cli_config
+
+def parse_and_merge(parser):
+    args, unknown = parser.parse_known_args()
+    cli_args = parse_oc_args(unknown)
+    cfg = oc.load(args.config)
+    cfg = oc.merge(cfg, cli_args)
+    return args, cfg

@@ -191,7 +191,7 @@ def make_env(config, **overrides):
                     render: false
                     init_thresh: 0.5
                     reward_scale: 0. #0.00016666666666666666
-                    gamma: 0.9999
+                    gamma: 0.997
                     goal: {config['env_goal']}
                     abstract_goal_tol: 0.1
                     envname: {config['envname']}    
@@ -199,7 +199,7 @@ def make_env(config, **overrides):
     print(f"ENVNAME: {config['envname']}")
     train_seed = 2**31 - 1 - config.seed if overrides['mode'] == 'train' else config.seed
     env_cfg = oc.create(env_config)
-    env = make_egocentric_maze(name=env_cfg.envname, goal=env_cfg.goal, test=overrides['mode']=='test', gamma=env_cfg.gamma)
+    env = make_egocentric_maze(name=env_cfg.envname, goal=env_cfg.goal, test=overrides['mode']=='eval', gamma=env_cfg.gamma)
     
     env = FromGym(env)
     return wrap_env(env, config)

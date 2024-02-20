@@ -13,7 +13,7 @@ import os
 import datetime
 import io
 
-
+import functools
 
 @dataclass
 class Transition:
@@ -415,8 +415,8 @@ class TrajectoryReplayBufferStored(TrajectoryReplayBuffer, Dataset):
         done = self._pad_sequence(done, max_length, dtype=torch.float32)
 
         tensor_trajectory = (states, actions, rewards, next_states, durations, success, done, mask)
-
-        return tensor_trajectory
+        info = list(info) + [info[0] for i in range((self.length - len(ep)))]
+        return tensor_trajectory, info
 
 
 

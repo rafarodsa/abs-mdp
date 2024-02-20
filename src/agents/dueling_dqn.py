@@ -98,7 +98,10 @@ class DistributionalDuelingDQN(nn.Module, StateQFunction):
         h = x
         batch_size = x.shape[0]
         try:
-            h = self.activation(self.main_stream(h.view(batch_size, -1)))
+            if not isinstance(h, dict):
+                h = h.view(batch_size, -1)
+            h = self.activation(self.main_stream(h))
+            h = h.view(batch_size, -1)
         except:
             import ipdb; ipdb.set_trace()
         h_a, h_v = torch.chunk(h, 2, dim=1)

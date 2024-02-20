@@ -33,6 +33,7 @@ import matplotlib.pyplot as plt
 from omegaconf import OmegaConf as oc
 import jax
 
+from dm_control.utils.transformations import quat_rotate
 
 class AbstractMDP(nn.Module, gym.Env):
     SMOOTHING_NOISE_STD = 0.2
@@ -116,6 +117,8 @@ class AbstractMDP(nn.Module, gym.Env):
     def step(self, action):
         # self.eval()
         info = {}
+        if isinstance(action, np.int64):
+            action = torch.tensor(action)
         action = F.one_hot(action.long(), self.n_options).to(self.current_z.device).unsqueeze(0)
         z = self.current_z.unsqueeze(0)
 
@@ -126,7 +129,7 @@ class AbstractMDP(nn.Module, gym.Env):
             r_g, done = self.task_reward(next_z) if not self.recurrent else self.task_reward(next_z, feats=feats)
         tau = self._tau(z, action, feats=feats)[0]
         # print(tau)
-        info['tau'] = tau
+        info['tau'] = tau.cpu().item()
         info['env_reward'] = r
         info['task_reward'] = r_g
         info['task_done'] = done
@@ -142,7 +145,7 @@ class AbstractMDP(nn.Module, gym.Env):
 
         assert feats.shape[0] == self.n_feats, f'{feats.shape} != self.n_feats'
 
-        return feats, r, done, info
+        return feats.cpu().numpy(), r.item(), done, info
     
     def __sample_initial_from_data(self):
         traj = self.data.sample(1)[0]
@@ -182,7 +185,7 @@ class AbstractMDP(nn.Module, gym.Env):
             feats = self.current_z if not self.recurrent else torch.cat([self.current_z, self.transition.feats.last_hidden[0]], dim=-1)
             self.last_initset = self.initset(self.current_z, feats=feats)
 
-        return feats
+        return feats.cpu().numpy()
 
     def set_task_reward(self, task_reward):
         self._task_reward = task_reward
@@ -316,6 +319,7 @@ class AbstractMDP(nn.Module, gym.Env):
                 self.csvlogger.save()
             
             self.optimizer.step()
+
 
             # pretty print logs
             metrics = list(logs.items())
@@ -695,23 +699,62 @@ class AbstractMDPGoal(AbstractMDP):
     def __init__(self, cfg, goal_cfg, fabric=None):
         super().__init__(cfg, fabric)
         self.goal_cfg = goal_cfg
+        goal_cfg.output_dim = 1
         goal_cfg.input_dim = self.latent_dim if not self.recurrent else self.n_feats
         self.goal_class = build_model(goal_cfg)
+
+        goal_cfg.output_dim = 4
+        self.position_regressor = build_model(goal_cfg)
+
+
         self.warmup_steps = goal_cfg.reward_warmup_steps
         self.timestep = 0
 
-    # def setup_trainer(self, cfg=None, log=True):
-    #     if self.fabric is None:
-    #         self.setup_fabric(cfg.fabric)
-    #     self.fabric.launch()
-    #     self.configure_optimizers()
-    #     # self._fabric_model, self.optimizer = self.fabric.setup(super(), self.optimizer)
-    #     # self._fabric_goal_loss, self.goal_optimizer = self.fabric.setup(self.goal_class, self.goal_optimizer)
-    #     self._fabric_model, self.optimizer, self.goal_optimizer = self.fabric.setup(self, self.optimizer, self.goal_optimizer)
+    def train_world_model(self, steps=1, timestep=None):
+        '''
+            Training step.
+        '''
+        # self._fabric_model.train()
+        loss = None
+        self.transition.train()
 
-    # def configure_optimizers(self):
-    #     super().configure_optimizers()
-    #     self.goal_optimizer = torch.optim.Adam(self.goal_class.parameters(), lr=2e-4)
+        for _ in range(steps):
+            batch = self.data.sample(self.batch_size)
+            if batch is None:
+                print("WARNING: not enough trajectories in the buffer")
+                break
+            self.optimizer.zero_grad()
+            loss, logs = self.training_loss(batch)
+            
+            # train 
+            logs['step'] = timestep
+            if self.fabric is None:
+                loss.backward()
+            else:   
+                self.fabric.backward(loss)
+                self.fabric.log_dict(logs, step=timestep)
+
+            if self.flush(timestep):
+                self.csvlogger.save()
+            
+            self.optimizer.step()
+
+            self.regressor_optimizer.zero_grad()
+            regressor_loss, regressor_logs = self.regressor_loss(batch)
+            self.fabric.log_dict(regressor_logs, step=timestep)
+            self.fabric.backward(regressor_loss)
+            self.regressor_optimizer.step()
+
+            logs = {**logs, **regressor_logs}
+
+            # pretty print logs
+            metrics = list(logs.items())
+            metrics = [f'{k}: {v:.3f}' for k, v in metrics if k != 'step']
+            metrics = ' | '.join(metrics)
+            print(f'[world model training step {timestep}] {metrics}')
+
+        return loss
+
     
     def configure_optimizers(self):
         self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
@@ -722,6 +765,30 @@ class AbstractMDPGoal(AbstractMDP):
         self.fabric.launch()
         self.configure_optimizers()
         self._fabric_model, self.optimizer = self.fabric.setup(self, self.optimizer)
+        self.setup_ground_truth_regressor()
+
+    def setup_ground_truth_regressor(self):
+        regressor_optimizer = torch.optim.Adam(self.position_regressor.parameters(), lr=3e-5)
+        self._fabric_regressor, self.regressor_optimizer = self.fabric.setup(self.position_regressor, regressor_optimizer)
+
+    def compute_orientation(self, quat):
+        x = quat_rotate(quat, np.array([1., 0., 0.]))
+        angle = np.arctan2(x[1], x[0])
+        return np.array((np.cos(angle), np.sin(angle)))
+
+    def regressor_loss(self, batch):
+        (s, action, reward, next_s, duration, success, done, masks), info = batch
+        with torch.no_grad():
+            z = self.encoder(next_s)[masks.bool()]
+        prediction = self.position_regressor(z)
+        target = jax.tree_map(lambda _info: np.concatenate((_info['log_global_pos'][:2], self.compute_orientation(_info['log_global_orientation'])), axis=-1), info, is_leaf=lambda l: isinstance(l, dict))
+        target = np.concatenate([np.array(t) for t in target], axis=0)
+        target = torch.Tensor(target).to(z.device)
+        loss = torch.nn.functional.mse_loss(prediction, target)
+        logs = {'debug_regressor_loss': loss}
+
+        return loss, logs
+
 
     def task_reward(self, z, feats=None):
         # if self.timestep < self.warmup_steps:
@@ -730,14 +797,6 @@ class AbstractMDPGoal(AbstractMDP):
         goal_pred = (self.goal_class(_inp).squeeze().sigmoid() > 0.5).float()
         return goal_pred, goal_pred > 0
     
-    # def train_world_model(self, steps=1, timestep=None):
-    #     self.timestep = timestep
-    #     # self.goal_optimizer.zero_grad()
-    #     loss = super().train_world_model(steps, timestep)
-    #     # if self.timestep > self.warmup_steps:
-    #     # self.goal_optimizer.step()
-    #     return loss
-
     def goal_training_loss(self, batch):
         (s, action, reward, next_s, duration, success, done, masks), info = batch
         lengths = masks.sum(-1)
@@ -810,7 +869,7 @@ class AbstractMDPGoal(AbstractMDP):
         #     plt.savefig('predition_task_reward.png')
         #     plt.close()
         
-        norm2 = (z_c**2).sum(-1).mean()
+        norm2 = (z_c**2).sum(-1)
 
         loss =  self.hyperparams.grounding_const * grounding_loss.mean() + \
                 self.hyperparams.transition_const * transition_loss.mean() + \
@@ -819,7 +878,7 @@ class AbstractMDPGoal(AbstractMDP):
                 self.hyperparams.reward_const * reward_loss.mean() + \
                 self.hyperparams.tau_const * tau_loss.mean() + \
                 self.hyperparams.goal_class_const * goal_loss + \
-                0. #self.hyperparams.norm2_const * norm2
+                self.hyperparams.norm2_const * norm2.mean()
 
         
         log_dict = {
@@ -830,7 +889,10 @@ class AbstractMDPGoal(AbstractMDP):
             'initset_loss': initset_loss.mean(),
             'reward_loss': reward_loss.mean(),
             'tau_loss': tau_loss.mean(),
-            'norm2': norm2,
+            'norm2/mean': norm2.mean(),
+            'norm2/std': norm2.std(),
+            'norm2/min': norm2.min(),
+            'norm2/max': norm2.max(),
             'goal_pred/goal_class_loss': goal_loss,
             **goal_log_dict,
         }
@@ -923,6 +985,7 @@ class AbstractMDPGoal(AbstractMDP):
         assert 'goal_cfg' in loaded_ckpt or goal_cfg
         goal_cfg = loaded_ckpt['goal_cfg'] if 'goal_cfg' in loaded_ckpt else goal_cfg
         mdp = cls(cfg, goal_cfg)
+
         mdp.timestep = loaded_ckpt['timestep']
         state = mdp.get_model_state()
         for mdl in ('encoder', 'encoder', 'transition', 'initsets', 'tau', 'reward_fn', 'goal_class'):

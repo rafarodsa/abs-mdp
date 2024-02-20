@@ -22,6 +22,7 @@ import numpy as np
 
 import pathlib
 
+from jax import tree_map
 
 class Every:
 
@@ -166,6 +167,23 @@ class GroundedPFRLTrainer:
         self.ground_step = 0
         self.current_step = 0 # n of step in simulation
 
+    def compute_metrics(self, ep):
+        ep = np.array([o for o in ep])
+        norm2 = (ep ** 2).sum(-1)
+        residual = ((ep[1:]-ep[:-1])**2).sum(-1)
+
+        logs = {
+            'sim_rollout/norm2_mean': norm2.mean(),
+            'sim_rollout/norm2_std': norm2.std(),
+            'sim_rollout/norm2_max': norm2.max(),
+            'sim_rollout/norm2_min': norm2.min(),
+            'sim_rollout/residual_norm2_mean': residual.mean(),
+            'sim_rollout/residual_norm2_std': residual.std(),
+            'sim_rollout/residual_norm2_max': residual.max(),
+            'sim_rollout/residual_norm2_min': residual.min(),
+        }
+        return logs
+
     def train(self, steps_budget):
         '''
             Run training for a number of steps.
@@ -183,7 +201,9 @@ class GroundedPFRLTrainer:
 
         eval_stats_history = []  # List of evaluation episode stats dict
         episode_len = 0
-
+        
+        ep = [obs]
+        ep_logs = []
         try:
             while t < steps_budget:
 
@@ -195,7 +215,12 @@ class GroundedPFRLTrainer:
                     action = self.agent.act(obs)
 
                 # o_{t+1}, r_{t+1}
+                last_obs = obs
                 obs, r, done, info = self.env.step(action)
+                
+                # track
+                ep.append(obs)
+
                 t += 1
                 episode_r += r
                 episode_len += 1
@@ -211,7 +236,7 @@ class GroundedPFRLTrainer:
                 episode_end = done or reset or t == steps_budget
 
                 if episode_end:
-                    print(f'agent training: episode {episode_idx} length {episode_len} return {episode_r.item()}, statistics: {self.agent.get_statistics()}')
+                    print(f'agent training: episode {episode_idx} length {episode_len} return {episode_r}, statistics: {self.agent.get_statistics()}')
                     self.logger.info(
                         "outdir:%s step:%s episode:%s R:%s",
                         self.outdir,
@@ -222,6 +247,8 @@ class GroundedPFRLTrainer:
                     stats = self.agent.get_statistics()
                     self.logger.info("statistics:%s", stats)
                     episode_idx += 1
+
+                    ep_logs.append(self.compute_metrics(ep))
 
                 if self.evaluators is not None and (episode_end or self.eval_during_episode):
                     eval_results = [self.evaluate(evaluator, self.ground_step, episode_idx, self.agent, self.successful_score) for evaluator in self.evaluators]
@@ -237,6 +264,8 @@ class GroundedPFRLTrainer:
                     episode_r = 0
                     episode_len = 0
                     obs = self.env.reset()
+                    ep = [obs]
+
                 # if self.checkpoint_freq and self.ground_step % self.checkpoint_freq == 0:
                 #     save_agent(self.agent, self.ground_step, self.outdir, self.logger, suffix="_checkpoint")
 
@@ -250,7 +279,7 @@ class GroundedPFRLTrainer:
 
         self.current_step += t
 
-        return eval_stats_history
+        return eval_stats_history, tree_map(lambda *ep_stats: np.median(np.array(ep_stats)), *ep_logs)
     
     def update_ground_step(self, t=1):
         self.ground_step += t
@@ -327,8 +356,6 @@ def train_agent_with_evaluation(
 
     # set trainer in imagination
 
-    # TODO trigger evaluation by hand or align with steps in real env.
-
     
     warmup_steps = world_model.warmup_steps
 
@@ -385,7 +412,7 @@ def train_agent_with_evaluation(
 
 
     while timestep < max_steps:
-
+        grounded_agent.agent.batch_last_episode = None
         ## rollout agent in ground environment
         if config.experiment.explore_ground:
             with torch.no_grad():
@@ -442,7 +469,10 @@ def train_agent_with_evaluation(
             world_model.train_world_model(timestep=timestep)
             ## train agent
             if train_agent_in_sim:
-                agent_trainer.train(steps_budget=config.planner.agent.rollout_len)
+                grounded_agent.agent.batch_last_episode = None
+                eval_history, ep_logs = agent_trainer.train(steps_budget=config.planner.agent.rollout_len)
+                world_model.log(ep_logs, step=timestep)
+                print(f'[simulation stats] {" | ".join([f"{k}: {v}" for k,v in ep_logs.items()])}')
             
             ### timing
             toc = time.perf_counter()
