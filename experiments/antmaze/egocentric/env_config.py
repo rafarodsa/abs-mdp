@@ -1,7 +1,7 @@
 import numpy as np
 
 from experiments.antmaze.egocentric.maze import EgocentricMaze
-from experiments.antmaze.egocentric.env_adaptor import EmbodiedEnv
+from experiments.antmaze.egocentric.env_adaptor import EmbodiedEnv, GroundTruthEnvWrapper
 from envs.env_options import EnvOptionWrapper
 from envs.env_goal import EnvGoalWrapper
 
@@ -34,6 +34,22 @@ def make_egocentric_maze(name, goal, test=False, gamma=0.995, test_seed=None, tr
     print(f'ENV: {name}, GOAL: {goal}')
     base_env = EgocentricMaze(name, goal) 
     env = EmbodiedEnv(base_env, ignore_obs_keys=['walker/egocentric_camera'])
+    options = list(make_options(base_env, max_exec_time=100).values()) # mapping name->option
+    task_reward = make_reward_function(goal, base_env, tol=1.8)
+    env = EnvOptionWrapper(options, env, discounted=(not test))
+    env = EnvGoalWrapper(env, task_reward, discounted=(not test), gamma=gamma, reward_scale=reward_scale)
+    return env
+
+
+def make_egocentric_maze_ground_truth(name, goal, test=False, gamma=0.995, test_seed=None, train_seed=None, reward_scale=0.):
+    
+    from experiments.antmaze.egocentric.options import make_options
+    # goal space.
+    assert name in GOALS and len(GOALS[name]) > goal, f'Goal {goal} in maze {name} not defined!'
+    goal = GOALS[name][goal]
+    print(f'ENV: {name}, GOAL: {goal}')
+    base_env = EgocentricMaze(name, goal) 
+    env = GroundTruthEnvWrapper(base_env, ignore_obs_keys=['walker/egocentric_camera'])
     options = list(make_options(base_env, max_exec_time=100).values()) # mapping name->option
     task_reward = make_reward_function(goal, base_env, tol=1.8)
     env = EnvOptionWrapper(options, env, discounted=(not test))

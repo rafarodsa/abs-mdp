@@ -11,7 +11,7 @@ from pfrl import explorers
 
 from omegaconf import OmegaConf as oc
 from experiments.antmaze.plan import make_ground_env, parse_oc_args, gaussian_ball_goal_fn, GOALS, GOAL_TOL, DATA_PATH
-from src.absmdp.absmdp import AbstractMDPGoal, AbstractMDP
+from src.absmdp.absmdp import AbstractMDPGoal, TrueStateAbstractMDP
 from src.models import ModuleFactory
 from src.agents.abstract_ddqn import AbstractDDQNGrounded, AbstractDoubleDQN, AbstractLinearDecayEpsilonGreedy
 from src.agents.rainbow import Rainbow, AbstractRainbow
@@ -23,7 +23,8 @@ from pfrl import replay_buffers
 from src.agents.train_agent_online import train_agent_with_evaluation
 
 import pprint
-from .env_config import make_egocentric_maze
+from functools import partial
+from experiments.antmaze.egocentric.env_config import make_egocentric_maze, make_egocentric_maze_ground_truth
 
 def random_selection_initset(initset_s):
     # TODO this works only with single samples.
@@ -182,7 +183,6 @@ def make_dummy_options(act_space, n_options=4):
 
 def make_batched_ground_env(make_env, num_envs, seeds):
     from src.agents.multiprocess_env import MultiprocessVectorEnv
-    from functools import partial
     vec_env = MultiprocessVectorEnv(
         [
             partial(make_env, train_seed=seeds[i])
@@ -191,6 +191,10 @@ def make_batched_ground_env(make_env, num_envs, seeds):
     )
     return vec_env
 
+def encoder(state, device):
+    keys = ['log_global_pos', 'log_global_orientation']
+    state = torch.cat([state[k] for k in keys], dim=-1)
+    return state.float().to(device)
     
 def main():
     # parse arguments
@@ -198,6 +202,7 @@ def main():
     parser.add_argument('--config', type=str, default='experiments/antmaze/egocentric/online_planner.yaml')
     parser.add_argument('--exp-id', type=str, default=None)
     parser.add_argument('--no-initset', action='store_true')
+    parser.add_argument('--ground_truth_encoder', action='store_true')
     parser.add_argument('--agent', type=str, default='rainbow', choices=['rainbow', 'ddqn', 'ppo'])
     
     args, unknown = parser.parse_known_args()
@@ -224,21 +229,29 @@ def main():
 
     device = f'cuda:{cfg.experiment.gpu}' if cfg.experiment.gpu >= 0 else 'cpu'
     reward_scale = cfg.planner.env.reward_scale
-    
-    train_env = make_batched_ground_env(lambda *args, **kwargs: make_egocentric_maze(cfg.planner.env.envname, goal=cfg.planner.env.goal, gamma=cfg.planner.env.gamma, test=False, reward_scale=reward_scale), seeds=process_seeds, num_envs=cfg.planner.env.n_envs)
-    test_env = make_egocentric_maze(cfg.planner.env.envname, goal=cfg.planner.env.goal, gamma=cfg.planner.env.gamma, test=True, reward_scale=reward_scale)
+
 
     # initialize fabric for logging and checkpointing
     
-    mdp_constructor = AbstractMDPGoal
-    goal_cfg = world_model_cfg.model.goal_class
+    if not args.ground_truth_encoder:
+        train_env = make_batched_ground_env(lambda *args, **kwargs: make_egocentric_maze(cfg.planner.env.envname, goal=cfg.planner.env.goal, gamma=cfg.planner.env.gamma, test=False, reward_scale=reward_scale), seeds=process_seeds, num_envs=cfg.planner.env.n_envs)
+        test_env = make_egocentric_maze(cfg.planner.env.envname, goal=cfg.planner.env.goal, gamma=cfg.planner.env.gamma, test=True, reward_scale=reward_scale)
+        mdp_constructor = AbstractMDPGoal
+        goal_cfg = world_model_cfg.model.goal_class
 
-    if world_model_cfg.ckpt != 'none':
-        print(f'Loading world model from checkpoint at {world_model_cfg.ckpt}')
-        world_model = mdp_constructor.load_from_old_checkpoint(world_model_cfg=world_model_cfg)
+        if world_model_cfg.ckpt != 'none':
+            print(f'Loading world model from checkpoint at {world_model_cfg.ckpt}')
+            world_model = mdp_constructor.load_from_old_checkpoint(world_model_cfg=world_model_cfg)
+        else:
+            world_model = mdp_constructor(world_model_cfg, goal_cfg=goal_cfg)
+            # world_model = mdp_constructor(world_model_cfg)
     else:
-        world_model = mdp_constructor(world_model_cfg, goal_cfg=goal_cfg)
-        # world_model = mdp_constructor(world_model_cfg)
+
+        train_env = make_batched_ground_env(lambda *args, **kwargs: make_egocentric_maze_ground_truth(cfg.planner.env.envname, goal=cfg.planner.env.goal, gamma=cfg.planner.env.gamma, test=False, reward_scale=reward_scale), seeds=process_seeds, num_envs=cfg.planner.env.n_envs)
+        test_env = make_egocentric_maze_ground_truth(cfg.planner.env.envname, goal=cfg.planner.env.goal, gamma=cfg.planner.env.gamma, test=True, reward_scale=reward_scale)
+        mdp_constructor = TrueStateAbstractMDP
+        goal_cfg = world_model_cfg.model.goal_class
+        world_model = mdp_constructor(world_model_cfg, goal_cfg=goal_cfg, encoder_fn=partial(encoder, device=device), ground_truth_state_dim=7)
 
 
     world_model.freeze(world_model_cfg.fixed_modules)
@@ -246,7 +259,6 @@ def main():
     # make grounded agent
     print(world_model)
     
-
     use_initset = True
     if args.agent == 'rainbow':
         agent, grounded_agent = make_rainbow_agent(agent_cfg, experiment_cfg=cfg.experiment, world_model=world_model)
