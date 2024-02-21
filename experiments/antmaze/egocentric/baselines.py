@@ -14,21 +14,23 @@ from experiments.antmaze.egocentric.env_config import make_egocentric_maze
 
 from src.agents.train_agent_batch import train_agent_batch_with_evaluation
 
-def make_rainbow_agent(agent_cfg):
+def make_rainbow_agent(agent_cfg, obs):
     q_func = ModuleFactory.build(agent_cfg.q_func)
+
+    with torch.no_grad():
+        q_func(obs) # dummy forward pass
 
     training_steps = agent_cfg.experiment.steps
     agent_total_steps = training_steps
 
     betasteps = agent_total_steps / agent_cfg.experiment.update_interval
 
-
-    explorer = explorers.LinearDecayEpsilonGreedy(
-            1.0,
-            agent_cfg.experiment.final_epsilon,
-            agent_total_steps * agent_cfg.experiment.final_exploration_steps,
-            lambda: np.random.choice(agent_cfg.q_func.n_actions)
-    )
+    # explorer = explorers.LinearDecayEpsilonGreedy(
+    #         1.0,
+    #         agent_cfg.experiment.final_epsilon,
+    #         agent_total_steps * agent_cfg.experiment.final_exploration_steps,
+    #         lambda: np.random.choice(agent_cfg.q_func.n_actions)
+    # )
 
     agent = Rainbow(
         q_func, 
@@ -38,11 +40,13 @@ def make_rainbow_agent(agent_cfg):
         n_steps=agent_cfg.experiment.num_step_return,
         replay_start_size=agent_cfg.experiment.replay_start_size,
         replay_buffer_size=agent_cfg.experiment.replay_buffer_size,
-        target_update_interval=agent_cfg.experiment.update_interval,
+        target_update_interval=agent_cfg.experiment.target_update_interval,
         gamma=agent_cfg.experiment.gamma,
         gpu=agent_cfg.experiment.gpu,
         update_interval=agent_cfg.experiment.update_interval,
-        explorer=None #explorer
+        v_max=1,
+        v_min=-1,
+        explorer=None, #explorer
     )
     device = f'cuda:{agent_cfg.experiment.gpu}' if agent_cfg.experiment.gpu >= 0 else 'cpu'
 
@@ -80,12 +84,9 @@ def main():
     
     # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     # run 
-    agent, q_func, device = make_rainbow_agent(cfg.rainbow)
     obs = test_env.reset()
     obs = jax.tree_map(lambda s: torch.from_numpy(np.array(s)).float(), obs)
-    with torch.no_grad():
-        obs = jax.tree_map(lambda s: s.to(device), obs)
-        q_func(obs) # dummy forward pass
+    agent, q_func, device = make_rainbow_agent(cfg.rainbow, obs)
 
     # pfrl trainer
 

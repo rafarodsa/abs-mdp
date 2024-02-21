@@ -999,34 +999,13 @@ class AbstractMDPGoal(AbstractMDP):
             print(f'Could not initialize replay buffer from dataset from {cfg.data.data_path} with exception {e.with_traceback()}')
         return mdp
 
-# if __name__ == '__main__':
-#     ## TEST
-#     import argparse
-#     from omegaconf import OmegaConf as oc
-#     parser = argparse.ArgumentParser()
-#     parser.add_argument('--cfg', type=str, default='experiments/pb_obstacles/fullstate/config/tpc_cfg_rssm.yaml')
-#     parser.add_argument('--test-training', action='store_true')
-#     parser.add_argument('--ckpt', type=str, default=None)
 
-#     args = parser.parse_args()
 
-#     cfg = oc.load(args.cfg)
-#     cfg.data.buffer_size = int(1e6)
-
-#     if args.ckpt is not None:
-#         fabric = L.Fabric(accelerator='cpu')
-#         fabric.launch()
-#         mdp = AbstractMDP.load_from_old_checkpoint(args.ckpt, fabric=fabric)
-
-#     if args.test_training:
-#         mdp = AbstractMDP(cfg)
-#         mdp.initialize_replay_buffer_from_dataset(cfg.data)
-#         mdp.configure_optimizers()
-        
-#         for i in range(10):
-#             L = mdp.training_step()
-#             print(L)
-
+def encoder(state, device='cuda:0'):
+    keys = ['log_global_pos', 'log_global_orientation']
+    state = torch.cat([state[k] for k in keys], dim=-1)
+    return state.float().to(device)
+    
 
 class TrueStateAbstractMDP(AbstractMDPGoal):
 
@@ -1172,3 +1151,20 @@ class TrueStateAbstractMDP(AbstractMDPGoal):
         }
 
         return loss, log_dict
+
+    @classmethod
+    def load_checkpoint(cls, ckpt_path, goal_cfg=None, fabric=None):
+        if fabric is None:
+            fabric = L.Fabric()
+        loaded_ckpt = fabric.load(ckpt_path, {})
+
+        cfg = loaded_ckpt['cfg']
+        assert 'goal_cfg' in loaded_ckpt or goal_cfg
+        goal_cfg = loaded_ckpt['goal_cfg'] if 'goal_cfg' in loaded_ckpt else goal_cfg
+        mdp = cls(cfg, goal_cfg, encoder, ground_truth_state_dim=7)
+
+        mdp.timestep = loaded_ckpt['timestep']
+        state = mdp.get_model_state()
+        for mdl in ('transition', 'initsets', 'tau', 'reward_fn', 'goal_class'):
+            state[mdl].load_state_dict(loaded_ckpt[mdl])
+        return mdp
