@@ -142,6 +142,14 @@ world_model:
       - 256
       - 256
       activation: mish
+    termination:
+      type: mlp
+      input_dim: ${model.latent_dim}
+      output_dim: 2
+      hidden_dims:
+      - 256
+      - 256
+      activation: mish
     goal_class: 
       type: mlp
       hidden_dims: [256, 256]
@@ -166,6 +174,7 @@ world_model:
     kl_const: 1
     transition_const: 1.
     reward_const: 1.
+    termination_const: 1.
     tau_const: 0.001
     initset_const: 1.
     norm2_const: 0.
@@ -195,7 +204,7 @@ planner:
     eval_epsilon: 0.001
     replay_start_size: 100
     replay_buffer_size: 100000
-    target_update_interval: 5000
+    target_update_interval: 10000
     update_interval: 5
     num_step_return: 1
     steps: 1000000

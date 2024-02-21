@@ -100,6 +100,14 @@ class AbstractMDP(nn.Module, gym.Env):
         self.data = None
 
         self.residual_transition = True
+
+        self._models = {
+            'encoder': self.encoder,
+            'transition': self.transition,
+            'initsets': self.initsets,
+            'tau': self.tau, 
+            'reward_fn': self.reward_fn
+        }
             
     def to(self, device):
         self.device = device
@@ -205,6 +213,24 @@ class AbstractMDP(nn.Module, gym.Env):
         probs = self.initsets(_inp).sigmoid()
         return  (probs > self.initset_thresh).float()
    
+    @property
+    def models(self):
+        return list(self._models.keys())
+    
+    def get_model_state(self):
+        '''
+            Get model state
+        '''
+
+        # 
+        state = {
+            "cfg": self.cfg,
+            "timestep": self.timestep,
+            "optimizer": self.optimizer,
+            **{k:v for k,v in self._models.items()}
+        }
+
+        return state
     
     def _transition(self, z, a):
         self.transition.eval()
@@ -490,7 +516,6 @@ class AbstractMDP(nn.Module, gym.Env):
 
         return -_loss[..., 1:].mean(-1)
 
-
     
     def reward_loss(self, r_target, z, a, next_z, feats=None):
         '''
@@ -565,25 +590,6 @@ class AbstractMDP(nn.Module, gym.Env):
                                 info=trajectory.info[j] # TODO add info
                             )
             self.data.end_trajectory()
-
-
-    def get_model_state(self):
-        '''
-            Get model state
-        '''
-
-        # 
-        state = {
-            "cfg": self.cfg,
-            "timestep": self.timestep,
-            "encoder": self.encoder,
-            "transition": self.transition,
-            "initsets": self.initsets,
-            "tau": self.tau,
-            "reward_fn": self.reward_fn,
-            "optimizer": self.optimizer,
-        }
-        return state
 
     @staticmethod
     def load_from_old_checkpoint(world_model_cfg=None, fabric=None):
@@ -678,7 +684,7 @@ class AbstractMDPGoal(AbstractMDP):
         goal_cfg.output_dim = 1
         goal_cfg.input_dim = self.latent_dim if not self.recurrent else self.n_feats
         self.goal_class = build_model(goal_cfg)
-
+        self._models['goal_class'] = self.goal_class
         goal_cfg.output_dim = 4
         self.position_regressor = build_model(goal_cfg)
 
@@ -730,7 +736,6 @@ class AbstractMDPGoal(AbstractMDP):
             print(f'[world model training step {timestep}] {metrics}')
 
         return loss
-
     
     def configure_optimizers(self):
         self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
@@ -936,8 +941,7 @@ class AbstractMDPGoal(AbstractMDP):
 
     def _get_task_reward_examples(self):
         return  self.data.sample_task_reward(1024)
-    
-        
+     
     @classmethod
     def load_checkpoint(cls, ckpt_path, goal_cfg=None, fabric=None):
         if fabric is None:
@@ -951,7 +955,7 @@ class AbstractMDPGoal(AbstractMDP):
 
         mdp.timestep = loaded_ckpt['timestep']
         state = mdp.get_model_state()
-        for mdl in ('encoder', 'encoder', 'transition', 'initsets', 'tau', 'reward_fn', 'goal_class'):
+        for mdl in mdp.models:
             state[mdl].load_state_dict(loaded_ckpt[mdl])
         return mdp
 
@@ -999,14 +1003,114 @@ class AbstractMDPGoal(AbstractMDP):
             print(f'Could not initialize replay buffer from dataset from {cfg.data.data_path} with exception {e.with_traceback()}')
         return mdp
 
+class AbstractMDPGoalWTermination(AbstractMDPGoal):
+    def __init__(self, cfg, goal_cfg, fabric=None):
+        super().__init__(cfg, goal_cfg, fabric)
+        self.termination = build_model(cfg.model.termination)
+        self._models['termination'] = self.termination
+    @torch.no_grad()
+    def step(self, action):
+        # self.eval()
+        info = {}
+        if isinstance(action, np.int64):
+            action = torch.tensor(action)
+        action = F.one_hot(action.long(), self.n_options).to(self.current_z.device).unsqueeze(0)
+        z = self.current_z.unsqueeze(0)
 
+        next_z, feats = self._transition(z, action)
+        feats = torch.cat([next_z, feats], dim=-1)  if self.recurrent else None
+        r = self._reward(z, action, next_z, feats=feats)[0]
+        if self._task_reward is not None:
+            r_g, done = self.task_reward(next_z) if not self.recurrent else self.task_reward(next_z, feats=feats)
+        tau = self._tau(z, action, feats=feats)[0]
+
+        termination = nn.functional.softmax(self.termination(next_z), dim=-1).argmax(-1)
+        done = (termination > 0) or done
+
+
+        info['tau'] = tau.cpu().item()
+        info['env_reward'] = r
+        info['task_reward'] = r_g
+        info['task_done'] = done
+        info['initset_s'] = self.last_initset
+        info['initset_next_s'] = self.initset(next_z, feats=feats)[0]
+        self.last_initset = info['initset_next_s']
+
+        # done = done or self.last_initset.sum() == 0
+
+        r = self.reward_scale * r + self.gamma ** max(1, tau.item()-1) * r_g  # add task reward
+        self.current_z = next_z.squeeze(0)
+        feats = feats[0] if self.recurrent else next_z[0]
+
+        assert feats.shape[0] == self.n_feats, f'{feats.shape} != self.n_feats'
+
+        return feats.cpu().numpy(), r.item(), done, info
+
+    def training_loss(self, batch):
+        (s, action, reward, next_s, duration, success, done, masks), _ = batch
+        action = F.one_hot(action.long(), self.n_options)
+        # encode
+        z_c = self.encoder(s)
+        next_z_c = self.encoder(next_s)
+        z = z_c + self.SMOOTHING_NOISE_STD * torch.randn_like(z_c)
+        next_z = next_z_c + self.SMOOTHING_NOISE_STD * torch.randn_like(next_z_c)
+
+        batch_size, length = s.shape[0], s.shape[1]
+    
+        # transition
+        next_z_dist = self.transition.distribution(torch.cat([z, action], dim=-1))
+        feats = next_z_dist.feats
+        feats = torch.cat([next_z, feats], dim=-1)  if self.recurrent else None
+        lengths = masks.sum(-1)
+        _mask = masks.bool()
+
+        grounding_loss = self.grounding_loss(next_z[_mask], feats=feats[_mask])
+        reward_loss = self.reward_loss(reward[_mask], z_c[_mask], action[_mask], next_z_c[_mask], feats=feats[_mask])
+        tau_loss = self.duration_loss(duration[_mask], z_c[_mask], action[_mask], feats=feats[_mask])
+        termination_loss = self.termination_loss(done[_mask], next_z_c[_mask])
+        
+        # transition losses
+        transition_loss = self.consistency_loss(z, next_z, next_z_dist, mask=_mask)
+ 
+
+        tpc_loss = self.tpc_loss(z, next_z, next_z_dist, min_length=int(lengths.min().item()))
+
+        initset_loss = self.initset_loss_from_executed(z, action, success, _mask, feats=feats)
+
+        loss =  self.hyperparams.grounding_const * grounding_loss.mean() + \
+                self.hyperparams.transition_const * transition_loss.mean() + \
+                self.hyperparams.tpc_const * tpc_loss.mean() + \
+                self.hyperparams.initset_const * initset_loss.mean() + \
+                self.hyperparams.reward_const * reward_loss.mean() + \
+                self.hyperparams.tau_const * tau_loss.mean() + \
+                self.hyperparamms.termination_const * termination_loss.mean()
+        
+        log_dict = {
+            'loss': loss,
+            'grounding_loss': grounding_loss.mean(),
+            'transition_loss': transition_loss.mean(),
+            'tpc_loss': tpc_loss.mean(),
+            'initset_loss': initset_loss.mean(),
+            'reward_loss': reward_loss.mean(),
+            'tau_loss': tau_loss.mean(),
+            'termination_loss': termination_loss.mean(),
+            'rbuffer_len': len(self.data),
+            'norm2': (z_c ** 2).sum(-1).mean()
+        }
+
+        return loss, log_dict
+    
+    def termination_loss(self, done, next_z):
+        done_pred = nn.functional.softmax(self.termination(next_z), dim=-1)
+        loss = nn.functional.cross_entropy(done_pred, done.long())
+        return loss
+    
 
 def encoder(state, device='cuda:0'):
     keys = ['log_global_pos', 'log_global_orientation']
     state = torch.cat([state[k] for k in keys], dim=-1)
     return state.float().to(device)
     
-
 class TrueStateAbstractMDP(AbstractMDPGoal):
 
     def __init__(self, cfg, goal_cfg, encoder_fn, ground_truth_state_dim, fabric=None):
@@ -1081,6 +1185,15 @@ class TrueStateAbstractMDP(AbstractMDPGoal):
 
         self.warmup_steps = goal_cfg.reward_warmup_steps
         self.timestep = 0
+
+        self._models = {
+            'encoder': self.encoder,
+            'transition': self.transition,
+            'initsets': self.initsets,
+            'tau': self.tau, 
+            'reward_fn': self.reward_fn,
+            'goal_class': self.goal_class
+        }
 
     def training_loss(self, batch):
         (s, action, reward, next_s, duration, success, done, masks), info = batch
@@ -1161,10 +1274,188 @@ class TrueStateAbstractMDP(AbstractMDPGoal):
         cfg = loaded_ckpt['cfg']
         assert 'goal_cfg' in loaded_ckpt or goal_cfg
         goal_cfg = loaded_ckpt['goal_cfg'] if 'goal_cfg' in loaded_ckpt else goal_cfg
-        mdp = cls(cfg, goal_cfg, encoder, ground_truth_state_dim=7)
+        mdp = cls(cfg, goal_cfg, loaded_ckpt['encoder'], ground_truth_state_dim=7)
 
         mdp.timestep = loaded_ckpt['timestep']
         state = mdp.get_model_state()
-        for mdl in ('transition', 'initsets', 'tau', 'reward_fn', 'goal_class'):
-            state[mdl].load_state_dict(loaded_ckpt[mdl])
+        for mdl in mdp.models:
+            if mdl != 'encoder':
+                state[mdl].load_state_dict(loaded_ckpt[mdl])
+        return mdp
+    
+
+class TrueStateAbstractMDPWTermination(AbstractMDPGoalWTermination):
+    def __init__(self, cfg, goal_cfg, encoder_fn, ground_truth_state_dim, fabric=None):
+        nn.Module.__init__(self)
+        gym.Env.__init__(self)
+
+        model_cfg = oc.masked_copy(cfg, 'model') 
+        model_cfg.model.latent_dim = ground_truth_state_dim
+        oc.resolve(model_cfg)
+        cfg.model = model_cfg
+        oc.update(cfg, 'model', model_cfg.model)
+
+        self.cfg = cfg
+        self.fabric = fabric
+
+        self.obs_dim = model_cfg.model.obs_dims
+        self.latent_dim = model_cfg.model.latent_dim
+        self.n_options = model_cfg.model.n_options
+
+        # self.encoder = build_model(model_cfg.model.encoder.features)
+        self.encoder = encoder_fn
+        self.transition = build_distribution(model_cfg.model.transition)
+        self.recurrent = model_cfg.model.transition.features.type == 'rssm'
+
+        print(f"It's recurrent {self.recurrent}")
+        if self.recurrent:
+            self.n_feats = model_cfg.model.transition.features.hidden_dim + model_cfg.model.latent_dim
+            model_cfg.model.init_class.input_dim = self.n_feats
+            model_cfg.model.tau.input_dim = self.n_feats
+            model_cfg.model.reward.input_dim = self.n_feats
+        else:
+            self.n_feats = model_cfg.model.latent_dim
+
+        self.initsets = build_model(model_cfg.model.init_class)
+        self.tau = build_model(model_cfg.model.tau)
+        self.reward_fn = build_model(model_cfg.model.reward)
+        self.timestep = 0
+
+        self.lr = cfg.optimizer.params.lr
+        
+        self.batch_size = cfg.data.batch_size
+        self.hyperparams = cfg.loss
+        self.optimizer = None
+        self.action_space = gym.spaces.Discrete(self.n_options)
+        self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.latent_dim,), dtype=np.float32)
+        self.current_z = None
+        self.last_initset = None
+        self.outdir = None
+        self.reward_scale = cfg.reward_scale
+        self.model_success = cfg.model_success
+        self.sample_transition = cfg.sample_transition
+        self.gamma = cfg.gamma
+        self._task_reward = None
+        if self.cfg.name is not None:
+            self.name = self.cfg.name
+        else:
+            self.name = 'world_model'
+        self.init_state_sampler = None
+        self.initset_thresh = 0.5
+        self.device = 'cpu'
+        self.data = None
+
+        self.residual_transition = True
+        self.goal_cfg = goal_cfg
+        goal_cfg.output_dim = 1
+        goal_cfg.input_dim = self.latent_dim if not self.recurrent else self.n_feats
+        self.goal_class = build_model(goal_cfg)
+
+        goal_cfg.output_dim = 4
+        self.position_regressor = build_model(goal_cfg)
+
+
+        self.warmup_steps = goal_cfg.reward_warmup_steps
+        self.timestep = 0
+        self.termination = build_model(cfg.model.termination)
+
+        self._models = {
+            'encoder': self.encoder,
+            'transition': self.transition,
+            'initsets': self.initsets,
+            'tau': self.tau, 
+            'reward_fn': self.reward_fn,
+            'goal_class': self.goal_class,
+            'termination': self.termination
+        }
+
+    def training_loss(self, batch):
+        (s, action, reward, next_s, duration, success, done, masks), info = batch
+        action = F.one_hot(action.long(), self.n_options) #* masks[..., None]
+        # encode
+        z_c = self.encoder(s)
+        next_z_c = self.encoder(next_s)
+        z = z_c + self.SMOOTHING_NOISE_STD * torch.randn_like(z_c)
+        next_z = next_z_c + self.SMOOTHING_NOISE_STD * torch.randn_like(next_z_c)
+
+    
+        # transition
+        next_z_dist = self.transition.distribution(torch.cat([z, action], dim=-1))
+        feats = torch.cat([next_z, next_z_dist.feats], dim=-1)  if self.recurrent else None
+        
+        lengths = masks.sum(-1)
+        _mask = masks.bool()
+
+
+        grounding_loss = self.grounding_loss(next_z, next_z)
+        _feats = feats[_mask] if feats is not None else None
+        reward_loss = self.reward_loss(reward[_mask], z_c[_mask], action[_mask], next_z_c[_mask], feats=_feats)
+        tau_loss = self.duration_loss(duration[_mask], z_c[_mask], action[_mask], feats=_feats)
+        termination_loss = self.termination_loss(done[_mask], next_z_c[_mask])
+
+        # transition losses
+        transition_loss = self.consistency_loss(z, next_z, next_z_dist, mask=_mask)
+
+        tpc_loss = self.tpc_loss(z, next_z, next_z_dist, min_length=int(lengths.min().item()), mask=masks)
+
+        initset_loss = self.initset_loss_from_executed(z, action, success, _mask, feats=feats)
+
+        # _z, goal_reward = self._get_goal_reward_from_traj(z, info, lengths, _mask)
+        if not self.recurrent:
+            s, goal_reward = self._get_task_reward_examples()
+            # with torch.no_grad():
+            _z = self.encoder(s)
+            goal_loss, goal_log_dict = self.goal_loss(_z, goal_reward, feats=_feats) if _z is not None and goal_reward is not None else (torch.tensor(0.), {})
+        else:
+            feats, goal_reward = self._get_goal_reward_from_traj(feats, info, lengths, _mask)
+            goal_loss, goal_log_dict = self.goal_loss(None, goal_reward, feats=feats)
+        
+        norm2 = (z_c**2).sum(-1)
+
+        loss =  self.hyperparams.grounding_const * grounding_loss.mean() + \
+                self.hyperparams.transition_const * transition_loss.mean() + \
+                self.hyperparams.tpc_const * tpc_loss.mean() + \
+                self.hyperparams.initset_const * initset_loss.mean() + \
+                self.hyperparams.reward_const * reward_loss.mean() + \
+                self.hyperparams.tau_const * tau_loss.mean() + \
+                self.hyperparams.goal_class_const * goal_loss + \
+                self.hyperparams.norm2_const * norm2.mean() + \
+                self.hyperparams.termination_const * termination_loss.mean()
+
+        
+        log_dict = {
+            'loss': loss,
+            'grounding_loss': grounding_loss.mean(),
+            'transition_loss': transition_loss.mean(),
+            'tpc_loss': tpc_loss.mean(),
+            'initset_loss': initset_loss.mean(),
+            'reward_loss': reward_loss.mean(),
+            'tau_loss': tau_loss.mean(),
+            'termination_loss': termination_loss.mean(),
+            'norm2/mean': norm2.mean(),
+            'norm2/std': norm2.std(),
+            'norm2/min': norm2.min(),
+            'norm2/max': norm2.max(),
+            'goal_pred/goal_class_loss': goal_loss,
+            **goal_log_dict,
+        }
+
+        return loss, log_dict
+
+    @classmethod
+    def load_checkpoint(cls, ckpt_path, goal_cfg=None, fabric=None):
+        if fabric is None:
+            fabric = L.Fabric()
+        loaded_ckpt = fabric.load(ckpt_path, {})
+
+        cfg = loaded_ckpt['cfg']
+        assert 'goal_cfg' in loaded_ckpt or goal_cfg
+        goal_cfg = loaded_ckpt['goal_cfg'] if 'goal_cfg' in loaded_ckpt else goal_cfg
+        mdp = cls(cfg, goal_cfg, loaded_ckpt['encoder'], ground_truth_state_dim=7)
+
+        mdp.timestep = loaded_ckpt['timestep']
+        state = mdp.get_model_state()
+        for mdl in mdp.models:
+            if mdl != 'encoder':
+                state[mdl].load_state_dict(loaded_ckpt[mdl])
         return mdp

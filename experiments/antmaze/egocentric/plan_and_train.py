@@ -11,7 +11,7 @@ from pfrl import explorers
 
 from omegaconf import OmegaConf as oc
 from experiments.antmaze.plan import make_ground_env, parse_oc_args, gaussian_ball_goal_fn, GOALS, GOAL_TOL, DATA_PATH
-from src.absmdp.absmdp import AbstractMDPGoal, TrueStateAbstractMDP
+from src.absmdp.absmdp import AbstractMDPGoal, AbstractMDPGoalWTermination, TrueStateAbstractMDP, TrueStateAbstractMDPWTermination
 from src.models import ModuleFactory
 from src.agents.abstract_ddqn import AbstractDDQNGrounded, AbstractDoubleDQN, AbstractLinearDecayEpsilonGreedy
 from src.agents.rainbow import Rainbow, AbstractRainbow
@@ -111,7 +111,7 @@ def make_rainbow_agent(agent_cfg, experiment_cfg, world_model):
         n_steps=agent_cfg.agent.num_step_return,
         replay_start_size=agent_cfg.agent.replay_start_size,
         replay_buffer_size=agent_cfg.agent.replay_buffer_size,
-        target_update_interval=agent_cfg.agent.update_interval,
+        target_update_interval=agent_cfg.agent.target_update_interval,
         gamma=agent_cfg.env.gamma,
         gpu=experiment_cfg.gpu,
         update_interval=agent_cfg.agent.update_interval,
@@ -203,6 +203,7 @@ def main():
     parser.add_argument('--exp-id', type=str, default=None)
     parser.add_argument('--no-initset', action='store_true')
     parser.add_argument('--ground_truth_encoder', action='store_true')
+    parser.add_argument('--model_termination', action='store_true')
     parser.add_argument('--agent', type=str, default='rainbow', choices=['rainbow', 'ddqn', 'ppo'])
     
     args, unknown = parser.parse_known_args()
@@ -236,7 +237,7 @@ def main():
     if not args.ground_truth_encoder:
         train_env = make_batched_ground_env(lambda *args, **kwargs: make_egocentric_maze(cfg.planner.env.envname, goal=cfg.planner.env.goal, gamma=cfg.planner.env.gamma, test=False, reward_scale=reward_scale), seeds=process_seeds, num_envs=cfg.planner.env.n_envs)
         test_env = make_egocentric_maze(cfg.planner.env.envname, goal=cfg.planner.env.goal, gamma=cfg.planner.env.gamma, test=True, reward_scale=reward_scale)
-        mdp_constructor = AbstractMDPGoal
+        mdp_constructor = AbstractMDPGoal if not args.model_termination else AbstractMDPGoalWTermination
         goal_cfg = world_model_cfg.model.goal_class
 
         if world_model_cfg.ckpt != 'none':
@@ -249,7 +250,7 @@ def main():
 
         train_env = make_batched_ground_env(lambda *args, **kwargs: make_egocentric_maze_ground_truth(cfg.planner.env.envname, goal=cfg.planner.env.goal, gamma=cfg.planner.env.gamma, test=False, reward_scale=reward_scale), seeds=process_seeds, num_envs=cfg.planner.env.n_envs)
         test_env = make_egocentric_maze_ground_truth(cfg.planner.env.envname, goal=cfg.planner.env.goal, gamma=cfg.planner.env.gamma, test=True, reward_scale=reward_scale)
-        mdp_constructor = TrueStateAbstractMDP
+        mdp_constructor = TrueStateAbstractMDP if not args.model_termination else TrueStateAbstractMDPWTermination
         goal_cfg = world_model_cfg.model.goal_class
         world_model = mdp_constructor(world_model_cfg, goal_cfg=goal_cfg, encoder_fn=partial(encoder, device=device), ground_truth_state_dim=7)
 
