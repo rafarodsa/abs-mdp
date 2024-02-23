@@ -1,3 +1,6 @@
+import torch 
+import torch.nn as nn
+
 from .gaussian import DiagonalGaussian, Deterministic, DiagonalGaussianModule
 from .gaussian import build_gaussian_mixture
 from .mlp import MLP, DynamicsMLP, RewardMLP, MLPCritic
@@ -8,6 +11,7 @@ from .grid_quantizer import FactoredQuantizer, FactoredQuantizerSTFactory, Facto
 from .rssm import RSSMFactory
 from .multiencoder import build_multiencoder
 from .factories import ModuleFactory
+
 
 
 ModuleFactory.register('quantizer_st', FactoredQuantizerSTFactory)

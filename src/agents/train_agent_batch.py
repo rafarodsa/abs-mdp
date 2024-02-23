@@ -283,7 +283,7 @@ def train_agent_batch_with_evaluation(
     """
 
     logger = logger or logging.getLogger(__name__)
-
+    logger.setLevel('INFO')
     for hook in evaluation_hooks:
         if not hook.support_train_agent_batch:
             raise ValueError(

@@ -20,6 +20,8 @@ import pfrl
 from pfrl.q_functions import DiscreteActionValueHead
 from pfrl import replay_buffers
 
+from dm_control.utils.transformations import quat_rotate
+
 from src.agents.train_agent_online import train_agent_with_evaluation
 
 import pprint
@@ -33,7 +35,7 @@ def random_selection_initset(initset_s):
     avail_action = torch.nonzero(initset_s.squeeze())
     selection = torch.randint(0, avail_action.shape[0], (1,))
     a =  avail_action[selection].squeeze()
-    return a
+    return a.cpu()
 
 def make_ddqn_agent(agent_cfg, experiment_cfg, world_model):
     
@@ -41,7 +43,7 @@ def make_ddqn_agent(agent_cfg, experiment_cfg, world_model):
     q_func = ModuleFactory.build(agent_cfg.q_func)
     q_func = torch.nn.Sequential(q_func, DiscreteActionValueHead())
 
-    training_steps = experiment_cfg.steps // experiment_cfg.train_every
+    training_steps = experiment_cfg.steps // agent_cfg.train_every
     agent_total_steps = agent_cfg.agent.rollout_len * training_steps
 
     betasteps = agent_total_steps / agent_cfg.agent.update_interval
@@ -56,7 +58,8 @@ def make_ddqn_agent(agent_cfg, experiment_cfg, world_model):
     explorer = AbstractLinearDecayEpsilonGreedy(
             1.0,
             agent_cfg.agent.final_epsilon,
-            agent_total_steps * agent_cfg.agent.final_exploration_steps,
+            # agent_total_steps * agent_cfg.agent.final_exploration_steps
+            agent_cfg.agent.final_exploration_steps,
             random_selection_initset,
         )
 
@@ -195,6 +198,26 @@ def encoder(state, device):
     keys = ['log_global_pos', 'log_global_orientation']
     state = torch.cat([state[k] for k in keys], dim=-1)
     return state.float().to(device)
+
+
+def compute_orientation(quat, device):
+    shape = quat.shape
+    if len(quat.shape) > 1:
+        quat = quat.reshape(-1, shape[-1])
+        bsize = quat.shape[0]
+    else:
+        bsize = 1
+        quat = quat[None]
+    x = np.stack([quat_rotate(quat[i], np.array([1., 0., 0.])) for i in range(bsize)])
+    angle = np.arctan2(x[..., 1], x[..., 0])[..., None]
+    z = torch.from_numpy(np.concatenate((np.cos(angle), np.sin(angle)), axis=-1)).to(device)
+    return z.reshape(*shape[:-1], -1)
+
+def simpler_encoder(state, device):
+    quat = state['log_global_orientation']
+    quat = quat.cpu().numpy() if isinstance(quat, torch.Tensor) else quat
+    state = torch.cat([state['log_global_pos'][..., :2], compute_orientation(quat, device)], dim=-1)
+    return state.float().to(device)
     
 def main():
     # parse arguments
@@ -205,6 +228,8 @@ def main():
     parser.add_argument('--ground_truth_encoder', action='store_true')
     parser.add_argument('--model_termination', action='store_true')
     parser.add_argument('--agent', type=str, default='rainbow', choices=['rainbow', 'ddqn', 'ppo'])
+    parser.add_argument('--offline_model', action='store_true')
+    parser.add_argument('--data_path', type=str, default=None)
     
     args, unknown = parser.parse_known_args()
     cli_args = parse_oc_args(unknown)
@@ -252,7 +277,7 @@ def main():
         test_env = make_egocentric_maze_ground_truth(cfg.planner.env.envname, goal=cfg.planner.env.goal, gamma=cfg.planner.env.gamma, test=True, reward_scale=reward_scale)
         mdp_constructor = TrueStateAbstractMDP if not args.model_termination else TrueStateAbstractMDPWTermination
         goal_cfg = world_model_cfg.model.goal_class
-        world_model = mdp_constructor(world_model_cfg, goal_cfg=goal_cfg, encoder_fn=partial(encoder, device=device), ground_truth_state_dim=7)
+        world_model = mdp_constructor(world_model_cfg, goal_cfg=goal_cfg, encoder_fn=partial(simpler_encoder, device=device), ground_truth_state_dim=4)
 
 
     world_model.freeze(world_model_cfg.fixed_modules)
@@ -277,6 +302,13 @@ def main():
         use_initset = False
         world_model.set_no_initset()
 
+
+    if args.offline_model:
+        cfg.planner.train_every = int(1e10)
+        cfg.world_model.train_every = 1
+        cfg.experiment.checkpoint_frequency = 500
+        assert os.path.exists(args.data_path)
+
     # train agent
     train_agent_with_evaluation(
                                 grounded_agent, 
@@ -287,7 +319,8 @@ def main():
                                 max_steps=cfg.experiment.steps,
                                 config=cfg,
                                 use_initset=use_initset,
-                                learning_reward=True
+                                learning_reward=True,
+                                offline_data_path=args.data_path
                             )
 
 if __name__ == '__main__':

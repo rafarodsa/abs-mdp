@@ -164,7 +164,8 @@ def generate_learning_curves(
     min_seeds=1,
     all_seeds=False,
     title=None,
-    min_final_val=None):
+    min_final_val=None,
+    min_len_curve=-1):
 
     id_to_csv = csv_path_fn(base_dir=base_dir)
 
@@ -190,6 +191,7 @@ def generate_learning_curves(
         print(config)
         for curve in curves:
             print(f"\t{len(curve[0])}")
+        curves = [curve for curve in curves if len(curve[0]) >= min_len_curve]
         truncated_xs, truncated_all_ys = truncate_and_interpolate(curves, max_frames=truncate_max_frames, min_frames=truncate_min_frames)
 
         if truncated_xs is None or len(truncated_all_ys) < min_seeds:

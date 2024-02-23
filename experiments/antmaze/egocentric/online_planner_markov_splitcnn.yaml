@@ -11,7 +11,7 @@ experiment:
   gpu: 0
   demo: false
   eval_interval: 5000
-  eval_n_runs: 4
+  eval_n_runs: 5
   log_level: 20
   checkpoint_frequency: 10000 
   max_rollout_len: 64 # max length to rollout the ground env.
@@ -33,6 +33,7 @@ world_model:
   model_success: false
   gamma: ${planner.env.gamma}
   fixed_modules: []
+  train_every: ${experiment.train_every}
   
   model:
     model_config_dir: experiments/antmaze
@@ -82,33 +83,37 @@ world_model:
       output_dim: 1
       hidden_dims: [512, 512]
       activation: mish
-    transition:
-      features:
-        type: dynamics_mlp
-        latent_dim: ${model.latent_dim}
-        n_options: ${model.n_options}
-        hidden_dims: [512, 512]
-        activation: mish
-      dist:
-        type: diag_gaussian
-        output_dim: ${model.latent_dim}
-        input_dim: ${model.latent_dim}
-        min_std: 0.001
-        max_std: 10
     # transition:
     #   features:
-    #     type: dynamics_mlp
-    #     latent_dim: ${model.latent_dim}
+    #     type: mlp
+    #     input_dim: ${eval:${model.n_options} + ${model.latent_dim}}
+    #     output_dim: 512
     #     n_options: ${model.n_options}
     #     hidden_dims: [512, 512]
     #     activation: mish
     #   dist:
-    #     type: mixture_gaussian
-    #     n_components: 8
+    #     type: diag_gaussian
+    #     activation: mish
     #     output_dim: ${model.latent_dim}
-    #     input_dim: ${model.latent_dim}
+    #     input_dim: ${model.transition.features.output_dim}
     #     min_std: 0.001
-    #     max_std: 100
+    #     max_std: 10
+    transition:
+      features:
+        type: mlp
+        input_dim: ${eval:${model.n_options} + ${model.latent_dim}}
+        output_dim: 1024
+        n_options: ${model.n_options}
+        hidden_dims: [512, 512]
+        activation: mish
+      dist:
+        type: mixture_gaussian
+        n_components: 4
+        activation: mish
+        output_dim: ${model.latent_dim}
+        input_dim: ${model.transition.features.output_dim}
+        min_std: 0.001
+        max_std: 10
     # transition:
     #   features:
     #     type: dynamics_mlp
@@ -186,6 +191,8 @@ world_model:
     batch_size: 16
 
 planner:
+  train_every: ${experiment.train_every}
+  agent_id: ''
   env:
     sample_abstract_transition: true
     render: false
@@ -199,16 +206,16 @@ planner:
 
   agent:
     load: null
-    final_exploration_steps: 0.4 # proportion of agent trainings steps to decay the epsilon
+    final_exploration_steps: 300000 #0.01 # proportion of agent trainings steps to decay the epsilon
     final_epsilon: 0.1
     eval_epsilon: 0.001
-    replay_start_size: 100
+    replay_start_size: 5000
     replay_buffer_size: 100000
     target_update_interval: 10000
     update_interval: 5
     num_step_return: 1
     steps: 1000000
-    lr: 3e-4
+    lr: 1e-5
     eval_random_agent: false
     rollout_len: 400
 
@@ -223,5 +230,5 @@ planner:
     type: 'mlp'
     n_actions: 3
     hidden_dims: [256, 256]
-    activation: tanh
+    activation: mish
     output_dim: 1024

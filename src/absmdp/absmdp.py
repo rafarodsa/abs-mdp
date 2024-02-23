@@ -115,8 +115,9 @@ class AbstractMDP(nn.Module, gym.Env):
         if self.data:
             self.data.to(device)
 
-    def setup_replay(self):
-        self.data = TrajectoryReplayBufferStored(int(self.cfg.data.buffer_size), save_path=f'{self.outdir}/data', device=self.device)
+    def setup_replay(self, data_path=None):
+        data_path = f'{self.outdir}/data' if not data_path else data_path
+        self.data = TrajectoryReplayBufferStored(int(self.cfg.data.buffer_size), save_path=data_path, device=self.device)
 
     def set_no_initset(self):
         self.initset_thresh = -1.
@@ -125,7 +126,7 @@ class AbstractMDP(nn.Module, gym.Env):
     def step(self, action):
         # self.eval()
         info = {}
-        if isinstance(action, np.int64):
+        if isinstance(action, (np.intc, int, float)):
             action = torch.tensor(action)
         action = F.one_hot(action.long(), self.n_options).to(self.current_z.device).unsqueeze(0)
         z = self.current_z.unsqueeze(0)
@@ -147,7 +148,8 @@ class AbstractMDP(nn.Module, gym.Env):
 
         # done = done or self.last_initset.sum() == 0
 
-        r = self.reward_scale * r + self.gamma ** max(1, tau.item()-1) * r_g  # add task reward
+        # r = self.reward_scale * r + self.gamma ** max(1, tau.item()-1) * r_g  # add task reward
+        r = self.reward_scale * r + r_g
         self.current_z = next_z.squeeze(0)
         feats = feats[0] if self.recurrent else next_z[0]
 
@@ -1012,7 +1014,7 @@ class AbstractMDPGoalWTermination(AbstractMDPGoal):
     def step(self, action):
         # self.eval()
         info = {}
-        if isinstance(action, np.int64):
+        if isinstance(action, (np.intc, int, float)):
             action = torch.tensor(action)
         action = F.one_hot(action.long(), self.n_options).to(self.current_z.device).unsqueeze(0)
         z = self.current_z.unsqueeze(0)
@@ -1038,7 +1040,8 @@ class AbstractMDPGoalWTermination(AbstractMDPGoal):
 
         # done = done or self.last_initset.sum() == 0
 
-        r = self.reward_scale * r + self.gamma ** max(1, tau.item()-1) * r_g  # add task reward
+        # r = self.reward_scale * r + self.gamma ** max(1, tau.item()-1) * r_g  # add task reward
+        r = self.reward_scale * r + r_g
         self.current_z = next_z.squeeze(0)
         feats = feats[0] if self.recurrent else next_z[0]
 
@@ -1192,7 +1195,8 @@ class TrueStateAbstractMDP(AbstractMDPGoal):
             'initsets': self.initsets,
             'tau': self.tau, 
             'reward_fn': self.reward_fn,
-            'goal_class': self.goal_class
+            'goal_class': self.goal_class,
+            'ground_state_dim': self.latent_dim
         }
 
     def training_loss(self, batch):
@@ -1274,12 +1278,13 @@ class TrueStateAbstractMDP(AbstractMDPGoal):
         cfg = loaded_ckpt['cfg']
         assert 'goal_cfg' in loaded_ckpt or goal_cfg
         goal_cfg = loaded_ckpt['goal_cfg'] if 'goal_cfg' in loaded_ckpt else goal_cfg
-        mdp = cls(cfg, goal_cfg, loaded_ckpt['encoder'], ground_truth_state_dim=7)
-
+        mdp = cls(cfg, goal_cfg, loaded_ckpt['encoder'], ground_truth_state_dim=loaded_ckpt['ground_state_dim'])
+        del loaded_ckpt['encoder']
+        del loaded_ckpt['ground_state_dim']
         mdp.timestep = loaded_ckpt['timestep']
         state = mdp.get_model_state()
         for mdl in mdp.models:
-            if mdl != 'encoder':
+            if mdl not in ('encoder', 'ground_state_dim'):
                 state[mdl].load_state_dict(loaded_ckpt[mdl])
         return mdp
     
@@ -1366,7 +1371,7 @@ class TrueStateAbstractMDPWTermination(AbstractMDPGoalWTermination):
             'tau': self.tau, 
             'reward_fn': self.reward_fn,
             'goal_class': self.goal_class,
-            'termination': self.termination
+            'termination': self.termination,
         }
 
     def training_loss(self, batch):
@@ -1441,6 +1446,7 @@ class TrueStateAbstractMDPWTermination(AbstractMDPGoalWTermination):
         }
 
         return loss, log_dict
+    
 
     @classmethod
     def load_checkpoint(cls, ckpt_path, goal_cfg=None, fabric=None):
@@ -1451,7 +1457,7 @@ class TrueStateAbstractMDPWTermination(AbstractMDPGoalWTermination):
         cfg = loaded_ckpt['cfg']
         assert 'goal_cfg' in loaded_ckpt or goal_cfg
         goal_cfg = loaded_ckpt['goal_cfg'] if 'goal_cfg' in loaded_ckpt else goal_cfg
-        mdp = cls(cfg, goal_cfg, loaded_ckpt['encoder'], ground_truth_state_dim=7)
+        mdp = cls(cfg, goal_cfg, loaded_ckpt['encoder'], ground_truth_state_dim=cfg.model.latent_dim)
 
         mdp.timestep = loaded_ckpt['timestep']
         state = mdp.get_model_state()

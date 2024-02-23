@@ -328,12 +328,12 @@ def makeoutdirs(config):
     basedir = f'{config.experiment_cwd}/{config.experiment_name}'
     os.makedirs(basedir, exist_ok=True)
     # make world model outdir
-    world_model_outdir = f'{basedir}/world_model/{config.exp_id}'
+    world_model_outdir = f'{basedir}/{config.exp_id}/world_model/'
     os.makedirs(world_model_outdir, exist_ok=True)
     # make agent outdir
-    agent_outdir = f'{basedir}/agent'
+    agent_outdir = f'{basedir}/{config.exp_id}/agent'
     os.makedirs(agent_outdir, exist_ok=True)
-    agent_outdir = pfrl.experiments.prepare_output_dir(None, agent_outdir, exp_id=config.exp_id, make_backup=False)
+    agent_outdir = pfrl.experiments.prepare_output_dir(None, agent_outdir, exp_id=config.planner.agent_id, make_backup=False)
     return basedir, world_model_outdir, agent_outdir
 
 def train_agent_with_evaluation(
@@ -346,7 +346,8 @@ def train_agent_with_evaluation(
                                 config,
                                 init_state_sampler=None,
                                 use_initset=True, 
-                                learning_reward=False
+                                learning_reward=False,
+                                offline_data_path=None
                             ):
     
     ## Boilerplate: set up logging, evaluator, and checkpointing 
@@ -386,7 +387,7 @@ def train_agent_with_evaluation(
     world_model.set_outdir(world_model_outdir)
     world_model.setup_trainer(config)
     world_model.set_task_reward(task_reward)
-    world_model.setup_replay()
+    world_model.setup_replay(offline_data_path)
     # world_model.set_init_state_sampler(test_env.init_state_sampler if init_state_sampler is None else init_state_sampler)
 
     ## main training loop
@@ -407,7 +408,8 @@ def train_agent_with_evaluation(
     timestep = world_model.timestep   
     # timestep=0
 
-    should_train = Every(train_every)
+    should_train_wm = Every(config.world_model.train_every)
+    should_train_agent = Every(config.planner.train_every)
     should_checkpoint = Every(checkpoint_freq)
 
 
@@ -464,15 +466,10 @@ def train_agent_with_evaluation(
             train_agent_in_sim = timestep > warmup_steps
             
 
-        if should_train(timestep) and len(world_model.data) > prefill:
+        if should_train_wm(timestep) and len(world_model.data) > prefill:
             ## train world model for n gradient steps
             world_model.train_world_model(timestep=timestep)
             ## train agent
-            if train_agent_in_sim:
-                grounded_agent.agent.batch_last_episode = None
-                eval_history, ep_logs = agent_trainer.train(steps_budget=config.planner.agent.rollout_len)
-                world_model.log(ep_logs, step=timestep)
-                print(f'[simulation stats] {" | ".join([f"{k}: {v}" for k,v in ep_logs.items()])}')
             
             ### timing
             toc = time.perf_counter()
@@ -481,6 +478,13 @@ def train_agent_with_evaluation(
             avg_time_per_loop = sum(times_per_loop) / len(times_per_loop)
             estimate = avg_time_per_loop * (max_steps - timestep) / train_every
             print(f'\tAverage time per loop: {avg_time_per_loop} seconds. Estimated time to complete: {datetime.timedelta(seconds=estimate)}')
+
+        if train_agent_in_sim and should_train_agent(timestep):
+            grounded_agent.agent.batch_last_episode = None
+            eval_history, ep_logs = agent_trainer.train(steps_budget=config.planner.agent.rollout_len)
+            world_model.log(ep_logs, step=timestep)
+            print(f'[simulation stats] {" | ".join([f"{k}: {v}" for k,v in ep_logs.items()])}')
+
 
         if should_checkpoint(timestep):
             # save world model.

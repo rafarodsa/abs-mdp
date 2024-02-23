@@ -19,7 +19,6 @@ from pfrl.utils.recurrent import (
     recurrent_state_as_numpy,
 )
 
-    
 def to_tensor(s):
     if isinstance(s, np.ndarray):
         return torch.from_numpy(np.array(s))
@@ -165,7 +164,8 @@ class AbstractCategoricalDDQN(agents.CategoricalDoubleDQN):
             ),
             "reward": torch.as_tensor(
                 [
-                    sum((gamma ** (exp[i-1]['tau']*(float(i>0)))) * exp[i]["reward"] for i in range(len(exp)))
+                    # sum((gamma ** (exp[i-1]['tau']*(float(i>0)))) * exp[i]["reward"] for i in range(len(exp)))
+                    sum((gamma ** i) * exp[i]["reward"] for i in range(len(exp)))
                     for exp in experiences
                 ],
                 dtype=torch.float32,
@@ -183,7 +183,8 @@ class AbstractCategoricalDDQN(agents.CategoricalDoubleDQN):
                 device=device,
             ),
             "discount": torch.as_tensor(
-                [gamma ** sum([exp[i]['tau'] for i in range(len(exp))]) for exp in experiences],
+                # [gamma ** sum([exp[i]['tau'] for i in range(len(exp))]) for exp in experiences],
+                [(gamma ** len(elem)) for elem in experiences],
                 dtype=torch.float32,
                 device=device,
             ),
@@ -197,7 +198,7 @@ class AbstractCategoricalDDQN(agents.CategoricalDoubleDQN):
 class Rainbow:
     def __init__(self, q_func_model, n_actions=8, n_atoms=51, v_min=-10, v_max=10, noisy_net_sigma=0.5, lr=1e-5, 
                  n_steps=3, betasteps=1, replay_start_size=1000, replay_buffer_size=int(1e6), gpu=-1,
-                 goal_conditioned=False, gamma=0.995, target_update_interval=32_000, update_interval=5, use_custom_batch_states=True, explorer=None):
+                 goal_conditioned=False, gamma=0.995, target_update_interval=32_000, update_interval=5, use_custom_batch_states=True, explorer=None, phi=None):
         self.n_actions = n_actions
         self.goal_conditioned = goal_conditioned
         self.use_custom_batch_states = use_custom_batch_states
@@ -230,7 +231,7 @@ class Rainbow:
             target_update_interval=target_update_interval,
             update_interval=update_interval,
             batch_accumulator="mean",
-            phi=self.phi,
+            phi=self.phi if phi is None else phi,
             batch_states=self.batch_states if use_custom_batch_states else pfrl_batch_states
         )
 
@@ -255,18 +256,24 @@ class Rainbow:
             if isinstance(state, torch.Tensor):
                 return state.cpu().numpy()
             return state
-        if isinstance(states[0], dict):
-            states = jax.tree_map(to_tensor, states)
-            return DictTensor(jax.tree_map(lambda *s: torch.stack(s).to(device), *states))
+        # if isinstance(states[0], dict):
+        #     states = jax.tree_map(to_tensor, states)
+        #     return DictTensor(jax.tree_map(lambda *s: torch.stack(s).to(device), *states))
         states = list(map(preprocess, states))
-        features = np.array([phi(s) for s in states])
-        return torch.as_tensor(features).to(device)
+        features = [phi(s) for s in states]
+        if isinstance(features[0], dict):
+            return DictTensor(jax.tree_map(lambda *s: torch.stack(s).to(device), *features))
+        
+        return torch.stack(features).to(device)
 
     @staticmethod
     def phi(x):
         """ Observation pre-processing for convolutional layers. """
         # return np.asarray(x, dtype=np.float32) / 255.
-        return x
+        if isinstance(x, dict):
+            x = jax.tree_map(to_tensor, x)
+        
+        return torch.as_tensor(x)
     
     def batch_act(self, state, initset=None):
         return self.agent.batch_act(state)

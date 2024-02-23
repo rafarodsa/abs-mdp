@@ -390,6 +390,7 @@ def get_curves(args):
                 xlabel=args.xlabel,
                 show=args.show,
                 truncate_max_frames=args.max_x_value,
+                min_len_curve=args.min_len_curve
             )
             for c in curves:
                 groupbys.add(c['label'])
@@ -482,6 +483,7 @@ def parse_args():
     parser.add_argument('--show', action='store_true')
     parser.add_argument('--depth', type=int, default=2)
     parser.add_argument('--n-cols', type=int, default=4)
+    parser.add_argument('--min-len-curve', type=int, default=-1)
     args, unknown = parser.parse_known_args()
 
 

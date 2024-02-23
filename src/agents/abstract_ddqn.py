@@ -34,6 +34,8 @@ from pfrl.replay_buffers import PrioritizedReplayBuffer
 from pfrl.utils.batch_states import batch_states
 import jax 
 
+from contextlib import contextmanager
+
 def batch_initset(batch_initset, device='cpu'):
     batch_initset = [t.to(device) if isinstance(t, torch.Tensor) else torch.from_numpy(t).to(device) for t in batch_initset]
     return torch.stack(batch_initset, dim=0)
@@ -66,7 +68,8 @@ def batch_experiences(experiences, device, phi, gamma, batch_states=batch_states
         ),
         "reward": torch.as_tensor(
             [
-                sum((gamma ** (exp[i-1]['tau']*(float(i>0)))) * exp[i]["reward"] for i in range(len(exp)))
+                # sum((gamma ** (exp[i-1]['tau']*(float(i>0)))) * exp[i]["reward"] for i in range(len(exp)))
+                sum((gamma ** i) * exp[i]["reward"] for i in range(len(exp)))
                 for exp in experiences
             ],
             dtype=torch.float32,
@@ -84,7 +87,8 @@ def batch_experiences(experiences, device, phi, gamma, batch_states=batch_states
             device=device,
         ),
         "discount": torch.as_tensor(
-            [gamma ** sum([exp[i]['tau'] for i in range(len(exp))]) for exp in experiences],
+            # [gamma ** sum([exp[i]['tau'] for i in range(len(exp))]) for exp in experiences],
+            [(gamma ** len(elem)) for elem in experiences],
             dtype=torch.float32,
             device=device,
         ),
@@ -152,13 +156,22 @@ class AbstractDoubleDQN(DoubleDQN):
         return self.batch_act([obs], [initset])[0]
 
     def batch_act(self, batch_obs: Sequence[Any], batch_initset_s: Sequence[Any] = None) -> Sequence[Any]:
-
+        def preprocess(x):
+            if isinstance(x, np.ndarray):
+                return torch.from_numpy(x)
+            return x
+        
         batch_s = self.batch_states(batch_obs, self.device, self.phi)
         if batch_initset_s is not None:
-            if isinstance(batch_initset_s[0], np.ndarray):
-                batch_initset_s = torch.from_numpy(np.stack(batch_initset_s, axis=0)).to(device=self.device)
-            else:
+            try:
+                batch_initset_s = jax.tree_map(lambda s: preprocess(s), batch_initset_s)
                 batch_initset_s = torch.stack(batch_initset_s, dim=0).to(device=self.device)
+            except:
+                import ipdb; ipdb.set_trace()
+            # if isinstance(batch_initset_s[0], np.ndarray):
+            #     batch_initset_s = torch.from_numpy(np.stack(batch_initset_s, axis=0)).to(device=self.device)
+            # else:
+            #     batch_initset_s = torch.stack(batch_initset_s, dim=0).to(device=self.device)
         else:
             # print('Warning: Executing Initset function')
             batch_initset_s = self.action_mask(batch_s)
@@ -355,14 +368,15 @@ class AbstractDDQNGrounded(pfrl.agent.Agent):
             obs = [obs]
         with torch.no_grad():
             z = jax.tree_map(self.encoder, obs, is_leaf=lambda x: isinstance(x, dict))
-            action = self.agent.batch_act(z, initset)
-        return action 
+            action = self.agent.batch_act(z, [initset] if not initset is None else initset)
+            action = jax.tree_map(lambda a: a.cpu(), action)
+        return action if len(action) > 1 else action[0]
     
     def load(self, dirname):
         self.agent.load(dirname)
     
     def observe(self, obs, reward, done, reset, info):
-        obs = self.preprocess(obs)
+        obs = jax.tree_map(lambda s: self.preprocess(s), obs)
         if not isinstance(obs, list):
             obs = [obs]
         with torch.no_grad():
@@ -377,3 +391,12 @@ class AbstractDDQNGrounded(pfrl.agent.Agent):
     
     def getattr(self, name):
         return getattr(self.agent, name)
+    
+    @contextmanager
+    def eval_mode(self):
+        orig_mode = self.agent.training
+        try:
+            self.agent.training = False
+            yield
+        finally:
+            self.agent.training = orig_mode

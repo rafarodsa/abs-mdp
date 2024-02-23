@@ -9,6 +9,7 @@ from functools import partial
 from torch.distributions import Normal, register_kl, MultivariateNormal, kl_divergence
 from src.utils.printarr import printarr
 
+from src.models.common import get_act
 
 class DiagonalNormal(torch.distributions.Distribution):
     def __init__(self, mean, std, feats):
@@ -87,16 +88,16 @@ class DiagonalGaussianModule(nn.Module):
         super().__init__()
         self.feats = features
         self.output_dim = config.output_dim
-        
-        self.mean = nn.Linear(config.input_dim, config.output_dim)
-        self.log_var = nn.Linear(config.input_dim, config.output_dim)
+        self.activation = config.activation
+        self.split = config.input_dim // 2
+        self.mean = nn.Sequential(get_act(self.activation), nn.Linear(config.input_dim // 2, config.output_dim))
+        self.log_var = nn.Sequential(get_act(self.activation), nn.Linear(config.input_dim - config.input_dim // 2, config.output_dim))
         self.min_var = torch.log(torch.tensor(config.min_std)) * 2
         self.max_var = torch.log(torch.tensor(config.max_std)) * 2 
 
     def forward(self, input):
         feats = self.feats(input)
-        # mean, log_var = self.mean(F.leaky_relu(feats)), self.log_var(F.leaky_relu(feats))
-        mean, log_var = self.mean(F.elu(feats)), self.log_var(F.elu(feats))
+        mean, log_var = self.mean(feats[..., :self.split]), self.log_var(feats[..., self.split:])
         
         #softly constrain the variance
         log_var = self.max_var - F.softplus(self.max_var - log_var)
@@ -141,16 +142,19 @@ class SphericalGaussianModule(DiagonalGaussianModule):
     def __init__(self, features, config):
         nn.Module.__init__(self)
         self.feats = features
-        self.output_dim = config.output_dim
 
-        self.mean = nn.Linear(config.input_dim, config.output_dim)
-        self.log_var = nn.Linear(config.input_dim, 1)
+
+        self.output_dim = config.output_dim
+        self.activation = config.activation
+        self.split = config.input_dim // 2
+        self.mean = nn.Sequential(get_act(self.activation), nn.Linear(config.input_dim // 2, config.output_dim))
+        self.log_var = nn.Sequential(get_act(self.activation), nn.Linear(config.input_dim - config.input_dim // 2, config.output_dim))
         self.min_var = torch.log(torch.tensor(config.min_std)) * 2
         self.max_var = torch.log(torch.tensor(config.max_std)) * 2 
 
     def forward(self, input):
         feats = self.feats(input)
-        mean, log_var = self.mean(F.relu(feats)), self.log_var(F.relu(feats))
+        mean, log_var = self.mean(feats[..., :self.split]), self.log_var(feats[..., self.split:])
         
         # softly constrain the variance
         log_var = self.max_var - softplus(self.max_var - log_var)
@@ -294,26 +298,32 @@ class MixtureDiagonalGaussianModule(nn.Module):
         self.feats = features
         self.output_dim = config.output_dim
         self.k = config.n_components
+        self.input_dim = config.input_dim
+        self.activation = config.activation
 
-        self.means = nn.ModuleList([nn.Linear(config.input_dim, config.output_dim) for _ in range(self.k)])
-        self.log_vars = nn.ModuleList([nn.Linear(config.input_dim, config.output_dim) for _ in range(self.k)])
-        self.mixing_coeffs = nn.Linear(config.input_dim, self.k)  # the mixing coefficients
+        self.per_mod_input = self.input_dim // self.k
+
+        self.means = nn.ModuleList([nn.Sequential(get_act(self.activation), nn.Linear(self.per_mod_input//2, config.output_dim)) for _ in range(self.k)])
+        self.log_vars = nn.ModuleList([nn.Sequential(get_act(self.activation), nn.Linear(self.per_mod_input-self.per_mod_input//2, config.output_dim)) for _ in range(self.k)])
+        self.mixing_coeffs = nn.Sequential(get_act(self.activation), nn.Linear(config.input_dim, self.k))  # the mixing coefficients
         
         self.min_var = torch.log(torch.tensor(config.min_std)) * 2
         self.max_var = torch.log(torch.tensor(config.max_std)) * 2 
+
 
     def forward(self, input):
         feats = self.feats(input)
         means, log_vars = [], []
         for i in range(self.k):
-            mean, log_var = self.means[i](F.elu(feats)), self.log_vars[i](F.elu(feats))
+            _feats = feats[..., i*self.per_mod_input:(i+1)*self.per_mod_input]
+            mean, log_var = self.means[i](_feats[..., :self.per_mod_input//2]), self.log_vars[i](_feats[..., self.per_mod_input//2:])
             # softly constrain the variance
             log_var = self.max_var - F.softplus(self.max_var - log_var)
             log_var = self.min_var + F.softplus(log_var - self.min_var)
             means.append(mean)
             log_vars.append(log_var)
 
-        pis = F.softmax(self.mixing_coeffs(F.elu(feats)), dim=-1)
+        pis = F.softmax(self.mixing_coeffs(feats), dim=-1)
         return (means, log_vars, pis), feats
 
     def sample_n_dist(self, input, n_samples=1):
