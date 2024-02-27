@@ -32,12 +32,12 @@ def make_egocentric_maze(name, goal, test=False, gamma=0.995, test_seed=None, tr
     assert name in GOALS and len(GOALS[name]) > goal, f'Goal {goal} in maze {name} not defined!'
     goal = GOALS[name][goal]
     print(f'ENV: {name}, GOAL: {goal}')
-    base_env = EgocentricMaze(name, goal) 
+    base_env = EgocentricMaze(name, goal, termination=True) 
     env = EmbodiedEnv(base_env, ignore_obs_keys=['walker/egocentric_camera'])
     options = list(make_options(base_env, max_exec_time=100).values()) # mapping name->option
     task_reward = make_reward_function(goal, base_env, tol=1.8)
     env = EnvOptionWrapper(options, env, discounted=(not test))
-    env = EnvGoalWrapper(env, task_reward, discounted=(not test), gamma=gamma, reward_scale=reward_scale)
+    env = EnvGoalWrapper(env, task_reward, discounted=False, gamma=gamma, reward_scale=reward_scale)
     return env
 
 
@@ -48,10 +48,10 @@ def make_egocentric_maze_ground_truth(name, goal, test=False, gamma=0.995, test_
     assert name in GOALS and len(GOALS[name]) > goal, f'Goal {goal} in maze {name} not defined!'
     goal = GOALS[name][goal]
     print(f'ENV: {name}, GOAL: {goal}')
-    base_env = EgocentricMaze(name, goal) 
+    base_env = EgocentricMaze(name, goal, termination=True) 
     env = GroundTruthEnvWrapper(base_env, ignore_obs_keys=['walker/egocentric_camera'])
     options = list(make_options(base_env, max_exec_time=100).values()) # mapping name->option
     task_reward = make_reward_function(goal, base_env, tol=1.8)
     env = EnvOptionWrapper(options, env, discounted=(not test))
-    env = EnvGoalWrapper(env, task_reward, discounted=(not test), gamma=gamma, reward_scale=reward_scale)
+    env = EnvGoalWrapper(env, task_reward, discounted=False, gamma=gamma, reward_scale=reward_scale)
     return env

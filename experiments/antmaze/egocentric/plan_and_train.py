@@ -14,7 +14,7 @@ from experiments.antmaze.plan import make_ground_env, parse_oc_args, gaussian_ba
 from src.absmdp.absmdp import AbstractMDPGoal, AbstractMDPGoalWTermination, TrueStateAbstractMDP, TrueStateAbstractMDPWTermination
 from src.models import ModuleFactory
 from src.agents.abstract_ddqn import AbstractDDQNGrounded, AbstractDoubleDQN, AbstractLinearDecayEpsilonGreedy
-from src.agents.rainbow import Rainbow, AbstractRainbow
+from src.agents.rainbow import Rainbow, AbstractRainbow, AbstractMPCRainbow
 from src.absmdp.datasets_traj import PinballDatasetTrajectory_
 import pfrl
 from pfrl.q_functions import DiscreteActionValueHead
@@ -88,7 +88,7 @@ def make_ddqn_agent(agent_cfg, experiment_cfg, world_model):
     return agent, grounded_agent
 
 
-def make_rainbow_agent(agent_cfg, experiment_cfg, world_model):
+def make_rainbow_agent(agent_cfg, experiment_cfg, world_model, mpc=False):
 
     agent_cfg.q_func_rainbow.input_dim = world_model.n_feats
     q_func = ModuleFactory.build(agent_cfg.q_func_rainbow)
@@ -123,8 +123,10 @@ def make_rainbow_agent(agent_cfg, experiment_cfg, world_model):
     device = f'cuda:{experiment_cfg.gpu}' if experiment_cfg.gpu >= 0 else 'cpu'
 
     encoder = world_model.encoder if not world_model.recurrent else (world_model.encoder, world_model.transition)
-    grounded_agent = AbstractRainbow(agent=agent, encoder=encoder, action_mask=world_model.initset, device=device, recurrent=world_model.recurrent)
-
+    if not mpc:
+        grounded_agent = AbstractRainbow(agent=agent, encoder=encoder, action_mask=world_model.initset, device=device, recurrent=world_model.recurrent)
+    else:
+        grounded_agent = AbstractMPCRainbow(agent=agent, world_model=world_model, action_mask=world_model.initset, device=device, recurrent=world_model.recurrent)
     return agent, grounded_agent
 
 def make_ppo_agent(agent_cfg, experiment_cfg, world_model):
@@ -230,6 +232,7 @@ def main():
     parser.add_argument('--agent', type=str, default='rainbow', choices=['rainbow', 'ddqn', 'ppo'])
     parser.add_argument('--offline_model', action='store_true')
     parser.add_argument('--data_path', type=str, default=None)
+    parser.add_argument('--mpc', action='store_true')
     
     args, unknown = parser.parse_known_args()
     cli_args = parse_oc_args(unknown)
@@ -287,7 +290,7 @@ def main():
     
     use_initset = True
     if args.agent == 'rainbow':
-        agent, grounded_agent = make_rainbow_agent(agent_cfg, experiment_cfg=cfg.experiment, world_model=world_model)
+        agent, grounded_agent = make_rainbow_agent(agent_cfg, experiment_cfg=cfg.experiment, world_model=world_model, mpc=args.mpc)
         use_initset = False
         # world_model.set_no_initset()
     elif args.agent == 'ddqn':
@@ -320,7 +323,8 @@ def main():
                                 config=cfg,
                                 use_initset=use_initset,
                                 learning_reward=True,
-                                offline_data_path=args.data_path
+                                offline_data_path=args.data_path,
+                                args=args
                             )
 
 if __name__ == '__main__':

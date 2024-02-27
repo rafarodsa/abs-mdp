@@ -10,20 +10,6 @@ rainbow_gt:
     - 512
     activation: mish
     output_dim: 1024
-  experiment:
-    load: null
-    final_exploration_steps: 0.4 # proportion of agent trainings steps to decay the epsilon
-    final_epsilon: 0.1
-    eval_epsilon: 0.001
-    replay_start_size: 100
-    replay_buffer_size: 100000
-    target_update_interval: 5000
-    update_interval: 5
-    num_step_return: 3
-    steps: ${trainer.steps}
-    lr: 3e-4
-    gpu: ${trainer.gpu}
-    gamma: ${env.gamma}
 
 rainbow:
   q_func:
@@ -60,20 +46,20 @@ rainbow:
       - 512
       activation: mish
       outact: none
-  experiment:
-    load: null
-    final_exploration_steps: 0.4 # proportion of agent trainings steps to decay the epsilon
-    final_epsilon: 0.1
-    eval_epsilon: 0.001
-    replay_start_size: 100
-    replay_buffer_size: 1000000
-    target_update_interval: 5000
-    update_interval: 5
-    num_step_return: 3
-    steps: ${trainer.steps}
-    lr: 3e-4
-    gpu: ${trainer.gpu}
-    gamma: ${env.gamma}
+experiment:
+  load: null
+  final_exploration_steps: 0.4 # proportion of agent trainings steps to decay the epsilon
+  final_epsilon: 0.1
+  eval_epsilon: 0.001
+  replay_start_size: 5000
+  replay_buffer_size: 1000000
+  target_update_interval: 5000
+  update_interval: 5
+  num_step_return: 3
+  steps: ${trainer.steps}
+  lr: 3e-4
+  gpu: ${trainer.gpu}
+  gamma: ${env.gamma}
 env:
   sample_abstract_transition: true
   render: false
@@ -86,7 +72,7 @@ env:
 
 trainer:
   steps: 1000000
-  checkpoint_frequency: 100000
+  checkpoint_frequency: 50000
   eval_n_runs: 10
   eval_interval: 10000
   outdir: exp_results/egocentric/baselines

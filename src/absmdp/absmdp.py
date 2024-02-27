@@ -690,7 +690,7 @@ class AbstractMDPGoal(AbstractMDP):
         goal_cfg.output_dim = 4
         self.position_regressor = build_model(goal_cfg)
 
-
+        self._task_reward = True
         self.warmup_steps = goal_cfg.reward_warmup_steps
         self.timestep = 0
 
@@ -777,7 +777,7 @@ class AbstractMDPGoal(AbstractMDP):
         # if self.timestep < self.warmup_steps:
         #     return 0., False
         _inp = feats if self.recurrent else z
-        goal_pred = (self.goal_class(_inp).squeeze().sigmoid() > 0.5).float()
+        goal_pred = (self.goal_class(_inp).squeeze(-1).sigmoid() > 0.5).float()
         return goal_pred, goal_pred > 0
     
     def goal_training_loss(self, batch):
@@ -1016,21 +1016,26 @@ class AbstractMDPGoalWTermination(AbstractMDPGoal):
         info = {}
         if isinstance(action, (np.intc, int, float)):
             action = torch.tensor(action)
+            batched = False
+        else:
+            batched = True
+
         action = F.one_hot(action.long(), self.n_options).to(self.current_z.device).unsqueeze(0)
         z = self.current_z.unsqueeze(0)
 
         next_z, feats = self._transition(z, action)
         feats = torch.cat([next_z, feats], dim=-1)  if self.recurrent else None
-        r = self._reward(z, action, next_z, feats=feats)[0]
+        r = self._reward(z, action, next_z, feats=feats)[..., 0]
+        # done = torch.zeros(*z.shape[:-1]).to(self.device).bool()
         if self._task_reward is not None:
             r_g, done = self.task_reward(next_z) if not self.recurrent else self.task_reward(next_z, feats=feats)
-        tau = self._tau(z, action, feats=feats)[0]
+        tau = self._tau(z, action, feats=feats)[..., 0]
 
         termination = nn.functional.softmax(self.termination(next_z), dim=-1).argmax(-1)
-        done = (termination > 0) or done
+        done = torch.logical_or((termination > 0), done)
 
 
-        info['tau'] = tau.cpu().item()
+        info['tau'] = tau.cpu().item() if not batched else tau.cpu()
         info['env_reward'] = r
         info['task_reward'] = r_g
         info['task_done'] = done
@@ -1045,9 +1050,9 @@ class AbstractMDPGoalWTermination(AbstractMDPGoal):
         self.current_z = next_z.squeeze(0)
         feats = feats[0] if self.recurrent else next_z[0]
 
-        assert feats.shape[0] == self.n_feats, f'{feats.shape} != self.n_feats'
+        # assert feats.shape[0] == self.n_feats, f'{feats.shape} != self.n_feats'
 
-        return feats.cpu().numpy(), r.item(), done, info
+        return feats.cpu().numpy(), r.item() if not batched else r[0], done[0], info
 
     def training_loss(self, batch):
         (s, action, reward, next_s, duration, success, done, masks), _ = batch
@@ -1166,7 +1171,7 @@ class TrueStateAbstractMDP(AbstractMDPGoal):
         self.model_success = cfg.model_success
         self.sample_transition = cfg.sample_transition
         self.gamma = cfg.gamma
-        self._task_reward = None
+        self._task_reward = True
         if self.cfg.name is not None:
             self.name = self.cfg.name
         else:
@@ -1340,7 +1345,7 @@ class TrueStateAbstractMDPWTermination(AbstractMDPGoalWTermination):
         self.model_success = cfg.model_success
         self.sample_transition = cfg.sample_transition
         self.gamma = cfg.gamma
-        self._task_reward = None
+        self._task_reward = True
         if self.cfg.name is not None:
             self.name = self.cfg.name
         else:

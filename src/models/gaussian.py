@@ -255,16 +255,30 @@ class MixtureDiagonalNormal(torch.distributions.Distribution):
     def std(self):
         return torch.sqrt(self.var)
 
+
+    # def sample(self, n_samples=1):
+    #     # Sampling using Categorical Distribution
+    #     # TODO Test
+    #     event_shape = self._pis.shape[:-1]
+    #     categorical = Categorical(probs=self._pis)
+    #     indices = categorical.sample((n_samples,))
+    #     samples = []
+    #     for i in range(n_samples):
+    #         sample_from_chosen_component = self._components[indices[i]].sample()[0] # only one sample
+    #         samples.append(sample_from_chosen_component)
+    #     return torch.stack(samples)
+
     def sample(self, n_samples=1):
         # Sampling using Categorical Distribution
-        # TODO Test
+        event_shape = self._pis.shape[:-1]
         categorical = Categorical(probs=self._pis)
-        indices = categorical.sample((n_samples,))
-        samples = []
-        for i in range(n_samples):
-            sample_from_chosen_component = self._components[indices[i]].sample()[0] # only one sample
-            samples.append(sample_from_chosen_component)
-        return torch.stack(samples)
+        indices = categorical.sample((n_samples,)) # n_samples x event_size
+        samples = torch.stack([normal.sample(n_samples) for normal in self._components]) # n_components x n_samples x event_size x dim_sample
+        indices = indices.reshape(-1)
+        x = samples.reshape(len(self._components), -1, samples.shape[-1])
+        x = x[indices, range(len(indices))]
+        return x.reshape(*event_shape, -1)
+
 
     def log_prob(self, x, batched=False):
         # Compute log prob for each component and then combine with log(pis)

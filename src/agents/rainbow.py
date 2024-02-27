@@ -272,6 +272,7 @@ class Rainbow:
         # return np.asarray(x, dtype=np.float32) / 255.
         if isinstance(x, dict):
             x = jax.tree_map(to_tensor, x)
+            return x 
         
         return torch.as_tensor(x)
     
@@ -474,6 +475,8 @@ class AbstractRainbow(pfrl.agent.Agent):
             return torch.from_numpy(obs.copy()).to(self.device)
         elif isinstance(obs, torch.Tensor):
             return obs.to(self.device)
+        elif isinstance(obs, (np.bool_, bool, np.intc, np.float_, float, int)):
+            return torch.tensor(obs)
         return obs
 
     def preprocess(self, obs):
@@ -537,3 +540,90 @@ class AbstractRainbow(pfrl.agent.Agent):
     
     def getattr(self, name):
         return getattr(self.agent, name)
+    
+    @contextmanager
+    def eval_mode(self):
+        orig_mode = self.agent.agent.training
+        try:
+            self.agent.agent.training = False
+            yield
+        finally:
+            self.agent.agent.training = orig_mode
+    
+
+class AbstractMPCRainbow(AbstractRainbow):
+    def __init__(self, world_model, agent, action_mask=None, device='cpu', recurrent=False):
+        super().__init__(world_model.encoder, agent, action_mask, device, recurrent)
+        self.world_model = world_model
+
+    
+    def mpc(self, obs, N=100, K=10, horizon=15, device='cpu'):
+        
+        n_obs = len(obs)
+        obs = jax.tree_map(lambda *s: torch.stack(s).repeat_interleave(N, dim=0), *obs)
+        # rollout for N trajs
+        z = self.world_model.reset(obs) # (NxN_OBS)
+        trajs = []
+        actions = []
+        for t in range(horizon):
+            # random action selection
+            _action = torch.randint(0, self.agent.n_actions,(N*n_obs,)).long().to(device)
+            ret = self.world_model.step(_action)
+            trajs.append(ret)
+            actions.append(_action)
+        
+        
+        # compute returns
+        rewards = jax.tree_map(lambda transition: transition[1], trajs, is_leaf=lambda s: isinstance(s, (tuple,)))
+        rewards = torch.stack(rewards).squeeze() # H x N
+        dones = jax.tree_map(lambda transition: transition[2].float(), trajs, is_leaf=lambda s: isinstance(s, (tuple,))) 
+        dones = torch.stack(dones).squeeze() # H x N
+        dones = torch.cat([dones, torch.zeros(1, N*n_obs).to(self.device)], dim=0)
+        dones = torch.cumprod(1.-dones, dim=0) # H x N
+        discounts = torch.Tensor([self.gamma ** i for i in range(horizon+1)]).unsqueeze(1).to(self.device) * dones # T x N 
+        
+        final_value = self.agent.agent.model(torch.Tensor(trajs[-1][0]).to(self.device)).q_values.max(-1)[0] * discounts[-1] # N 
+        returns = (rewards * discounts[:-1]).sum(0) + final_value # (Nxn_obs)
+        
+
+        returns = returns.reshape(n_obs, N) # n_obs x N
+        actions = torch.stack(actions).reshape(-1, n_obs, N) # T x n_obs x N
+        # pick top K
+        top_k, top_k_idx = torch.topk(returns, K)
+        top_k_idx = top_k_idx.repeat(horizon, 1, 1)
+        actions = torch.gather(actions, dim=-1, index=top_k_idx)
+        actions_prob = 1/K * torch.nn.functional.one_hot(actions, self.agent.n_actions).sum(-2) # T x n_obs x N_ACTIONS
+
+        return actions_prob.argmax(-1).cpu()[0]
+
+
+
+    def act(self, obs, initset=None):
+        # obs = jax.tree_map(self.preprocess, obs)
+        obs = self.preprocess(obs)
+        if not isinstance(obs, list):
+            obs = [obs]
+        with torch.no_grad():
+            if self.recurrent and self._state is None:
+                self._state = self.transition.feats._init_state(len(obs), batched=True)
+                self._hidden = self._state
+            z = jax.tree_map(self.encoder, obs, is_leaf=lambda x: isinstance(x, dict))
+            feats = [torch.cat([z, self._state[0, i]], dim=-1) for i, z in enumerate(z)] if self.recurrent else z
+            if self.agent.agent.training:
+                action = self.agent.batch_act(feats, initset)
+            else:
+                action = self.mpc(obs, device=self.world_model.device)
+            self.update_hidden(z, action)
+        return action if len(obs) > 1 else action[0]
+    
+    @contextmanager
+    def eval_mode(self):
+        orig_mode = self.agent.agent.training
+        current_z = self.world_model.current_z
+        try:
+            self.agent.agent.training = False
+            yield
+        finally:
+            self.agent.agent.training = orig_mode
+            self.world_model.current_z = current_z
+            

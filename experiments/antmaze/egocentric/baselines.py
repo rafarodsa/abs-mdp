@@ -14,21 +14,23 @@ from experiments.antmaze.egocentric.env_config import make_egocentric_maze, make
 
 from src.agents.train_agent_batch import train_agent_batch_with_evaluation
 
-def make_rainbow_agent(agent_cfg, obs):
+def make_rainbow_agent(agent_cfg, experiment_cfg, obs):
+    print(agent_cfg)
+    print(experiment_cfg)
     q_func = ModuleFactory.build(agent_cfg.q_func)
 
     with torch.no_grad():
         q_func(obs) # dummy forward pass
 
-    training_steps = agent_cfg.experiment.steps
+    training_steps = experiment_cfg.steps
     agent_total_steps = training_steps
 
-    betasteps = agent_total_steps / agent_cfg.experiment.update_interval
+    betasteps = agent_total_steps / experiment_cfg.update_interval
 
     # explorer = explorers.LinearDecayEpsilonGreedy(
     #         1.0,
-    #         agent_cfg.experiment.final_epsilon,
-    #         agent_total_steps * agent_cfg.experiment.final_exploration_steps,
+    #         experiment_cfg.final_epsilon,
+    #         agent_total_steps * experiment_cfg.final_exploration_steps,
     #         lambda: np.random.choice(agent_cfg.q_func.n_actions)
     # )
 
@@ -36,19 +38,19 @@ def make_rainbow_agent(agent_cfg, obs):
         q_func, 
         n_actions=agent_cfg.q_func.n_actions,
         betasteps=betasteps,
-        lr=agent_cfg.experiment.lr,
-        n_steps=agent_cfg.experiment.num_step_return,
-        replay_start_size=agent_cfg.experiment.replay_start_size,
-        replay_buffer_size=agent_cfg.experiment.replay_buffer_size,
-        target_update_interval=agent_cfg.experiment.target_update_interval,
-        gamma=agent_cfg.experiment.gamma,
-        gpu=agent_cfg.experiment.gpu,
-        update_interval=agent_cfg.experiment.update_interval,
+        lr=experiment_cfg.lr,
+        n_steps=experiment_cfg.num_step_return,
+        replay_start_size=experiment_cfg.replay_start_size,
+        replay_buffer_size=experiment_cfg.replay_buffer_size,
+        target_update_interval=experiment_cfg.target_update_interval,
+        gamma=experiment_cfg.gamma,
+        gpu=experiment_cfg.gpu,
+        update_interval=experiment_cfg.update_interval,
         v_max=1,
         v_min=-1,
         explorer=None, #explorer
     )
-    device = f'cuda:{agent_cfg.experiment.gpu}' if agent_cfg.experiment.gpu >= 0 else 'cpu'
+    device = f'cuda:{experiment_cfg.gpu}' if experiment_cfg.gpu >= 0 else 'cpu'
 
     return agent, q_func, device
 
@@ -65,16 +67,18 @@ def encoder(state, device):
     return state.float().to(device)
 
 
-def make_rainbow_agent_gt(agent_cfg):
+def make_rainbow_agent_gt(agent_cfg, experiment_cfg):
+    print(agent_cfg)
+    print(experiment_cfg)
     q_func = ModuleFactory.build(agent_cfg.q_func)
 
     # with torch.no_grad():
     #     q_func(obs) # dummy forward pass
 
-    training_steps = agent_cfg.experiment.steps
+    training_steps = experiment_cfg.steps
     agent_total_steps = training_steps
 
-    betasteps = agent_total_steps / agent_cfg.experiment.update_interval
+    betasteps = agent_total_steps / experiment_cfg.update_interval
 
     # explorer = explorers.LinearDecayEpsilonGreedy(
     #         1.0,
@@ -82,19 +86,19 @@ def make_rainbow_agent_gt(agent_cfg):
     #         agent_total_steps * agent_cfg.experiment.final_exploration_steps,
     #         lambda: np.random.choice(agent_cfg.q_func.n_actions)
     # )
-    device = f'cuda:{agent_cfg.experiment.gpu}' if agent_cfg.experiment.gpu >= 0 else 'cpu'
+    device = f'cuda:{experiment_cfg.gpu}' if experiment_cfg.gpu >= 0 else 'cpu'
     agent = Rainbow(
         q_func, 
         n_actions=agent_cfg.q_func.n_actions,
         betasteps=betasteps,
-        lr=agent_cfg.experiment.lr,
-        n_steps=agent_cfg.experiment.num_step_return,
-        replay_start_size=agent_cfg.experiment.replay_start_size,
-        replay_buffer_size=agent_cfg.experiment.replay_buffer_size,
-        target_update_interval=agent_cfg.experiment.target_update_interval,
-        gamma=agent_cfg.experiment.gamma,
-        gpu=agent_cfg.experiment.gpu,
-        update_interval=agent_cfg.experiment.update_interval,
+        lr=experiment_cfg.lr,
+        n_steps=experiment_cfg.num_step_return,
+        replay_start_size=experiment_cfg.replay_start_size,
+        replay_buffer_size=experiment_cfg.replay_buffer_size,
+        target_update_interval=experiment_cfg.target_update_interval,
+        gamma=experiment_cfg.gamma,
+        gpu=experiment_cfg.gpu,
+        update_interval=experiment_cfg.update_interval,
         v_max=1,
         v_min=-1,
         explorer=None, #explorer
@@ -137,17 +141,17 @@ def main():
     # run 
     
     if args.gt_encoder:
-        train_env = make_batched_ground_env(lambda *args, **kwargs: make_egocentric_maze_ground_truth(cfg.env.envname, goal=cfg.env.goal, gamma=cfg.env.gamma, test=False, reward_scale=0.), seeds=process_seeds, num_envs=cfg.env.n_envs)
+        train_env = make_batched_ground_env(lambda *args, **kwargs: make_egocentric_maze_ground_truth(cfg.env.envname, goal=cfg.env.goal, gamma=cfg.env.gamma, test=True, reward_scale=0.), seeds=process_seeds, num_envs=cfg.env.n_envs)
         # test_env = make_batched_ground_env(lambda *args, **kwargs: make_egocentric_maze(cfg.env.envname, goal=cfg.env.goal, gamma=cfg.env.gamma, test=True, reward_scale=0.), seeds=process_seeds, num_envs=cfg.env.n_envs)
         test_env = make_egocentric_maze_ground_truth(cfg.env.envname, goal=cfg.env.goal, gamma=cfg.env.gamma, test=True, reward_scale=0.)
-        agent, q_func, device = make_rainbow_agent_gt(cfg.rainbow_gt)
+        agent, q_func, device = make_rainbow_agent_gt(cfg.rainbow_gt, cfg.experiment)
     else:
-        train_env = make_batched_ground_env(lambda *args, **kwargs: make_egocentric_maze(cfg.env.envname, goal=cfg.env.goal, gamma=cfg.env.gamma, test=False, reward_scale=0.), seeds=process_seeds, num_envs=cfg.env.n_envs)
+        train_env = make_batched_ground_env(lambda *args, **kwargs: make_egocentric_maze(cfg.env.envname, goal=cfg.env.goal, gamma=cfg.env.gamma, test=True, reward_scale=0.), seeds=process_seeds, num_envs=cfg.env.n_envs)
         # test_env = make_batched_ground_env(lambda *args, **kwargs: make_egocentric_maze(cfg.env.envname, goal=cfg.env.goal, gamma=cfg.env.gamma, test=True, reward_scale=0.), seeds=process_seeds, num_envs=cfg.env.n_envs)
         test_env = make_egocentric_maze(cfg.env.envname, goal=cfg.env.goal, gamma=cfg.env.gamma, test=True, reward_scale=0.)
         obs = test_env.reset()
         obs = jax.tree_map(lambda s: torch.from_numpy(np.array(s)).float(), obs)
-        agent, q_func, device = make_rainbow_agent(cfg.rainbow, obs)
+        agent, q_func, device = make_rainbow_agent(cfg.rainbow, cfg.experiment, obs)
 
     # pfrl trainer
 

@@ -135,6 +135,7 @@ class GroundedPFRLTrainer:
         self.use_initset = use_initset
 
         self.logger = logger or logging.getLogger(__name__)
+        # self.logger.setLevel('INFO')
         # make pfrl evaluators
         evaluators = []
         for name, eval_env in eval_envs.items():
@@ -257,6 +258,7 @@ class GroundedPFRLTrainer:
                     # if any in success is True
                     if any(success):
                         break
+
                 if episode_end:
                     if t == steps_budget:
                         break
@@ -347,7 +349,8 @@ def train_agent_with_evaluation(
                                 init_state_sampler=None,
                                 use_initset=True, 
                                 learning_reward=False,
-                                offline_data_path=None
+                                offline_data_path=None,
+                                args=None
                             ):
     
     ## Boilerplate: set up logging, evaluator, and checkpointing 
@@ -364,6 +367,8 @@ def train_agent_with_evaluation(
         world_model = world_model.load_checkpoint(pathlib.Path(world_model_outdir) / 'checkpoints/world_model.ckpt', goal_cfg=world_model.goal_cfg)
         grounded_agent.encoder = world_model.encoder
         grounded_agent.action_mask = world_model.initset
+        if args.mpc:
+            grounded_agent.world_model = world_model
         print(f"Loading checkpoint at {pathlib.Path(world_model_outdir) / 'checkpoints/world_model.ckpt'}")
 
     agent_trainer = GroundedPFRLTrainer(
@@ -419,7 +424,7 @@ def train_agent_with_evaluation(
         if config.experiment.explore_ground:
             with torch.no_grad():
                 actions = grounded_agent.act(ss)
-        else:
+        else:  
             with grounded_agent.eval_mode():
                 actions = grounded_agent.act(ss)
 
