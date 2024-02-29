@@ -31,6 +31,13 @@ OPTIONS_INFO = {
     }
 }
 
+STOP_OPTION = {
+    'stop': {
+        'path': 'exp_results/antmaze/egocentric/stop',
+        'type': 'stop'
+    }
+}
+
 CONVERSION = {
     np.floating: np.float32,
     np.signedinteger: np.int64,
@@ -126,6 +133,26 @@ def walking_option(conf, env):
 
     return initiation, policy_factory, termination
 
+
+def stop_option(conf, env):
+
+    agent = load_agent(env, path=conf['path'])
+    initiation = lambda *args: 1.
+    # termination condition
+    def termination(obs, tol=0.05):
+        vel = obs['walker/sensors_velocimeter']
+        return (vel ** 2).sum() < tol ** 2
+        
+    def policy_factory(init_obs):
+        def _policy(obs, state):
+            obs = {k: convert(v)[None] for k, v in obs.items()}
+            action, state = agent.policy(obs, state,  mode='eval')
+            return {**action, 'reset': np.array([0.])}, state
+        return _policy        
+
+    return initiation, policy_factory, lambda obs: termination
+
+
 def walking_distance_option(conf, env):
 
     agent = load_agent(env, path=conf['path'])
@@ -146,13 +173,16 @@ def walking_distance_option(conf, env):
     return initiation, policy_factory, termination
 
 
-def make_options(env, max_exec_time=200):
+def make_options(env, max_exec_time=200, include_stop=False):
     options = {}
-    for option_name, conf in OPTIONS_INFO.items():
+    options_info = {**OPTIONS_INFO, **STOP_OPTION} if include_stop else OPTIONS_INFO
+    for option_name, conf in options_info.items():
         if conf['type'] == 'rotate':
             option = rotation_option(conf, env)
         elif conf['type'] == 'walk':
             option = walking_option(conf, env)
+        elif conf['type'] == 'stop':
+            option = stop_option(conf, env)
         else:
             raise ValueError(f'Option type {conf["type"]} is not implemented!')
         options[option_name] = Option(*option, name=option_name, recurrent=True, max_executing_time=max_exec_time, check_can_execute=False)

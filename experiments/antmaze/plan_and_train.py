@@ -15,7 +15,7 @@ from pfrl import explorers
 
 from omegaconf import OmegaConf as oc
 from experiments.antmaze.plan import make_ground_env, parse_oc_args, gaussian_ball_goal_fn, GOALS, GOAL_TOL, DATA_PATH
-from src.absmdp.absmdp import AbstractMDPGoal, AbstractMDP
+from src.absmdp.absmdp import AbstractMDPGoalWTermination as AbstractMDPGoal, AbstractMDP
 from src.models import ModuleFactory
 from src.agents.abstract_ddqn import AbstractDDQNGrounded, AbstractDoubleDQN, AbstractLinearDecayEpsilonGreedy
 from src.agents.rainbow import Rainbow, AbstractRainbow
@@ -24,12 +24,18 @@ import pfrl
 from pfrl.q_functions import DiscreteActionValueHead
 from pfrl import replay_buffers, utils
 
+
 import lightning as L
 
 from src.agents.train_agent_online import train_agent_with_evaluation
+from src.agents.multiprocess_env import MultiprocessVectorEnv
 
 from envs.pinball.pinball_gym import PinballPixelWrapper
 from envs.pinball import PinballEnvContinuous
+
+from functools import partial
+
+import pprint
 
 def random_selection_initset(initset_s):
     # TODO this works only with single samples.
@@ -91,6 +97,7 @@ def make_ddqn_agent(agent_cfg, experiment_cfg, world_model):
 
 
 def make_rainbow_agent(agent_cfg, experiment_cfg, world_model):
+    print('Building Rainbow agent')
     agent_cfg.q_func_rainbow.input_dim = world_model.latent_dim
     q_func = ModuleFactory.build(agent_cfg.q_func_rainbow)
 
@@ -100,12 +107,12 @@ def make_rainbow_agent(agent_cfg, experiment_cfg, world_model):
     betasteps = agent_total_steps / agent_cfg.agent.update_interval
 
 
-    explorer = explorers.LinearDecayEpsilonGreedy(
-            1.0,
-            agent_cfg.agent.final_epsilon,
-            agent_total_steps * agent_cfg.agent.final_exploration_steps,
-            lambda: np.random.choice(agent_cfg.q_func.n_actions)
-    )
+    # explorer = explorers.LinearDecayEpsilonGreedy(
+    #         1.0,
+    #         agent_cfg.agent.final_epsilon,
+    #         agent_total_steps * agent_cfg.agent.final_exploration_steps,
+    #         lambda: np.random.choice(agent_cfg.q_func.n_actions)
+    # )
 
     agent = Rainbow(
         q_func, # TODO change config for this
@@ -114,17 +121,73 @@ def make_rainbow_agent(agent_cfg, experiment_cfg, world_model):
         lr=agent_cfg.agent.lr,
         n_steps=agent_cfg.agent.num_step_return,
         replay_start_size=agent_cfg.agent.replay_start_size,
-        target_update_interval=agent_cfg.agent.update_interval,
+        target_update_interval=agent_cfg.agent.target_update_interval,
         gamma=agent_cfg.env.gamma,
         gpu=experiment_cfg.gpu,
         update_interval=agent_cfg.agent.update_interval,
-        explorer=explorer
+        explorer=None
     )
     device = f'cuda:{experiment_cfg.gpu}' if experiment_cfg.gpu >= 0 else 'cpu'
 
     grounded_agent = AbstractRainbow(agent=agent, encoder=world_model.encoder, action_mask=world_model.initset, device=device)
 
     return agent, grounded_agent
+
+def make_ppo_agent(agent_cfg, experiment_cfg, world_model):
+    from pfrl.policies import SoftmaxCategoricalHead
+    from src.agents.ppo import AbstractPPO, PPO
+
+    agent_cfg.q_func_rainbow.input_dim = world_model.n_feats
+    model_feats = ModuleFactory.build(agent_cfg.q_func_rainbow)
+
+    model = torch.nn.Sequential(
+        model_feats,
+        nn.Tanh(),
+        pfrl.nn.Branched(
+            nn.Sequential(
+                nn.Linear(agent_cfg.q_func_rainbow.output_dim, agent_cfg.q_func_rainbow.n_actions),
+                SoftmaxCategoricalHead()
+            ),
+            nn.Linear(agent_cfg.q_func_rainbow.output_dim, 1)
+        )
+    )
+    
+
+    opt = torch.optim.Adam(model.parameters(), lr=agent_cfg.agent.lr, eps=1e-5)
+
+    agent = PPO(
+        model,
+        opt,
+        gpu=experiment_cfg.gpu,
+        phi=lambda x: x,
+        update_interval=512,
+        minibatch_size=128,
+        epochs=10,
+        clip_eps=0.1,
+        clip_eps_vf=None,
+        standardize_advantages=True,
+        entropy_coef=1e-2,
+        recurrent=False,
+        max_grad_norm=0.5,
+        gamma=agent_cfg.env.gamma
+    )
+    device = f'cuda:{experiment_cfg.gpu}' if experiment_cfg.gpu >= 0 else 'cpu'
+
+    encoder = world_model.encoder if not world_model.recurrent else (world_model.encoder, world_model.transition)
+    grounded_agent = AbstractPPO(agent=agent, encoder=encoder, action_mask=world_model.initset, device=device, recurrent=world_model.recurrent)
+
+    return agent, grounded_agent
+
+def make_mpc_agent(agent_cfg, experiment_cfg, world_model):
+    from src.agents.mpc import AbstractMPC
+    print('Building MPC agent')
+
+    device = f'cuda:{experiment_cfg.gpu}' if experiment_cfg.gpu >= 0 else 'cpu'
+
+    grounded_agent = AbstractMPC(world_model=world_model, action_mask=world_model.initset, device=device)
+
+    return grounded_agent, grounded_agent
+
 
 def get_goal_examples(goal, n_samples=10000, device='cpu', envname='antmaze-umaze-v2', abstract_tol=0.1):        
     goal = np.array(goal).astype(np.float32)
@@ -144,7 +207,15 @@ def get_goal_examples(goal, n_samples=10000, device='cpu', envname='antmaze-umaz
     plt.savefig('samples_goal.png')
     return states[distances], states[~distances]
 
-    
+def make_batched_ground_env(make_env, num_envs, seeds):
+    vec_env = MultiprocessVectorEnv(
+        [
+            partial(make_env, seed=seeds[i])
+            for i in range(num_envs)
+        ]
+    )
+    return vec_env
+
 def main():
     # parse arguments
     parser = argparse.ArgumentParser()
@@ -152,7 +223,8 @@ def main():
     parser.add_argument('--exp-id', type=str, default=None)
     parser.add_argument('--learn-task-reward', action='store_true')
     parser.add_argument('--no-initset', action='store_true')
-    parser.add_argument('--agent', type=str, default='ddqn', choices=['rainbow', 'ddqn'])
+    parser.add_argument('--agent', type=str, choices=['rainbow', 'ddqn', 'ppo', 'mpc'])
+    parser.add_argument('--mpc', action='store_true')
     
     args, unknown = parser.parse_known_args()
     cli_args = parse_oc_args(unknown)
@@ -162,29 +234,37 @@ def main():
     # load configs  
     cfg = oc.load(args.config)
     cfg = oc.merge(cfg, cli_args)
+
+    pprint.pprint(oc.to_container(cfg))
+
     agent_cfg = cfg.planner
     world_model_cfg = cfg.world_model
     # make envs.
     train_seed = cfg.experiment.seed
     test_seed = 2**31 - 1 - cfg.experiment.seed
-
+    process_seeds = np.arange(cfg.planner.env.n_envs).astype(np.int64) + cfg.experiment.seed * cfg.planner.env.n_envs
+    print(f'Process seeds: {process_seeds}')
+    assert process_seeds.max() < 2**32
+    process_seeds = [int(s) for s in process_seeds]
 
     device = f'cuda:{cfg.experiment.gpu}' if cfg.experiment.gpu >= 0 else 'cpu'
 
     # make ground environment
-    train_env = make_ground_env(
-                                    test=False,
-                                    args=agent_cfg.env,
-                                    gamma=agent_cfg.env.gamma,
-                                    train_seed=train_seed,
-                                    device=device,
-                                )
+    # train_env = make_ground_env(
+    #                                 test=False,
+    #                                 args=agent_cfg.env,
+    #                                 gamma=agent_cfg.env.gamma,
+    #                                 train_seed=train_seed,
+    #                                 device=device,
+    #                             )
+
+    train_env = make_batched_ground_env(lambda *args, **kwargs: make_ground_env(args=agent_cfg.env, gamma=cfg.planner.env.gamma, test=True, device=device), seeds=process_seeds, num_envs=cfg.planner.env.n_envs)
 
     test_env = make_ground_env(
                                     test=True,
                                     args=agent_cfg.env,
                                     gamma=agent_cfg.env.gamma,
-                                    train_seed=test_seed,
+                                    seed=test_seed,
                                     device=device,
                                 )
 
@@ -204,9 +284,9 @@ def main():
     
     # make task_reward_funcion
     goal = GOALS[agent_cfg.env.envname][agent_cfg.env.goal]
-    if args.learn_task_reward:
-        pos_samples, neg_samples = get_goal_examples(goal, n_samples=5000)
-        world_model.preload_task_reward_samples(pos_samples, neg_samples)
+    # if args.learn_task_reward:
+    #     pos_samples, neg_samples = get_goal_examples(goal, n_samples=5000)
+    #     world_model.preload_task_reward_samples(pos_samples, neg_samples)
 
 
     def make_task_reward(envname, abstract_goal_tol):
@@ -227,8 +307,13 @@ def main():
         agent, grounded_agent = make_rainbow_agent(agent_cfg, experiment_cfg=cfg.experiment, world_model=world_model)
         use_initset = False
         # world_model.set_no_initset()
+    elif args.agent == 'ppo':
+        agent, grounded_agent = make_ppo_agent(agent_cfg, experiment_cfg=cfg.experiment, world_model=world_model)
+        use_initset = False
     elif args.agent == 'ddqn':
         agent, grounded_agent = make_ddqn_agent(agent_cfg, experiment_cfg=cfg.experiment, world_model=world_model)
+    elif args.agent == 'mpc':
+        _, grounded_agent = make_mpc_agent(agent_cfg, experiment_cfg=cfg.experiment, world_model=world_model)
     else:
         raise ValueError(f'Agent {args.agent} not implemented')
     
@@ -237,6 +322,7 @@ def main():
         world_model.set_no_initset()
 
     # train agent
+    print(world_model)
     train_agent_with_evaluation(
                                 grounded_agent, 
                                 train_env,
@@ -246,7 +332,9 @@ def main():
                                 max_steps=cfg.experiment.steps,
                                 config=cfg,
                                 use_initset=use_initset,
-                                learning_reward=args.learn_task_reward
+                                learning_reward=args.learn_task_reward,
+                                args=args, 
+                                device=device
                             )
 
 if __name__ == '__main__':

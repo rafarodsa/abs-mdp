@@ -350,7 +350,8 @@ def train_agent_with_evaluation(
                                 use_initset=True, 
                                 learning_reward=False,
                                 offline_data_path=None,
-                                args=None
+                                args=None,
+                                device='cpu'
                             ):
     
     ## Boilerplate: set up logging, evaluator, and checkpointing 
@@ -360,7 +361,6 @@ def train_agent_with_evaluation(
 
     # set trainer in imagination
 
-    
     warmup_steps = world_model.warmup_steps
 
     if (pathlib.Path(world_model_outdir) / 'checkpoints/world_model.ckpt').exists():
@@ -371,7 +371,8 @@ def train_agent_with_evaluation(
             grounded_agent.world_model = world_model
         print(f"Loading checkpoint at {pathlib.Path(world_model_outdir) / 'checkpoints/world_model.ckpt'}")
 
-    agent_trainer = GroundedPFRLTrainer(
+    if not args.mpc:
+        agent_trainer = GroundedPFRLTrainer(
                                         agent=grounded_agent,
                                         env=world_model,
                                         steps=max_steps,
@@ -387,12 +388,14 @@ def train_agent_with_evaluation(
                                         discounted=config.experiment.discounted,
                                         use_tensorboard=config.experiment.log_tensorboard,
                                         use_initset=use_initset
-    )
+        )
     
     world_model.set_outdir(world_model_outdir)
     world_model.setup_trainer(config)
     world_model.set_task_reward(task_reward)
     world_model.setup_replay(offline_data_path)
+    
+
     # world_model.set_init_state_sampler(test_env.init_state_sampler if init_state_sampler is None else init_state_sampler)
 
     ## main training loop
@@ -416,10 +419,11 @@ def train_agent_with_evaluation(
     should_train_wm = Every(config.world_model.train_every)
     should_train_agent = Every(config.planner.train_every)
     should_checkpoint = Every(checkpoint_freq)
-
+    n_steps = config.experiment.gradient_steps if 'gradient_steps' in config.experiment else 1
 
     while timestep < max_steps:
-        grounded_agent.agent.batch_last_episode = None
+        if not args.mpc:
+            grounded_agent.agent.batch_last_episode = None
         ## rollout agent in ground environment
         if config.experiment.explore_ground:
             with torch.no_grad():
@@ -439,7 +443,7 @@ def train_agent_with_evaluation(
         env_rewards = [info['env_reward'] for info in infos]
         taus = [info['tau'] for info in infos]
         successes = [info['success'] for info in infos]
-        
+        # print(dones, episode_len, max_rollout_len, episode_return)
         last = np.logical_or(dones, np.array(episode_len) >= max_rollout_len)
         world_model.observe(ss, actions, env_rewards, next_ss, dones, taus, successes, info=infos, last=last)
 
@@ -463,17 +467,16 @@ def train_agent_with_evaluation(
                 episode_len[i] = 0
                 episode_return[i] = 0
 
+        if not args.mpc:
+            agent_trainer.update_ground_step(len(ss))
+        
 
-        agent_trainer.update_ground_step(len(ss))
-        
-        
         if learning_reward: 
-            train_agent_in_sim = timestep > warmup_steps
+            train_agent_in_sim = world_model.n_gradient_steps > warmup_steps
             
-
         if should_train_wm(timestep) and len(world_model.data) > prefill:
             ## train world model for n gradient steps
-            world_model.train_world_model(timestep=timestep)
+            world_model.train_world_model(timestep=timestep, steps=n_steps)
             ## train agent
             
             ### timing
@@ -484,7 +487,7 @@ def train_agent_with_evaluation(
             estimate = avg_time_per_loop * (max_steps - timestep) / train_every
             print(f'\tAverage time per loop: {avg_time_per_loop} seconds. Estimated time to complete: {datetime.timedelta(seconds=estimate)}')
 
-        if train_agent_in_sim and should_train_agent(timestep):
+        if train_agent_in_sim and should_train_agent(timestep) and not args.mpc:
             grounded_agent.agent.batch_last_episode = None
             eval_history, ep_logs = agent_trainer.train(steps_budget=config.planner.agent.rollout_len)
             world_model.log(ep_logs, step=timestep)
@@ -497,9 +500,9 @@ def train_agent_with_evaluation(
             print('Checkpointing world model...')
         
     # final steps
-
-    agent_trainer.train(steps_budget=config.planner.agent.rollout_len) # train & evaluate finally
-    agent_trainer.save(t=timestep)
+    if not args.mpc:
+        agent_trainer.train(steps_budget=config.planner.agent.rollout_len) # train & evaluate finally
+        agent_trainer.save(t=timestep)
     world_model.save_checkpoint()
 
 

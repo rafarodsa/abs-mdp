@@ -10,4 +10,4 @@ dist:
   output_dim: ${model.latent_dim}
   input_dim: ${model.latent_dim}
   min_std: 0.001
-  max_std: 100
+  max_std: 10

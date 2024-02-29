@@ -125,6 +125,7 @@ def main():
     parser.add_argument('--agent', type=str, default='rainbow', choices=['rainbow', 'ddqn', 'ppo'])
     parser.add_argument('--exp_id', type=str, default='')
     parser.add_argument('--gt_encoder', action='store_true')
+    parser.add_argument('--include_stop', action='store_true')
     args, cfg = parse_and_merge(parser)
 
 
@@ -139,16 +140,17 @@ def main():
     
     # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     # run 
-    
+    print(args)
     if args.gt_encoder:
-        train_env = make_batched_ground_env(lambda *args, **kwargs: make_egocentric_maze_ground_truth(cfg.env.envname, goal=cfg.env.goal, gamma=cfg.env.gamma, test=True, reward_scale=0.), seeds=process_seeds, num_envs=cfg.env.n_envs)
+       
+        train_env = make_batched_ground_env(lambda *arg, **kwargs: make_egocentric_maze_ground_truth(name=cfg.env.envname, goal=cfg.env.goal, gamma=cfg.env.gamma, test=True, reward_scale=0., include_stop=args.include_stop), seeds=process_seeds, num_envs=cfg.env.n_envs)
         # test_env = make_batched_ground_env(lambda *args, **kwargs: make_egocentric_maze(cfg.env.envname, goal=cfg.env.goal, gamma=cfg.env.gamma, test=True, reward_scale=0.), seeds=process_seeds, num_envs=cfg.env.n_envs)
-        test_env = make_egocentric_maze_ground_truth(cfg.env.envname, goal=cfg.env.goal, gamma=cfg.env.gamma, test=True, reward_scale=0.)
+        test_env = make_egocentric_maze_ground_truth(cfg.env.envname, goal=cfg.env.goal, gamma=cfg.env.gamma, test=True, reward_scale=0., include_stop=args.include_stop)
         agent, q_func, device = make_rainbow_agent_gt(cfg.rainbow_gt, cfg.experiment)
     else:
-        train_env = make_batched_ground_env(lambda *args, **kwargs: make_egocentric_maze(cfg.env.envname, goal=cfg.env.goal, gamma=cfg.env.gamma, test=True, reward_scale=0.), seeds=process_seeds, num_envs=cfg.env.n_envs)
+        train_env = make_batched_ground_env(lambda *arg, **kwargs: make_egocentric_maze(cfg.env.envname, goal=cfg.env.goal, gamma=cfg.env.gamma, test=True, reward_scale=0., include_stop=args.include_stop), seeds=process_seeds, num_envs=cfg.env.n_envs)
         # test_env = make_batched_ground_env(lambda *args, **kwargs: make_egocentric_maze(cfg.env.envname, goal=cfg.env.goal, gamma=cfg.env.gamma, test=True, reward_scale=0.), seeds=process_seeds, num_envs=cfg.env.n_envs)
-        test_env = make_egocentric_maze(cfg.env.envname, goal=cfg.env.goal, gamma=cfg.env.gamma, test=True, reward_scale=0.)
+        test_env = make_egocentric_maze(cfg.env.envname, goal=cfg.env.goal, gamma=cfg.env.gamma, test=True, reward_scale=0., include_stop=args.include_stop)
         obs = test_env.reset()
         obs = jax.tree_map(lambda s: torch.from_numpy(np.array(s)).float(), obs)
         agent, q_func, device = make_rainbow_agent(cfg.rainbow, cfg.experiment, obs)

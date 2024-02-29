@@ -100,7 +100,7 @@ class EnvInitsetWrapper(gym.Wrapper):
         elif len(ret) == 5:
             next_obs, r, done, truncated, info = ret
         initset = self.initset(next_obs)
-        no_action_avail = initset.sum() == 0
+        no_action_avail = (initset.sum() == 0).item()
         done = no_action_avail or done
         
 

@@ -246,12 +246,22 @@ def make_abstract_env(test=False, test_seed=127, train_seed=255, args=None, rewa
     env.seed(test_seed if test else train_seed)
     return env
 
-def make_ground_env(test=False, test_seed=0, train_seed=1, args=None, reward_scale=0., gamma=GAMMA, device='cpu'):
+# def make_ground_env(test=False, test_seed=0, train_seed=1, args=None, reward_scale=0., gamma=GAMMA, device='cpu'):
+#     options, initset = make_antmaze_options(args.envname, device=device, check_can_execute=False)
+#     goal = GOALS[args.envname][args.goal]
+#     print(f'Goal: {goal}')
+#     discounted = not test
+#     env = make_antmaze_with_options(args.envname, test_seed if test else train_seed, options, initset, device=device)
+#     env = EnvGoalWrapper(env, goal_fn(lambda s: s, goal, GOAL_TOL), goal_reward=GOAL_REWARD, discounted=discounted, gamma=gamma, reward_scale=reward_scale, init_state_sampler=init_state_sampler(goal, args.envname))
+#     return env
+
+def make_ground_env(test=False, seed=0, args=None, reward_scale=0., gamma=GAMMA, device='cpu'):
     options, initset = make_antmaze_options(args.envname, device=device, check_can_execute=False)
     goal = GOALS[args.envname][args.goal]
     print(f'Goal: {goal}')
-    discounted = not test
-    env = make_antmaze_with_options(args.envname, test_seed if test else train_seed, options, initset, device=device)
+    # discounted = not test
+    discounted = False
+    env = make_antmaze_with_options(args.envname, seed, options, initset, device=device)
     env = EnvGoalWrapper(env, goal_fn(lambda s: s, goal, GOAL_TOL), goal_reward=GOAL_REWARD, discounted=discounted, gamma=gamma, reward_scale=reward_scale, init_state_sampler=init_state_sampler(goal, args.envname))
     return env
 

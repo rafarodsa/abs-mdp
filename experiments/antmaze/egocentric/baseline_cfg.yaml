@@ -1,8 +1,8 @@
 seed: 0
-
+n_actions: 3
 rainbow_gt:
   q_func:
-    n_actions: 3
+    n_actions: ${n_actions}
     type: mlp
     input_dim: 7
     hidden_dims:
@@ -15,7 +15,7 @@ rainbow:
   q_func:
     type: multicnnencoder
     n_cnns: 2
-    n_actions: 3
+    n_actions: ${n_actions}
     cnn:
       type: doubling_residual
       in_width: 64
@@ -51,9 +51,9 @@ experiment:
   final_exploration_steps: 0.4 # proportion of agent trainings steps to decay the epsilon
   final_epsilon: 0.1
   eval_epsilon: 0.001
-  replay_start_size: 5000
+  replay_start_size: 20000
   replay_buffer_size: 1000000
-  target_update_interval: 5000
+  target_update_interval: 10000
   update_interval: 5
   num_step_return: 3
   steps: ${trainer.steps}

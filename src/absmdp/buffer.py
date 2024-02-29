@@ -51,13 +51,13 @@ class TrajectoryReplayBuffer:
 
         for i, traj  in enumerate(self.current_trajectories):
             _copy = copy.deepcopy
-            state = tree_map(self._to_torch, _copy(states[i]))
-            action = self._to_torch(_copy(actions[i]))
-            reward = self._to_torch(_copy(rewards[i]))
-            next_state = tree_map(self._to_torch, _copy(next_states[i]))
-            duration = self._to_torch(_copy(durations[i]))
-            success = self._to_torch(_copy(successes[i]), dtype=torch.float32)
-            done = self._to_torch(_copy(dones[i]), dtype=torch.float32)
+            state = tree_map(self._to_numpy, _copy(states[i]))
+            action = self._to_numpy(_copy(actions[i]))
+            reward = self._to_numpy(_copy(rewards[i]))
+            next_state = tree_map(self._to_numpy, _copy(next_states[i]))
+            duration = self._to_numpy(_copy(durations[i]))
+            success = self._to_numpy(_copy(successes[i]), dtype=torch.float32)
+            done = self._to_numpy(_copy(dones[i]), dtype=torch.float32)
             traj.append([state, action, reward, next_state, duration, success, done, infos[i]])
             if 'goal_reached' in infos[i]:
                 self.push_task_reward_sample(next_state, infos[i]['goal_reached'] > 0)
@@ -274,6 +274,21 @@ class TrajectoryReplayBuffer:
             return x
         else:
             raise ValueError(f"Unsupported type {type(x)}")
+    
+    def _to_numpy(self, x, dtype=torch.float32):
+        if isinstance(x, np.ndarray):
+            return x
+        elif isinstance(x, torch.Tensor):
+            # Only move to device if it's not on the desired device
+            # if x.device != self.device:
+                # return x.type(dtype)
+            return x.cpu().numpy()
+        elif isinstance(x, (int, float, np.int64, np.float32, np.float64, bool, np.bool_)):
+            return x
+        elif isinstance(x, dict):
+            return x
+        else:
+            raise ValueError(f"Unsupported type {type(x)}")
 
     def to(self, device):
         if device != self.data_device:
@@ -328,7 +343,7 @@ class TrajectoryReplayBufferStored(TrajectoryReplayBuffer, Dataset):
             self.push_task_reward_sample(last_state, last_info['goal_reached'] > 0)
 
     def save_episode(self, episode):
-        
+
         timestamp = datetime.datetime.now().strftime('%Y%m%dT%H%M%S')
         identifier = str(uuid.uuid4().hex)
         eplen = len(episode['action'])

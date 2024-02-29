@@ -20,28 +20,57 @@ experiment:
   steps: 250000
   train_every: 8
   max_episode_len: 100
-  outdir: planning_ddqn
-  explore_ground: false
+  outdir: planning
+  explore_ground: true
+  prefill: 512
+  gradient_steps: 1
 
 world_model:
-  ckpt: exp_results/antmaze/antmaze-umaze-v2/mdps/umaze_markov_1024_from_success_mixture_uniform_3__model.latentdim_16/phi_train/ckpts/last-v1.ckpt
+  ckpt: null #exp_results/antmaze/antmaze-umaze-v2/mdps/umaze_markov_1024_from_success_mixture_uniform_3__model.latentdim_16/phi_train/ckpts/last-v1.ckpt
   data_path: exp_results/antmaze/antmaze-umaze-v2/data/trajectories_128_uniform.zip
   name: null
   reward_scale: ${planner.env.reward_scale}
-  sample_transition: false
+  sample_transition: true
   model_success: false
   gamma: ${planner.env.gamma}
-  fixed_modules: ['encoder']
+  fixed_modules: [] #['encoder']
+  train_every: ${experiment.train_every}
+  
   
   model:
-    model_config_dir: experiments/pb_obstacles/fullstate/
+    model_config_dir: experiments/antmaze
     n_options: 8
     obs_dims: 29
-    latent_dim: 16
+    latent_dim: 8
     trajectory_len: 64
     encoder: ${loadcfg:${model.model_config_dir}/config/models/encoder_mlp.yaml}
     decoder: ${loadcfg:${model.model_config_dir}/config/models/decoder_mlp_critic.yaml}
-    transition: ${loadcfg:${model.model_config_dir}/config/models/transition_gaussian.yaml}
+    # transition: ${loadcfg:${model.model_config_dir}/config/models/transition_gaussian.yaml}
+    transition:
+      features:
+        type: mlp
+        input_dim: ${eval:${model.n_options} + ${model.latent_dim}}
+        output_dim: 1024
+        n_options: ${model.n_options}
+        hidden_dims: [512, 512]
+        activation: mish
+        normalize: true
+      dist:
+        type: mixture_gaussian
+        n_components: 2
+        activation: mish
+        output_dim: ${model.latent_dim}
+        input_dim: ${model.transition.features.output_dim}
+        min_std: 0.001
+        max_std: 10
+    termination:
+      type: mlp
+      input_dim: ${model.latent_dim}
+      output_dim: 2
+      hidden_dims:
+      - 256
+      - 256
+      activation: mish
     init_class: ${loadcfg:${model.model_config_dir}/config/models/init_class_mlp.yaml}
     reward: ${loadcfg:${model.model_config_dir}/config/models/reward_mlp.yaml}
     tau: ${loadcfg:${model.model_config_dir}/config/models/tau_mlp.yaml}
@@ -50,10 +79,9 @@ world_model:
       hidden_dims: [256, 256]
       activation: silu
       output_dim: 1
-      input_dim: 2
-      reward_warmup_steps: 5000
+      input_dim: ${model.latent_dim}
+      reward_warmup_steps: 30000
     
-
   optimizer:
     type: adam
     params:
@@ -73,6 +101,9 @@ world_model:
     reward_const: 1
     tau_const: 1.
     initset_const: 1
+    goal_class_const: 1.
+    norm2_const: 1.
+    termination_const: 1.
     n_samples: 1
 
   data:
@@ -80,6 +111,8 @@ world_model:
     batch_size: 16
 
 planner:
+  agent_id: ''
+  train_every: ${experiment.train_every}
   env:
     sample_abstract_transition: true
     render: false
@@ -89,6 +122,7 @@ planner:
     goal: 4
     abstract_goal_tol: 0.1
     envname: 'antmaze-medium-play-v2'
+    n_envs: 2
 
   agent:
     load: null
@@ -96,7 +130,7 @@ planner:
     final_epsilon: 0.1
     eval_epsilon: 0.001
     replay_start_size: 1000
-    replay_buffer_size: 1000000
+    replay_buffer_size: 100000
     target_update_interval: 5000
     update_interval: 5
     num_step_return: 1

@@ -111,9 +111,11 @@ class AbstractMDP(nn.Module, gym.Env):
             
     def to(self, device):
         self.device = device
-        super().to(device)
         if self.data:
             self.data.to(device)
+        for name, m in self._models.items():
+            if isinstance(m, nn.Module):
+                m.to(device)
 
     def setup_replay(self, data_path=None):
         data_path = f'{self.outdir}/data' if not data_path else data_path
@@ -126,19 +128,24 @@ class AbstractMDP(nn.Module, gym.Env):
     def step(self, action):
         # self.eval()
         info = {}
-        if isinstance(action, (np.intc, int, float)):
+
+        if isinstance(action, (np.intc, np.int64, int, float)):
             action = torch.tensor(action)
+            batched = False
+        else:
+            batched = True
+
         action = F.one_hot(action.long(), self.n_options).to(self.current_z.device).unsqueeze(0)
         z = self.current_z.unsqueeze(0)
 
         next_z, feats = self._transition(z, action)
         feats = torch.cat([next_z, feats], dim=-1)  if self.recurrent else None
-        r = self._reward(z, action, next_z, feats=feats)[0]
+        r = self._reward(z, action, next_z, feats=feats)[..., 0]
         if self._task_reward is not None:
             r_g, done = self.task_reward(next_z) if not self.recurrent else self.task_reward(next_z, feats=feats)
         tau = self._tau(z, action, feats=feats)[0]
         # print(tau)
-        info['tau'] = tau.cpu().item()
+        info['tau'] = tau.cpu().item() if not batched else tau.cpu()
         info['env_reward'] = r
         info['task_reward'] = r_g
         info['task_done'] = done
@@ -146,16 +153,17 @@ class AbstractMDP(nn.Module, gym.Env):
         info['initset_next_s'] = self.initset(next_z, feats=feats)[0]
         self.last_initset = info['initset_next_s']
 
-        # done = done or self.last_initset.sum() == 0
+        done = done or self.last_initset.sum() == 0
 
         # r = self.reward_scale * r + self.gamma ** max(1, tau.item()-1) * r_g  # add task reward
+
         r = self.reward_scale * r + r_g
         self.current_z = next_z.squeeze(0)
         feats = feats[0] if self.recurrent else next_z[0]
 
-        assert feats.shape[0] == self.n_feats, f'{feats.shape} != self.n_feats'
-
-        return feats.cpu().numpy(), r.item(), done, info
+        # assert feats.shape[0] == self.n_feats, f'{feats.shape} != self.n_feats'
+        #r = r.item() 
+        return feats.cpu().numpy(), r.item() if not batched else r, done, info
     
     def __sample_initial_from_data(self):
         traj = self.data.sample(1)[0]
@@ -300,7 +308,7 @@ class AbstractMDP(nn.Module, gym.Env):
 
     def setup_fabric(self, cfg_fabric):
         loggers = self.setup_loggers()
-
+        print(cfg_fabric)
         self.fabric = Fabric.Fabric(
                                     accelerator=cfg_fabric.accelerator,
                                     devices=cfg_fabric.devices,
@@ -351,7 +359,7 @@ class AbstractMDP(nn.Module, gym.Env):
             metrics = list(logs.items())
             metrics = [f'{k}: {v:.3f}' for k, v in metrics if k != 'step']
             metrics = ' | '.join(metrics)
-            print(f'[world model training step {timestep}] {metrics}')
+        print(f'[world model training step {timestep}] {metrics}')
 
         return loss
     
@@ -469,7 +477,7 @@ class AbstractMDP(nn.Module, gym.Env):
     #     _loss =  torch.diag(_norm) - (torch.logsumexp(_norm, dim=-1) - np.log(b_size))
     #     return -_loss.mean() #-_loss.reshape(*b)
 
-    def grounding_loss(self, next_z, grounded_next_z, std=0.1, batch_size=256):
+    def grounding_loss(self, next_z, grounded_next_z, std=0.1, batch_size=256, feats=None):
         '''
             critic f(s', z') = exp(||\phi(s')-z'||^2/std^2)
         '''
@@ -534,7 +542,7 @@ class AbstractMDP(nn.Module, gym.Env):
         tau = tau_target
         _tau = self.tau(torch.cat([z, a], dim=-1).detach()).squeeze() if not self.recurrent else self.tau(feats.detach()).squeeze()
         t = torch.sigmoid(_tau) * 100
-        print(f'tau target mean {tau.mean()}')
+        # print(f'tau target mean {tau.mean()}')
         loss = F.mse_loss(t.reshape(-1), tau.reshape(-1), reduction='none')
         return loss
     
@@ -693,6 +701,7 @@ class AbstractMDPGoal(AbstractMDP):
         self._task_reward = True
         self.warmup_steps = goal_cfg.reward_warmup_steps
         self.timestep = 0
+        self.n_gradient_steps = 0
 
     def train_world_model(self, steps=1, timestep=None):
         '''
@@ -723,20 +732,20 @@ class AbstractMDPGoal(AbstractMDP):
             
             self.optimizer.step()
 
-            self.regressor_optimizer.zero_grad()
-            regressor_loss, regressor_logs = self.regressor_loss(batch)
-            self.fabric.log_dict(regressor_logs, step=timestep)
-            self.fabric.backward(regressor_loss)
-            self.regressor_optimizer.step()
+            # self.regressor_optimizer.zero_grad()
+            # regressor_loss, regressor_logs = self.regressor_loss(batch)
+            # self.fabric.log_dict(regressor_logs, step=timestep)
+            # self.fabric.backward(regressor_loss)
+            # self.regressor_optimizer.step()
 
-            logs = {**logs, **regressor_logs}
+            # logs = {**logs, **regressor_logs}
 
             # pretty print logs
             metrics = list(logs.items())
             metrics = [f'{k}: {v:.3f}' for k, v in metrics if k != 'step']
             metrics = ' | '.join(metrics)
-            print(f'[world model training step {timestep}] {metrics}')
-
+        print(f'[world model training step {timestep} / gradient steps {self.n_gradient_steps}] {metrics}')
+        self.n_gradient_steps += steps
         return loss
     
     def configure_optimizers(self):
@@ -813,9 +822,10 @@ class AbstractMDPGoal(AbstractMDP):
         _mask = masks.bool()
 
         # grounding_loss = self.grounding_loss(feats[_mask])
-        self.grounder.mlp_keys = self.encoder.mlp_keys
-        self.grounder.cnn_keys = self.encoder.cnn_keys
-        self.grounder.initialized = True
+        if hasattr(self.encoder, 'mlp_keys') and  hasattr(self.encoder, 'cnn_keys'):
+            self.grounder.mlp_keys = self.encoder.mlp_keys
+            self.grounder.cnn_keys = self.encoder.cnn_keys
+            self.grounder.initialized = True
         # grounding_loss = self.grounding_loss(next_z, self.grounder(next_s))
         grounding_loss = self.grounding_loss(next_z, next_z)
         _feats = feats[_mask] if feats is not None else None
@@ -904,7 +914,7 @@ class AbstractMDPGoal(AbstractMDP):
             # 'goal_pred/pos_weight': pos_weight.item()
         }
 
-        print(f'Goal TPR: {tpr}, TNR: {tnr}')
+        # print(f'Goal TPR: {tpr}, TNR: {tnr}')
         return loss, log_dict
 
     def get_model_state(self):
@@ -956,6 +966,7 @@ class AbstractMDPGoal(AbstractMDP):
         mdp = cls(cfg, goal_cfg)
 
         mdp.timestep = loaded_ckpt['timestep']
+
         state = mdp.get_model_state()
         for mdl in mdp.models:
             state[mdl].load_state_dict(loaded_ckpt[mdl])
@@ -1014,7 +1025,7 @@ class AbstractMDPGoalWTermination(AbstractMDPGoal):
     def step(self, action):
         # self.eval()
         info = {}
-        if isinstance(action, (np.intc, int, float)):
+        if isinstance(action, (np.intc, np.int64, int, float)):
             action = torch.tensor(action)
             batched = False
         else:
@@ -1055,7 +1066,7 @@ class AbstractMDPGoalWTermination(AbstractMDPGoal):
         return feats.cpu().numpy(), r.item() if not batched else r[0], done[0], info
 
     def training_loss(self, batch):
-        (s, action, reward, next_s, duration, success, done, masks), _ = batch
+        (s, action, reward, next_s, duration, success, done, masks), info = batch
         action = F.one_hot(action.long(), self.n_options)
         # encode
         z_c = self.encoder(s)
@@ -1072,18 +1083,27 @@ class AbstractMDPGoalWTermination(AbstractMDPGoal):
         lengths = masks.sum(-1)
         _mask = masks.bool()
 
-        grounding_loss = self.grounding_loss(next_z[_mask], feats=feats[_mask])
-        reward_loss = self.reward_loss(reward[_mask], z_c[_mask], action[_mask], next_z_c[_mask], feats=feats[_mask])
-        tau_loss = self.duration_loss(duration[_mask], z_c[_mask], action[_mask], feats=feats[_mask])
+        grounding_loss = self.grounding_loss(next_z[_mask], feats=feats) # TODO this feats thing cannot be filtered if none
+        reward_loss = self.reward_loss(reward[_mask], z_c[_mask], action[_mask], next_z_c[_mask], feats=feats)
+        tau_loss = self.duration_loss(duration[_mask], z_c[_mask], action[_mask], feats=feats)
         termination_loss = self.termination_loss(done[_mask], next_z_c[_mask])
         
         # transition losses
         transition_loss = self.consistency_loss(z, next_z, next_z_dist, mask=_mask)
  
 
-        tpc_loss = self.tpc_loss(z, next_z, next_z_dist, min_length=int(lengths.min().item()))
+        tpc_loss = self.tpc_loss(z, next_z, next_z_dist, min_length=int(lengths.min().item()), mask=_mask)
 
         initset_loss = self.initset_loss_from_executed(z, action, success, _mask, feats=feats)
+
+        if not self.recurrent:
+            s, goal_reward = self._get_task_reward_examples()
+            # with torch.no_grad():
+            _z = self.encoder(s)
+            goal_loss, goal_log_dict = self.goal_loss(_z, goal_reward, feats=feats) if _z is not None and goal_reward is not None else (torch.tensor(0.), {})
+        else:
+            feats, goal_reward = self._get_goal_reward_from_traj(feats, info, lengths, _mask)
+            goal_loss, goal_log_dict = self.goal_loss(None, goal_reward, feats=feats)
 
         loss =  self.hyperparams.grounding_const * grounding_loss.mean() + \
                 self.hyperparams.transition_const * transition_loss.mean() + \
@@ -1091,7 +1111,8 @@ class AbstractMDPGoalWTermination(AbstractMDPGoal):
                 self.hyperparams.initset_const * initset_loss.mean() + \
                 self.hyperparams.reward_const * reward_loss.mean() + \
                 self.hyperparams.tau_const * tau_loss.mean() + \
-                self.hyperparamms.termination_const * termination_loss.mean()
+                self.hyperparams.termination_const * termination_loss.mean() + \
+                self.hyperparams.goal_class_const * goal_loss 
         
         log_dict = {
             'loss': loss,
@@ -1103,7 +1124,8 @@ class AbstractMDPGoalWTermination(AbstractMDPGoal):
             'tau_loss': tau_loss.mean(),
             'termination_loss': termination_loss.mean(),
             'rbuffer_len': len(self.data),
-            'norm2': (z_c ** 2).sum(-1).mean()
+            'norm2': (z_c ** 2).sum(-1).mean(),
+            **goal_log_dict
         }
 
         return loss, log_dict
@@ -1113,6 +1135,20 @@ class AbstractMDPGoalWTermination(AbstractMDPGoal):
         loss = nn.functional.cross_entropy(done_pred, done.long())
         return loss
     
+    def grounding_loss(self, next_z, std=0.1, batch_size=256, feats=None):
+        '''
+            critic f(s', z') = exp(||\phi(s')-z'||^2/std^2)
+        '''
+        b = next_z.shape[:-1]
+        b_size = np.prod(b)
+        # print(b_size)
+        next_z = next_z.reshape(int(b_size), -1)[:batch_size]
+
+        _norm = ((next_z[:, None, :] - next_z[None, :, :]) / std) ** 2 
+        _norm = -_norm.sum(-1) # b_size x b_size
+        _loss =  torch.diag(_norm) - (torch.logsumexp(_norm, dim=-1) - np.log(b_size))
+        return -_loss.mean() #-_loss.reshape(*b)
+
 
 def encoder(state, device='cuda:0'):
     keys = ['log_global_pos', 'log_global_orientation']
@@ -1463,7 +1499,7 @@ class TrueStateAbstractMDPWTermination(AbstractMDPGoalWTermination):
         assert 'goal_cfg' in loaded_ckpt or goal_cfg
         goal_cfg = loaded_ckpt['goal_cfg'] if 'goal_cfg' in loaded_ckpt else goal_cfg
         mdp = cls(cfg, goal_cfg, loaded_ckpt['encoder'], ground_truth_state_dim=cfg.model.latent_dim)
-
+        
         mdp.timestep = loaded_ckpt['timestep']
         state = mdp.get_model_state()
         for mdl in mdp.models:

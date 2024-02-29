@@ -42,7 +42,7 @@ def get_act(activation):
     
     return actlayer
 
-def _MLP(input_dim: int, hidden_dim: List[int], output_dim: int = None, activation: str = 'relu', normalize=True, outact='none'):
+def _MLP(input_dim: int, hidden_dim: List[int], output_dim: int = None, activation: str = 'relu', normalize=False, outact='none'):
     layers = []
     n = 1 if activation != 'glu' else 2
     for i in range(len(hidden_dim)):
@@ -72,7 +72,7 @@ class ResidualMLP(nn.Module):
         return self.mlp(x) + self.residual(x)
 
 def MLP(cfg: MLPConfig):
-    normalize = cfg.normalize if 'normalize' in cfg else True
+    normalize = cfg.normalize if 'normalize' in cfg else False
     outact = cfg.outact if 'outact' in cfg else 'none'
     return _MLP(cfg.input_dim, cfg.hidden_dims, cfg.output_dim, cfg.activation, normalize=normalize, outact=outact)
 

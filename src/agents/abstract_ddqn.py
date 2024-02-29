@@ -350,11 +350,22 @@ class AbstractDDQNGrounded(pfrl.agent.Agent):
     def __init__(self, encoder, agent, action_mask=None, device='cpu'):
         self.agent = agent
         self.encoder = encoder
-        self.action_mask = action_mask
+        self._action_mask = action_mask
         self.gamma = agent.gamma
         self.device = device
         self.agent.device = device
 
+    @property
+    def action_mask(self):
+        return self._action_mask
+    
+    @action_mask.setter
+    def action_mask(self, action_mask):
+        self._action_mask = action_mask
+        self.agent.action_mask = action_mask
+    
+    
+    
     def preprocess(self, obs):
         if isinstance(obs, np.ndarray):
             return torch.from_numpy(obs.copy()).to(self.device)
