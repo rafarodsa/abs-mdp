@@ -66,7 +66,7 @@ world_model:
     termination:
       type: mlp
       input_dim: ${model.latent_dim}
-      output_dim: 2
+      output_dim: 1
       hidden_dims:
       - 256
       - 256

@@ -4,25 +4,20 @@
     date: 24 August 2023
 '''
 
-import logging
+
 import os
 import torch
 import pfrl
-from pfrl.experiments.evaluator import save_agent
-from pfrl.utils.ask_yes_no import ask_yes_no
 
-from src.agents.evaluator import Evaluator
-from src.utils.printarr import printarr
+from src.agents.pfrl_trainer import GroundedPFRLTrainer
 
 from src.agents.abstract_ddqn import AbstractDDQNGrounded
-from tqdm import tqdm
 import time, datetime
 from collections import deque
 import numpy as np
 
 import pathlib
 
-from jax import tree_map
 
 class Every:
 
@@ -87,245 +82,6 @@ def rollout(grounded_agent, ground_env, world_model, n_steps=1, max_rollout_len=
     return timestep
 
 
-class GroundedPFRLTrainer:
-    def __init__(
-                    self, 
-                    agent,
-                    env,
-                    steps,
-                    eval_n_steps,
-                    eval_n_episodes,
-                    eval_interval,
-                    outdir,
-                    checkpoint_freq=None,
-                    train_max_episode_len=None,
-                    step_offset=0,
-                    eval_max_episode_len=None,
-                    eval_envs=None,
-                    successful_score=None,
-                    step_hooks=(),
-                    evaluation_hooks=(),
-                    save_best_so_far_agent=True,
-                    use_tensorboard=False,
-                    eval_during_episode=False,
-                    logger=None,
-                    discounted=False,
-                    use_initset=True
-                 ):
-        
-        # assert isinstance(agent, AbstractDDQNGrounded) # TODO create abstract class for these agents.
-        self.grounded_agent = agent # grounded agent
-        self.agent = agent.agent # abstract agent
-        self.env = env
-        self.steps = steps
-        self.eval_n_steps = eval_n_steps
-        self.eval_n_episodes = eval_n_episodes
-        self.eval_interval = eval_interval
-        self.outdir = outdir
-        self.checkpoint_freq = checkpoint_freq
-        self.max_episode_len = train_max_episode_len
-        self.step_offset = step_offset
-        self.eval_max_episode_len = eval_max_episode_len
-        self.eval_envs = eval_envs
-        self.successful_score = successful_score
-        self.step_hooks = step_hooks
-        self.evaluation_hooks = evaluation_hooks
-        self.save_best_so_far_agent = save_best_so_far_agent
-        self.eval_during_episode = eval_during_episode,
-        self.use_initset = use_initset
-
-        self.logger = logger or logging.getLogger(__name__)
-        # self.logger.setLevel('INFO')
-        # make pfrl evaluators
-        evaluators = []
-        for name, eval_env in eval_envs.items():
-            
-            os.makedirs(f'{outdir}/{name}', exist_ok=True)
-            if 'sim' in name:
-                agent = self.agent
-            elif 'ground' in name:
-                agent = self.grounded_agent
-            else:
-                raise ValueError(f'Env name must indicate whether the env is sim or ground')
-
-            evaluator = Evaluator(
-                agent=agent,
-                n_steps=eval_n_steps,
-                n_episodes=eval_n_episodes,
-                eval_interval=eval_interval,
-                outdir=f'{outdir}/{name}',
-                max_episode_len=eval_max_episode_len,
-                env=eval_env,
-                step_offset=step_offset,
-                evaluation_hooks=evaluation_hooks,
-                save_best_so_far_agent=save_best_so_far_agent,
-                use_tensorboard=use_tensorboard,
-                logger=logger,
-                discounted=discounted
-            )
-            evaluators.append(evaluator)
-        self.evaluators = evaluators
-        self.ground_step = 0
-        self.current_step = 0 # n of step in simulation
-
-    def compute_metrics(self, ep):
-        ep = np.array([o for o in ep])
-        norm2 = (ep ** 2).sum(-1)
-        residual = ((ep[1:]-ep[:-1])**2).sum(-1)
-
-        logs = {
-            'sim_rollout/norm2_mean': norm2.mean(),
-            'sim_rollout/norm2_std': norm2.std(),
-            'sim_rollout/norm2_max': norm2.max(),
-            'sim_rollout/norm2_min': norm2.min(),
-            'sim_rollout/residual_norm2_mean': residual.mean(),
-            'sim_rollout/residual_norm2_std': residual.std(),
-            'sim_rollout/residual_norm2_max': residual.max(),
-            'sim_rollout/residual_norm2_min': residual.min(),
-        }
-        return logs
-
-    def train(self, steps_budget):
-        '''
-            Run training for a number of steps.
-            return: evaluation statistics if evaluation is done
-        '''
-
-        episode_r = 0
-        episode_idx = 0
-
-        # o_0, r_0
-
-        obs = self.env.reset()
-
-        t = 0
-
-        eval_stats_history = []  # List of evaluation episode stats dict
-        episode_len = 0
-        
-        ep = [obs]
-        ep_logs = []
-        try:
-            while t < steps_budget:
-
-                # a_t
-                if self.use_initset:
-                    initset_s = self.env.last_initset
-                    action = self.agent.act(obs, initset_s)
-                else:
-                    action = self.agent.act(obs)
-
-                # o_{t+1}, r_{t+1}
-                last_obs = obs
-                obs, r, done, info = self.env.step(action)
-                
-                # track
-                ep.append(obs)
-
-                t += 1
-                episode_r += r
-                episode_len += 1
-                reset = episode_len == self.max_episode_len or info.get("needs_reset", False)
-            
-                if 'tau' not in info:
-                    info['tau'] = 1
-                self.agent.observe(obs, r, done, reset, info)
-
-                for hook in self.step_hooks:
-                    hook(self.env, self.agent, t)
-
-                episode_end = done or reset or t == steps_budget
-
-                if episode_end:
-                    print(f'agent training: episode {episode_idx} length {episode_len} return {episode_r}, statistics: {self.agent.get_statistics()}')
-                    self.logger.info(
-                        "outdir:%s step:%s episode:%s R:%s",
-                        self.outdir,
-                        t,
-                        episode_idx,
-                        episode_r,
-                    )
-                    stats = self.agent.get_statistics()
-                    self.logger.info("statistics:%s", stats)
-                    episode_idx += 1
-
-                    ep_logs.append(self.compute_metrics(ep))
-
-                if self.evaluators is not None and (episode_end or self.eval_during_episode):
-                    eval_results = [self.evaluate(evaluator, self.ground_step, episode_idx, self.agent, self.successful_score) for evaluator in self.evaluators]
-                    eval_dicts, success = list(zip(*eval_results))
-                    eval_stats_history.append(eval_dicts)
-                    # if any in success is True
-                    if any(success):
-                        break
-
-                if episode_end:
-                    if t == steps_budget:
-                        break
-                    # Start a new episode
-                    episode_r = 0
-                    episode_len = 0
-                    obs = self.env.reset()
-                    ep = [obs]
-
-                # if self.checkpoint_freq and self.ground_step % self.checkpoint_freq == 0:
-                #     save_agent(self.agent, self.ground_step, self.outdir, self.logger, suffix="_checkpoint")
-
-        except (Exception, KeyboardInterrupt):
-            # Save the current model before being killed
-            save_agent(self.agent, self.ground_step, self.outdir, self.logger, suffix="_except")
-            raise
-
-        # Save the final model
-        # save_agent(self.agent, self.ground_step, self.outdir, self.logger, suffix="_finish")
-
-        self.current_step += t
-
-        return eval_stats_history, tree_map(lambda *ep_stats: np.median(np.array(ep_stats)), *ep_logs)
-    
-    def update_ground_step(self, t=1):
-        self.ground_step += t
-
-    def evaluate(self, evaluator, t, episode_idx, agent, successful_score=None):
-        '''
-            Evaluate the agent and return the evaluation score.
-            return:
-                eval_stats: dict of evaluation statistics
-                success: bool indicating whether the agent has reached the successful score
-        '''
-        eval_stats = {}
-        eval_score = evaluator.evaluate_if_necessary(t=t, episodes=episode_idx)
-        if eval_score is not None:
-            eval_stats = dict(agent.get_statistics())
-            eval_stats["eval_score"] = eval_score
-        if (
-            successful_score is not None
-            and evaluator.max_score >= successful_score
-        ):
-            return eval_stats, True
-        return eval_stats, False
-
-
-    def save_agent_replay_buffer(self, agent, t, outdir, suffix="", logger=None):
-        logger = logger or logging.getLogger(__name__)
-        filename = os.path.join(outdir, "{}{}.replay.pkl".format(t, suffix))
-        agent.replay_buffer.save(filename)
-        logger.info("Saved the current replay buffer to %s", filename)
-
-
-    def ask_and_save_agent_replay_buffer(self, agent, t, outdir, suffix=""):
-        if hasattr(agent, "replay_buffer") and ask_yes_no(
-            "Replay buffer has {} transitions. Do you save them to a file?".format(
-                len(agent.replay_buffer)
-            )
-        ):  # NOQA
-            self.save_agent_replay_buffer(agent, t, outdir, suffix=suffix)
-
-    def save(self, t):
-        """Save the current model to a file."""
-        save_agent(self.agent, t, self.outdir, self.logger, suffix="_finish")
-
-
 def makeoutdirs(config):
     basedir = f'{config.experiment_cwd}/{config.experiment_name}'
     os.makedirs(basedir, exist_ok=True)
@@ -364,7 +120,7 @@ def train_agent_with_evaluation(
     warmup_steps = world_model.warmup_steps
 
     if (pathlib.Path(world_model_outdir) / 'checkpoints/world_model.ckpt').exists():
-        world_model = world_model.load_checkpoint(pathlib.Path(world_model_outdir) / 'checkpoints/world_model.ckpt', goal_cfg=world_model.goal_cfg)
+        world_model = world_model.load_checkpoint(pathlib.Path(world_model_outdir) / 'checkpoints/world_model.ckpt')
         grounded_agent.encoder = world_model.encoder
         grounded_agent.action_mask = world_model.initset
         if args.mpc:
@@ -392,7 +148,7 @@ def train_agent_with_evaluation(
     
     world_model.set_outdir(world_model_outdir)
     world_model.setup_trainer(config)
-    world_model.set_task_reward(task_reward)
+    # world_model.set_task_reward(task_reward)
     world_model.setup_replay(offline_data_path)
     
 

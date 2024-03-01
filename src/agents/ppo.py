@@ -295,3 +295,6 @@ class AbstractPPO(pfrl.agent.Agent):
     
     def getattr(self, name):
         return getattr(self.agent, name)
+    
+# from src.agents.agent import Agent
+# class PPOAgent(Agent):

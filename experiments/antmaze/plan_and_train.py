@@ -16,6 +16,7 @@ from pfrl import explorers
 from omegaconf import OmegaConf as oc
 from experiments.antmaze.plan import make_ground_env, parse_oc_args, gaussian_ball_goal_fn, GOALS, GOAL_TOL, DATA_PATH
 from src.absmdp.absmdp import AbstractMDPGoalWTermination as AbstractMDPGoal, AbstractMDP
+from src.absmdp.absmdp2 import AMDP
 from src.models import ModuleFactory
 from src.agents.abstract_ddqn import AbstractDDQNGrounded, AbstractDoubleDQN, AbstractLinearDecayEpsilonGreedy
 from src.agents.rainbow import Rainbow, AbstractRainbow
@@ -273,15 +274,19 @@ def main():
     # load world model
     goal_cfg = world_model_cfg.model.goal_class
 
-    mdp_constructor = AbstractMDPGoal if args.learn_task_reward else AbstractMDP
+    # mdp_constructor = AbstractMDPGoal if args.learn_task_reward else AbstractMDP
+    mdp_constructor = AMDP
 
 
-    if world_model_cfg.ckpt is not None:
-        print(f'Loading world model from checkpoint at {world_model_cfg.ckpt}')
-        world_model = mdp_constructor.load_from_old_checkpoint(world_model_cfg=world_model_cfg)
-    else:
-        world_model = mdp_constructor(world_model_cfg, goal_cfg=goal_cfg)
+    # if world_model_cfg.ckpt is not None:
+    #     print(f'Loading world model from checkpoint at {world_model_cfg.ckpt}')
+    #     world_model = mdp_constructor.load_from_old_checkpoint(world_model_cfg=world_model_cfg)
+    # else:
+    #     world_model = mdp_constructor(world_model_cfg, goal_cfg=goal_cfg)
     
+    
+    world_model = mdp_constructor(world_model_cfg)
+
     # make task_reward_funcion
     goal = GOALS[agent_cfg.env.envname][agent_cfg.env.goal]
     # if args.learn_task_reward:
@@ -296,10 +301,10 @@ def main():
             return r, r > 0
         return __r
 
-    task_reward = make_task_reward(agent_cfg.env.envname, agent_cfg.env.abstract_goal_tol)
+    # task_reward = make_task_reward(agent_cfg.env.envname, agent_cfg.env.abstract_goal_tol)
     # world_model.set_task_reward(task_reward)
 
-    world_model.freeze(world_model_cfg.fixed_modules)
+    # world_model.freeze(world_model_cfg.fixed_modules)
 
     # make grounded agent
     use_initset = True
@@ -328,7 +333,7 @@ def main():
                                 train_env,
                                 test_env, 
                                 world_model, 
-                                task_reward,
+                                True,
                                 max_steps=cfg.experiment.steps,
                                 config=cfg,
                                 use_initset=use_initset,
