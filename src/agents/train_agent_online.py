@@ -181,12 +181,12 @@ def train_agent_with_evaluation(
         if not args.mpc:
             grounded_agent.agent.batch_last_episode = None
         ## rollout agent in ground environment
-        if config.experiment.explore_ground:
-            with torch.no_grad():
-                actions = grounded_agent.act(ss)
-        else:  
-            with grounded_agent.eval_mode():
-                actions = grounded_agent.act(ss)
+        # if config.experiment.explore_ground:
+        #     with torch.no_grad():
+        #         actions = grounded_agent.act(ss)
+        # else:  
+        with grounded_agent.eval_mode():
+            actions = grounded_agent.act(ss)
 
         next_ss, rs, dones, infos = ground_env.step(actions) # this might return tuples/lists of steps per env if env is batched.
         # print(actions, rs, infos)

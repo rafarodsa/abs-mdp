@@ -553,6 +553,128 @@ class Evaluator(object):
             self.prev_eval_t = t - t % self.eval_interval
             return score
         return None
+    
+class PFRLEvaluator(object):
+    """Object that is responsible for evaluating a given agent.
+
+    Args:
+        agent (Agent): Agent to evaluate.
+        env (Env): Env to evaluate the agent on.
+        n_steps (int): Number of timesteps used in each evaluation.
+        n_episodes (int): Number of episodes used in each evaluation.
+        eval_interval (int): Interval of evaluations in steps.
+        outdir (str): Path to a directory to save things.
+        max_episode_len (int): Maximum length of episodes used in evaluations.
+        step_offset (int): Offset of steps used to schedule evaluations.
+        evaluation_hooks (Sequence): Sequence of
+            pfrl.experiments.evaluation_hooks.EvaluationHook objects. They are
+            called after each evaluation.
+        save_best_so_far_agent (bool): If set to True, after each evaluation,
+            if the score (= mean of returns in evaluation episodes) exceeds
+            the best-so-far score, the current agent is saved.
+        use_tensorboard (bool): Additionally log eval stats to tensorboard
+    """
+
+    def __init__(
+        self,
+        agent,
+        env,
+        n_steps,
+        n_episodes,
+        eval_interval,
+        outdir,
+        max_episode_len=None,
+        step_offset=0,
+        evaluation_hooks=(),
+        save_best_so_far_agent=True,
+        logger=None,
+        use_tensorboard=False,
+        discounted=False
+    ):
+        assert (n_steps is None) != (n_episodes is None), (
+            "One of n_steps or n_episodes must be None. "
+            + "Either we evaluate for a specified number "
+            + "of episodes or for a specified number of timesteps."
+        )
+        self.agent = agent
+        self.env = env
+        self.max_score = np.finfo(np.float32).min
+        self.start_time = time.time()
+        self.n_steps = n_steps
+        self.n_episodes = n_episodes
+        self.eval_interval = eval_interval
+        self.outdir = outdir
+        self.use_tensorboard = use_tensorboard
+        self.max_episode_len = max_episode_len
+        self.step_offset = step_offset
+        self.evaluation_hooks = evaluation_hooks
+        self.save_best_so_far_agent = save_best_so_far_agent
+        self.logger = logger or logging.getLogger(__name__)
+        self.env_get_stats = getattr(self.env, "get_statistics", lambda: [])
+        self.env_clear_stats = getattr(self.env, "clear_statistics", lambda: None)
+        self.discounted = discounted
+        assert callable(self.env_get_stats)
+        assert callable(self.env_clear_stats)
+
+        # Write a header line first
+        write_header(self.outdir, self.agent, self.env)
+
+        if use_tensorboard:
+            self.tb_writer = create_tb_writer(outdir)
+
+    def evaluate_and_update_max_score(self, t, episodes):
+        self.env_clear_stats()
+        eval_stats = eval_performance(
+            self.env,
+            self.agent,
+            self.n_steps,
+            self.n_episodes,
+            max_episode_len=self.max_episode_len,
+            logger=self.logger,
+            discounted=self.discounted
+        )
+        elapsed = time.time() - self.start_time
+        agent_stats = self.agent.get_statistics()
+        custom_values = tuple(tup[1] for tup in agent_stats)
+        env_stats = self.env_get_stats()
+        custom_env_values = tuple(tup[1] for tup in env_stats)
+        mean = eval_stats["mean"]
+        values = (
+            (
+                t,
+                episodes,
+                elapsed,
+                mean,
+                eval_stats["median"],
+                eval_stats["stdev"],
+                eval_stats["max"],
+                eval_stats["min"],
+            )
+            + custom_values
+            + custom_env_values
+        )
+        record_stats(self.outdir, values)
+
+        if self.use_tensorboard:
+            record_tb_stats(self.tb_writer, agent_stats, eval_stats, env_stats, t)
+
+        for hook in self.evaluation_hooks:
+            hook(
+                env=self.env,
+                agent=self.agent,
+                evaluator=self,
+                step=t,
+                eval_stats=eval_stats,
+                agent_stats=agent_stats,
+                env_stats=env_stats,
+            )
+
+        if mean > self.max_score:
+            self.logger.info("The best score is updated %s -> %s", self.max_score, mean)
+            self.max_score = mean
+            if self.save_best_so_far_agent:
+                save_agent(self.agent, "best", self.outdir, self.logger)
+        return mean
 
 
 class AsyncEvaluator(object):

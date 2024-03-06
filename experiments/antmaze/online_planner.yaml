@@ -66,7 +66,7 @@ world_model:
     termination:
       type: mlp
       input_dim: ${model.latent_dim}
-      output_dim: 1
+      output_dim: 2
       hidden_dims:
       - 256
       - 256
@@ -77,8 +77,9 @@ world_model:
     goal_class: 
       type: 'mlp'
       hidden_dims: [256, 256]
-      activation: silu
-      output_dim: 1
+      activation: mish
+      normalize: true
+      output_dim: 2
       input_dim: ${model.latent_dim}
       reward_warmup_steps: 30000
     
@@ -101,7 +102,7 @@ world_model:
     reward_const: 1
     tau_const: 1.
     initset_const: 1
-    goal_class_const: 1.
+    goal_class_const: 0.01
     norm2_const: 1.
     termination_const: 1.
     n_samples: 1
@@ -152,4 +153,11 @@ planner:
     n_actions: 8
     hidden_dims: [256, 256]
     activation: relu
+    output_dim: 1024
+
+  ppo_func:
+    type: 'mlp'
+    n_actions: 8
+    hidden_dims: [256, 256]
+    activation: tanh
     output_dim: 1024

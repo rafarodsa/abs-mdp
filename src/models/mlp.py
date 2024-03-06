@@ -42,14 +42,14 @@ def get_act(activation):
     
     return actlayer
 
-def _MLP(input_dim: int, hidden_dim: List[int], output_dim: int = None, activation: str = 'relu', normalize=False, outact='none'):
+def _MLP(input_dim: int, hidden_dim: List[int], output_dim: int = None, activation: str = 'relu', normalize=False, outact='none', init_fn=lambda l: l):
     layers = []
     n = 1 if activation != 'glu' else 2
     for i in range(len(hidden_dim)):
         if i == 0:
-            layers.append(nn.Linear(input_dim, hidden_dim[i] * n))
+            layers.append(init_fn(nn.Linear(input_dim, hidden_dim[i] * n)))
         else:
-            layers.append(nn.Linear(hidden_dim[i-1], hidden_dim[i] * n))
+            layers.append(init_fn(nn.Linear(hidden_dim[i-1], hidden_dim[i] * n)))
         
         if normalize:
             layers.append(nn.LayerNorm(hidden_dim[i] * n))
@@ -57,7 +57,7 @@ def _MLP(input_dim: int, hidden_dim: List[int], output_dim: int = None, activati
         layers.append(get_act(activation=activation))
 
     if output_dim is not None:
-        layers.append(nn.Linear(hidden_dim[-1], output_dim) if len(hidden_dim)  > 0 else nn.Linear(input_dim, output_dim)) 
+        layers.append(init_fn(nn.Linear(hidden_dim[-1], output_dim) if len(hidden_dim)  > 0 else nn.Linear(input_dim, output_dim)))
     if outact != 'none':
         layers.append(get_act(outact))
 
@@ -71,10 +71,10 @@ class ResidualMLP(nn.Module):
     def forward(self, x):
         return self.mlp(x) + self.residual(x)
 
-def MLP(cfg: MLPConfig):
+def MLP(cfg: MLPConfig, init_fn=lambda l: l):
     normalize = cfg.normalize if 'normalize' in cfg else False
     outact = cfg.outact if 'outact' in cfg else 'none'
-    return _MLP(cfg.input_dim, cfg.hidden_dims, cfg.output_dim, cfg.activation, normalize=normalize, outact=outact)
+    return _MLP(cfg.input_dim, cfg.hidden_dims, cfg.output_dim, cfg.activation, normalize=normalize, outact=outact, init_fn=init_fn)
 
 def DynamicsMLP(cfg):
     return _MLP(cfg.latent_dim + cfg.n_options, cfg.hidden_dims, output_dim=cfg.latent_dim, activation=cfg.activation)

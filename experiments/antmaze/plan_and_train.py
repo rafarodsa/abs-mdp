@@ -137,19 +137,24 @@ def make_rainbow_agent(agent_cfg, experiment_cfg, world_model):
 def make_ppo_agent(agent_cfg, experiment_cfg, world_model):
     from pfrl.policies import SoftmaxCategoricalHead
     from src.agents.ppo import AbstractPPO, PPO
+    
+    def ortho_init(layer, gain=1):
+        nn.init.orthogonal_(layer.weight, gain=gain)
+        nn.init.zeros_(layer.bias)
+        return layer
+    agent_cfg.ppo_func.input_dim = world_model.n_feats
+    model_feats = ModuleFactory.build(agent_cfg.ppo_func, ortho_init)
 
-    agent_cfg.q_func_rainbow.input_dim = world_model.n_feats
-    model_feats = ModuleFactory.build(agent_cfg.q_func_rainbow)
 
     model = torch.nn.Sequential(
         model_feats,
         nn.Tanh(),
         pfrl.nn.Branched(
             nn.Sequential(
-                nn.Linear(agent_cfg.q_func_rainbow.output_dim, agent_cfg.q_func_rainbow.n_actions),
+                ortho_init(nn.Linear(agent_cfg.ppo_func.output_dim, agent_cfg.ppo_func.n_actions), gain=1e-2),
                 SoftmaxCategoricalHead()
             ),
-            nn.Linear(agent_cfg.q_func_rainbow.output_dim, 1)
+            ortho_init(nn.Linear(agent_cfg.ppo_func.output_dim, 1))
         )
     )
     
@@ -289,9 +294,9 @@ def main():
 
     # make task_reward_funcion
     goal = GOALS[agent_cfg.env.envname][agent_cfg.env.goal]
-    # if args.learn_task_reward:
-    #     pos_samples, neg_samples = get_goal_examples(goal, n_samples=5000)
-    #     world_model.preload_task_reward_samples(pos_samples, neg_samples)
+    if args.learn_task_reward:
+        pos_samples, neg_samples = get_goal_examples(goal, n_samples=5000)
+        world_model.preload_task_reward_samples(pos_samples, neg_samples)
 
 
     def make_task_reward(envname, abstract_goal_tol):

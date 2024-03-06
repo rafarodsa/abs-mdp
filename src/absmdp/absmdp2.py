@@ -31,7 +31,7 @@ def get_config(cfg):
     return cfg
 
 class AMDP(gym.Env, nn.Module):
-    SMOOTHING_NOISE_STD = 0.2
+    SMOOTHING_NOISE_STD = 0.05
     def __init__(self, cfg, name='world_model'):
         nn.Module.__init__(self)
         gym.Env.__init__(self)
@@ -132,9 +132,16 @@ class AMDP(gym.Env, nn.Module):
     def n_feats(self):
         return self.cfg.model.latent_dim
     
+    def train(self, mode=True):
+        for m in self._models.values():
+            m.train(mode=mode)
+
+    def eval(self):
+        self.train(mode=False)
+
     @torch.no_grad()
     def step(self, action):
-        # self.eval()
+        self.eval()
         
         z = self.simulation_state['z']
         action = self.preprocess_action(action)
@@ -179,15 +186,17 @@ class AMDP(gym.Env, nn.Module):
         return log_tau
     
     def _termination(self, z):
-        termination_prob = torch.sigmoid(self.termination(z)) 
-        return (termination_prob > 0.5).float()
+        termination_prob = torch.softmax(self.termination(z), dim=-1)
+        # done = torch.bernoulli(termination_prob)
+        done = termination_prob.argmax(-1).float()
+        return done
     
     def initset(self, z):
         return (torch.sigmoid(self.initsets(z)) > 0.5).float()
     
     def task_reward(self, z):
-        goal_prob = F.sigmoid(self.goal_class(z)) 
-        return (goal_prob > 0.5).float()
+        goal_prob = F.softmax(self.goal_class(z), dim=-1)
+        return goal_prob.argmax(-1).float()
     
     @torch.no_grad()
     def reset(self, ground_state=None):
@@ -228,7 +237,7 @@ class AMDP(gym.Env, nn.Module):
         '''
         assert not self.fabric is None, f'Initialize Fabric to train World Model'
         assert not self.data is None, f'No data buffer initialized'
-
+        self.train()
         for _ in range(steps):
             batch = self.data.sample(self.batch_size)
             if batch is None:
@@ -258,6 +267,9 @@ class AMDP(gym.Env, nn.Module):
         self.timestep = timestep
         return loss
     
+    def _get_task_reward_examples(self):
+        return  self.data.sample_task_reward(1024)
+
     def training_loss(self, batch):
         (state, action, reward, next_state, duration, success, done, masks), info = batch
         action = F.one_hot(action.long(), self.n_options)
@@ -271,16 +283,19 @@ class AMDP(gym.Env, nn.Module):
         lengths = masks.sum(-1)
         _mask = masks.bool()
 
-        grounding_loss = self.grounding_loss(next_z[_mask])
+        grounding_loss = self.grounding_loss(next_z_c[_mask])
         reward_loss = self.reward_loss(reward[_mask], z_c[_mask], action[_mask], next_z_c[_mask])
         tau_loss = self.duration_loss(duration[_mask], z_c[_mask], action[_mask])
-        termination_loss = self.termination_loss(done[_mask], next_z_c[_mask])
+        termination_loss = self.termination_loss(done[_mask], next_z[_mask])
         transition_loss = self.transition_loss(z, next_z, next_z_dist, mask=_mask)
         tpc_loss = self.predictibility_loss(z, next_z, next_z_dist, min_length=int(lengths.min().item()), mask=_mask)
         initset_loss = self.initset_loss_from_executed(z, action, success, _mask)
         gamma_loss = self.gamma_loss(z_c[_mask], action[_mask], duration[_mask])
 
-        feats, goal_reward = self._get_goal_reward_from_traj(next_z_c, info, lengths, _mask)
+        # feats, goal_reward = self._get_goal_reward_from_traj(next_z_c, info, lengths, _mask)
+        states, goal_reward = self._get_task_reward_examples()
+        feats = self.encoder(states).detach()
+        feats = feats + torch.randn_like(feats) * self.SMOOTHING_NOISE_STD 
         goal_loss, goal_log_dict = self.goal_loss(feats, goal_reward)
 
         loss =  self.hyperparams.grounding_const * grounding_loss.mean() + \
@@ -305,6 +320,7 @@ class AMDP(gym.Env, nn.Module):
             'gamma_loss': gamma_loss.mean(),
             'rbuffer_len': len(self.data),
             'norm2': (z_c ** 2).sum(-1).mean(),
+            'goal_loss': goal_loss.mean(),
             **goal_log_dict
         }
 
@@ -317,13 +333,21 @@ class AMDP(gym.Env, nn.Module):
             pos_weight = torch.tensor(1.)
         else:
             pos_weight = torch.where(n_pos > 0, n_neg / n_pos, 1.)
-        done_pred = self.termination(next_z).squeeze(-1)
-        loss = nn.functional.binary_cross_entropy_with_logits(done_pred, done, pos_weight=pos_weight)
+        done_pred = torch.softmax(self.termination(next_z).squeeze(-1), dim=-1)
+        # loss = nn.functional.binary_cross_entropy_with_logits(done_pred, done, pos_weight=pos_weight)
+        # loss = nn.functional.binary_cross_entropy_with_logits(done_pred, done)
+        loss = nn.functional.cross_entropy(done_pred, done.long())
         return loss
+    
+    def preload_task_reward_samples(self, positive_samples, negative_samples):
+        for i in range(len(positive_samples)):
+            self.data.push_task_reward_sample(positive_samples[i], pos=True)
+        for i in range(len(negative_samples)):
+            self.data.push_task_reward_sample(negative_samples[i], pos=False)
     
     def gamma_loss(self, z, a, duration):
         gamma = self.cfg.gamma ** duration
-        gamma_pred = self.gamma_model(torch.cat([z, a], dim=-1)).squeeze(-1)
+        gamma_pred = self.gamma_model(torch.cat([z, a], dim=-1).detach()).squeeze(-1)
         return F.mse_loss(gamma_pred, gamma)
     
     def grounding_loss(self, next_z, std=0.1, batch_size=256):
@@ -333,7 +357,11 @@ class AMDP(gym.Env, nn.Module):
         b = next_z.shape[:-1]
         b_size = np.prod(b)
         next_z = next_z.reshape(int(b_size), -1)[:batch_size]
-        _norm = ((next_z[:, None, :] - next_z[None, :, :]) / std) ** 2 
+
+        next_z_1 = next_z + torch.randn_like(next_z) * self.SMOOTHING_NOISE_STD
+        next_z_2 = next_z + torch.randn_like(next_z) * self.SMOOTHING_NOISE_STD
+
+        _norm = ((next_z_1[:, None, :] - next_z_2[None, :, :]) / std) ** 2 
         _norm = -_norm.sum(-1) # b_size x b_size
         _loss =  torch.diag(_norm) - (torch.logsumexp(_norm, dim=-1) - np.log(b_size))
         return -_loss.mean()
@@ -394,20 +422,23 @@ class AMDP(gym.Env, nn.Module):
     
     def goal_loss(self, z, target):
         _inp = z
-        goal_pred = self.goal_class(_inp).squeeze(1)
+        goal_pred = torch.softmax(self.goal_class(_inp).squeeze(1), -1)
         n_pos = target.sum(-1, keepdim=True)
-        n_neg = target.shape[0] - n_pos
+        # n_neg = target.shape[0] - n_pos
+        n_neg = (1-target).sum(-1, keepdim=True)
         if torch.any(n_neg==0):
             pos_weight = torch.where(n_pos > 0, n_neg / n_pos, 1.)
         else:
             pos_weight = torch.tensor(1.)
         pos_weight = torch.where(n_pos > 0, n_neg / n_pos, 1.)
         try:
-            loss = F.binary_cross_entropy_with_logits(goal_pred, target, pos_weight=pos_weight)
+            # loss = F.binary_cross_entropy_with_logits(goal_pred, target, pos_weight=pos_weight)
+            loss = F.cross_entropy(goal_pred, target.long())
         except Exception as e:
             printarr(z, target, goal_pred)
         # accuracy
-        goal_pred = (goal_pred.sigmoid() > 0.5).float() 
+        # goal_pred = (goal_pred.sigmoid() > 0.5).float() 
+        goal_pred = goal_pred.argmax(-1)
         n_pos = target.sum()
         n_neg = (1-target).sum()
         tp = (goal_pred * target).sum()
@@ -519,6 +550,7 @@ class AMDP(gym.Env, nn.Module):
         cfg = loaded_ckpt['cfg']
         mdp = cls(cfg)
         mdp.timestep = loaded_ckpt['timestep']
+        mdp.n_gradient_steps = loaded_ckpt['n_gradient_steps']
         state = mdp.get_model_state()
         for mdl in mdp._models.keys():
             state[mdl].load_state_dict(loaded_ckpt[mdl])
