@@ -121,7 +121,7 @@ def train_agent_with_evaluation(
 
     if (pathlib.Path(world_model_outdir) / 'checkpoints/world_model.ckpt').exists():
         world_model = world_model.load_checkpoint(pathlib.Path(world_model_outdir) / 'checkpoints/world_model.ckpt')
-        grounded_agent.encoder = world_model.encoder
+        grounded_agent.encoder = world_model.encode
         grounded_agent.action_mask = world_model.initset
         if args.mpc:
             grounded_agent.world_model = world_model

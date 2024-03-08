@@ -31,7 +31,7 @@ def get_config(cfg):
     return cfg
 
 class AMDP(gym.Env, nn.Module):
-    SMOOTHING_NOISE_STD = 0.05
+    SMOOTHING_NOISE_STD = 0.1
     def __init__(self, cfg, name='world_model'):
         nn.Module.__init__(self)
         gym.Env.__init__(self)
@@ -89,6 +89,23 @@ class AMDP(gym.Env, nn.Module):
         self.name = name
         self.timestep = 0
         
+        ## Stats
+        self.obs_mean = np.zeros(self.n_feats)
+        self.m2 = np.zeros(self.n_feats) + 1e-9
+        self.count = 0
+    
+    def stats(self, zs):
+        batch_size = zs.shape[0]
+        
+        if batch_size == 0:
+            return
+        new_mean = np.mean(zs, axis=0)
+        delta = new_mean - self.obs_mean
+        self.obs_mean += delta * batch_size / (self.count + batch_size)
+        self.m2 += np.sum((zs - new_mean) * (zs - self.obs_mean), axis=0)
+
+        self.count += batch_size
+        # print(self.obs_mean, self.m2 / (self.count-1))
 
 
     ############### Gym Interface / World Model rollout ################
@@ -106,13 +123,16 @@ class AMDP(gym.Env, nn.Module):
         
     def postprocess(self, x):
         if isinstance(x, torch.Tensor):
-            return x.cpu().numpy()
+            x =  x.cpu().numpy()
         elif isinstance(x, np.ndarray):
-            return np.array(x)
+            x = np.array(x)
         elif isinstance(x, dict):
-            return tree_map(self.postprocess, x)
+            x = tree_map(self.postprocess, x)
         else:
             raise ValueError(f'Unknown type {type(x)}')
+        
+        # return ((x - self.obs_mean) / np.sqrt((self.m2 / (self.count-1)))).astype(np.float32)
+        return x
         
     def preprocess_action(self, action):
         if isinstance(action, (float, int, np.int64, np.intc)):
@@ -120,7 +140,7 @@ class AMDP(gym.Env, nn.Module):
         elif isinstance(action, np.ndarray):
             return F.one_hot(torch.from_numpy(action).long().to(self.device), self.n_options)
         else:
-            raise ValueError(f'Action must be an int or numpy array')
+            raise ValueError(f'Action must be an int or numpy array, instead got {type(action)}')
 
     def get_initial_state(self):
         ep, _ = self.data.sample(1)
@@ -186,17 +206,16 @@ class AMDP(gym.Env, nn.Module):
         return log_tau
     
     def _termination(self, z):
-        termination_prob = torch.softmax(self.termination(z), dim=-1)
-        # done = torch.bernoulli(termination_prob)
-        done = termination_prob.argmax(-1).float()
+        termination_prob = torch.sigmoid(self.termination(z))
+        done = (termination_prob > 0.5)
         return done
     
     def initset(self, z):
         return (torch.sigmoid(self.initsets(z)) > 0.5).float()
     
     def task_reward(self, z):
-        goal_prob = F.softmax(self.goal_class(z), dim=-1)
-        return goal_prob.argmax(-1).float()
+        goal_prob = F.sigmoid(self.goal_class(z))
+        return (goal_prob > 0.5).float()
     
     @torch.no_grad()
     def reset(self, ground_state=None):
@@ -212,6 +231,13 @@ class AMDP(gym.Env, nn.Module):
             done = initset.sum().item() > 0
         self.simulation_state = dict(z=z, initset=initset)
         return self.postprocess(z)
+    
+    @torch.no_grad()
+    def encode(self, obs):
+        z = self.encoder(obs)
+        # if self.count > 1:
+        #     z = (z - torch.from_numpy(self.obs_mean).to(z.device)) / torch.sqrt((torch.from_numpy(self.m2).to(z.device) / (self.count-1)))
+        return z.float()
 
 
     ####################### TRAINING METHODS ###########################
@@ -292,11 +318,6 @@ class AMDP(gym.Env, nn.Module):
         initset_loss = self.initset_loss_from_executed(z, action, success, _mask)
         gamma_loss = self.gamma_loss(z_c[_mask], action[_mask], duration[_mask])
 
-        # feats, goal_reward = self._get_goal_reward_from_traj(next_z_c, info, lengths, _mask)
-        states, goal_reward = self._get_task_reward_examples()
-        feats = self.encoder(states).detach()
-        feats = feats + torch.randn_like(feats) * self.SMOOTHING_NOISE_STD 
-        goal_loss, goal_log_dict = self.goal_loss(feats, goal_reward)
 
         loss =  self.hyperparams.grounding_const * grounding_loss.mean() + \
                 self.hyperparams.transition_const * transition_loss.mean() + \
@@ -305,9 +326,21 @@ class AMDP(gym.Env, nn.Module):
                 self.hyperparams.reward_const * reward_loss.mean() + \
                 self.hyperparams.tau_const * tau_loss.mean() + \
                 self.hyperparams.termination_const * termination_loss.mean() + \
-                self.hyperparams.goal_class_const * goal_loss.mean() + \
-                self.hyperparams.tau_const * gamma_loss.mean()
+                self.hyperparams.tau_const * gamma_loss.mean() + \
+                self.hyperparams.norm2_const * (z_c ** 2).sum(-1).mean()
         
+        if self.n_gradient_steps > 5000:
+            # feats, goal_reward = self._get_goal_reward_from_traj(next_z_c, info, lengths, _mask)
+            states, goal_reward = self._get_task_reward_examples()
+            feats = self.encoder(states)
+            feats = feats + torch.randn_like(feats) * self.SMOOTHING_NOISE_STD 
+            goal_loss, goal_log_dict = self.goal_loss(feats, goal_reward)
+
+            loss += goal_loss.mean()
+  
+        
+        self.stats(z_c.detach().cpu().numpy().reshape(-1, z_c.shape[-1]))
+
         log_dict = {
             'loss': loss,
             'grounding_loss': grounding_loss.mean(),
@@ -320,9 +353,13 @@ class AMDP(gym.Env, nn.Module):
             'gamma_loss': gamma_loss.mean(),
             'rbuffer_len': len(self.data),
             'norm2': (z_c ** 2).sum(-1).mean(),
-            'goal_loss': goal_loss.mean(),
-            **goal_log_dict
+            'stats/mean': (self.obs_mean ** 2).sum(-1),
+            'stats/var': (self.m2 / (self.count -1)).sum(-1),
+            'stats/count': self.count
         }
+
+        if self.n_gradient_steps > 5000:
+            log_dict = {**log_dict, **goal_log_dict, 'goal_loss': goal_loss.mean()}
 
         return loss, log_dict
     
@@ -333,10 +370,9 @@ class AMDP(gym.Env, nn.Module):
             pos_weight = torch.tensor(1.)
         else:
             pos_weight = torch.where(n_pos > 0, n_neg / n_pos, 1.)
-        done_pred = torch.softmax(self.termination(next_z).squeeze(-1), dim=-1)
-        # loss = nn.functional.binary_cross_entropy_with_logits(done_pred, done, pos_weight=pos_weight)
+        done_pred = self.termination(next_z).squeeze(-1)
+        loss = nn.functional.binary_cross_entropy_with_logits(done_pred, done, pos_weight=pos_weight)
         # loss = nn.functional.binary_cross_entropy_with_logits(done_pred, done)
-        loss = nn.functional.cross_entropy(done_pred, done.long())
         return loss
     
     def preload_task_reward_samples(self, positive_samples, negative_samples):
@@ -422,7 +458,7 @@ class AMDP(gym.Env, nn.Module):
     
     def goal_loss(self, z, target):
         _inp = z
-        goal_pred = torch.softmax(self.goal_class(_inp).squeeze(1), -1)
+        goal_pred = self.goal_class(_inp).squeeze(1)
         n_pos = target.sum(-1, keepdim=True)
         # n_neg = target.shape[0] - n_pos
         n_neg = (1-target).sum(-1, keepdim=True)
@@ -432,13 +468,13 @@ class AMDP(gym.Env, nn.Module):
             pos_weight = torch.tensor(1.)
         pos_weight = torch.where(n_pos > 0, n_neg / n_pos, 1.)
         try:
-            # loss = F.binary_cross_entropy_with_logits(goal_pred, target, pos_weight=pos_weight)
-            loss = F.cross_entropy(goal_pred, target.long())
+            loss = F.binary_cross_entropy_with_logits(goal_pred, target, pos_weight=pos_weight)
+            # loss = F.cross_entropy(goal_pred, target.long())
         except Exception as e:
             printarr(z, target, goal_pred)
         # accuracy
-        # goal_pred = (goal_pred.sigmoid() > 0.5).float() 
-        goal_pred = goal_pred.argmax(-1)
+        goal_pred = (goal_pred.sigmoid() > 0.5).float() 
+        # goal_pred = goal_pred.argmax(-1)
         n_pos = target.sum()
         n_neg = (1-target).sum()
         tp = (goal_pred * target).sum()

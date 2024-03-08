@@ -314,6 +314,7 @@ def parse_args():
     parser.add_argument('--depth', type=int, default=2)
     parser.add_argument('--n-cols', type=int, default=4)
     parser.add_argument('--title', type=str, default=None)
+    parser.add_argument('--min-len-curve', type=int, default=-1)
     args, unknown = parser.parse_known_args()
 
 

@@ -284,7 +284,8 @@ class Rainbow:
 
     def act(self, state, initset=None):
         """ Action selection method at the current state. """
-        return torch.tensor(self.agent.act(state))
+        # return torch.tensor(self.agent.act(state))
+        return self.agent.act(state)
 
     def step(self, state, action, reward, next_state, done, reset):
         """ Learning update based on a given transition from the environment. """

@@ -785,6 +785,7 @@ class AbstractMDPGoal(AbstractMDP):
     def task_reward(self, z, feats=None):
         # if self.timestep < self.warmup_steps:
         #     return 0., False
+        print('learned reward')
         _inp = feats if self.recurrent else z
         goal_pred = (self.goal_class(_inp).squeeze(-1).sigmoid() > 0.5).float()
         return goal_pred, goal_pred > 0

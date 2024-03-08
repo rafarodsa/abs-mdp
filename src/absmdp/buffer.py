@@ -372,7 +372,7 @@ class TrajectoryReplayBufferStored(TrajectoryReplayBuffer, Dataset):
         if not str(filename) in self.loaded:
             self.loaded.add(str(filename))
             state, info = ep[-1][3], ep[-1][-1]
-            self.push_task_reward_sample(state, info['goal_reached'])
+            self.push_task_reward_sample(state, info['goal_reached'] > 0)
         # self.buffer[str(filename)] = ep
         return ep
     

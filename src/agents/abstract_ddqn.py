@@ -153,7 +153,8 @@ class AbstractDoubleDQN(DoubleDQN):
     def act(self, obs: Any, initset: Any =None):
         if initset is None:
             return self.batch_act([obs])[0]
-        return self.batch_act([obs], [initset])[0]
+        action = self.batch_act([obs], [initset])[0]
+        return action
 
     def batch_act(self, batch_obs: Sequence[Any], batch_initset_s: Sequence[Any] = None) -> Sequence[Any]:
         def preprocess(x):
@@ -381,6 +382,8 @@ class AbstractDDQNGrounded(pfrl.agent.Agent):
             z = jax.tree_map(self.encoder, obs, is_leaf=lambda x: isinstance(x, dict))
             action = self.agent.batch_act(z, [initset] if not initset is None else initset)
             action = jax.tree_map(lambda a: a.cpu(), action)
+            if isinstance(action, torch.Tensor):
+                action = list(action.numpy())
         return action if len(action) > 1 else action[0]
     
     def load(self, dirname):

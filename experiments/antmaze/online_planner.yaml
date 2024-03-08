@@ -21,7 +21,7 @@ experiment:
   train_every: 8
   max_episode_len: 100
   outdir: planning
-  explore_ground: true
+  explore_ground: false
   prefill: 512
   gradient_steps: 1
 
@@ -66,7 +66,7 @@ world_model:
     termination:
       type: mlp
       input_dim: ${model.latent_dim}
-      output_dim: 2
+      output_dim: 1
       hidden_dims:
       - 256
       - 256
@@ -79,7 +79,7 @@ world_model:
       hidden_dims: [256, 256]
       activation: mish
       normalize: true
-      output_dim: 2
+      output_dim: 1
       input_dim: ${model.latent_dim}
       reward_warmup_steps: 30000
     
@@ -134,7 +134,7 @@ planner:
     replay_buffer_size: 100000
     target_update_interval: 5000
     update_interval: 5
-    num_step_return: 1
+    num_step_return: 3
     steps: 1000000
     lr: 1e-4
     eval_random_agent: false
@@ -159,5 +159,6 @@ planner:
     type: 'mlp'
     n_actions: 8
     hidden_dims: [256, 256]
-    activation: tanh
+    activation: mish
+    normalize: false
     output_dim: 1024

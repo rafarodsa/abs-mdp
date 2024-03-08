@@ -45,11 +45,11 @@ def random_selection_initset(initset_s):
     avail_action = torch.nonzero(initset_s.squeeze())
     selection = torch.randint(0, avail_action.shape[0], (1,))
     a =  avail_action[selection].squeeze()
-    return a
+    return a.item()
 
 def make_ddqn_agent(agent_cfg, experiment_cfg, world_model):
     
-    agent_cfg.q_func.input_dim = world_model.latent_dim
+    agent_cfg.q_func.input_dim = world_model.n_feats
     q_func = ModuleFactory.build(agent_cfg.q_func)
     q_func = torch.nn.Sequential(q_func, DiscreteActionValueHead())
 
@@ -99,7 +99,7 @@ def make_ddqn_agent(agent_cfg, experiment_cfg, world_model):
 
 def make_rainbow_agent(agent_cfg, experiment_cfg, world_model):
     print('Building Rainbow agent')
-    agent_cfg.q_func_rainbow.input_dim = world_model.latent_dim
+    agent_cfg.q_func_rainbow.input_dim = world_model.n_feats
     q_func = ModuleFactory.build(agent_cfg.q_func_rainbow)
 
     training_steps = experiment_cfg.steps // experiment_cfg.train_every
@@ -166,7 +166,7 @@ def make_ppo_agent(agent_cfg, experiment_cfg, world_model):
         opt,
         gpu=experiment_cfg.gpu,
         phi=lambda x: x,
-        update_interval=512,
+        update_interval=256,
         minibatch_size=128,
         epochs=10,
         clip_eps=0.1,
@@ -179,7 +179,7 @@ def make_ppo_agent(agent_cfg, experiment_cfg, world_model):
     )
     device = f'cuda:{experiment_cfg.gpu}' if experiment_cfg.gpu >= 0 else 'cpu'
 
-    encoder = world_model.encoder if not world_model.recurrent else (world_model.encoder, world_model.transition)
+    encoder = world_model.encode if not world_model.recurrent else (world_model.encode, world_model.transition)
     grounded_agent = AbstractPPO(agent=agent, encoder=encoder, action_mask=world_model.initset, device=device, recurrent=world_model.recurrent)
 
     return agent, grounded_agent
@@ -294,9 +294,9 @@ def main():
 
     # make task_reward_funcion
     goal = GOALS[agent_cfg.env.envname][agent_cfg.env.goal]
-    if args.learn_task_reward:
-        pos_samples, neg_samples = get_goal_examples(goal, n_samples=5000)
-        world_model.preload_task_reward_samples(pos_samples, neg_samples)
+    # if args.learn_task_reward:
+    #     pos_samples, neg_samples = get_goal_examples(goal, n_samples=5000)
+    #     world_model.preload_task_reward_samples(pos_samples, neg_samples)
 
 
     def make_task_reward(envname, abstract_goal_tol):
@@ -321,6 +321,7 @@ def main():
         agent, grounded_agent = make_ppo_agent(agent_cfg, experiment_cfg=cfg.experiment, world_model=world_model)
         use_initset = False
     elif args.agent == 'ddqn':
+        use_initset = False
         agent, grounded_agent = make_ddqn_agent(agent_cfg, experiment_cfg=cfg.experiment, world_model=world_model)
     elif args.agent == 'mpc':
         _, grounded_agent = make_mpc_agent(agent_cfg, experiment_cfg=cfg.experiment, world_model=world_model)
