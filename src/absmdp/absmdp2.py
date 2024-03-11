@@ -31,7 +31,7 @@ def get_config(cfg):
     return cfg
 
 class AMDP(gym.Env, nn.Module):
-    SMOOTHING_NOISE_STD = 0.1
+    SMOOTHING_NOISE_STD = 0.2
     def __init__(self, cfg, name='world_model'):
         nn.Module.__init__(self)
         gym.Env.__init__(self)
@@ -93,6 +93,7 @@ class AMDP(gym.Env, nn.Module):
         self.obs_mean = np.zeros(self.n_feats)
         self.m2 = np.zeros(self.n_feats) + 1e-9
         self.count = 0
+        self.once=True
     
     def stats(self, zs):
         batch_size = zs.shape[0]
@@ -186,11 +187,15 @@ class AMDP(gym.Env, nn.Module):
         return self.postprocess(next_z), reward.cpu().item(), done, info
 
     def imagine(self, z, action):
+        if self.once:
+            print(f'Sampling {self.sample_transition}')
+            self.once = False
         next_z_dist = self.transition.distribution(torch.cat([z, action], dim=-1))
         if self.sample_transition:
             next_z = next_z_dist.sample()[0]
         else:
-            next_z = next_z_dist.mode()
+            # next_z = next_z_dist.mode()
+            next_z = next_z_dist.sample_mode()
         if self.residual_transition:
             next_z = next_z + z
         return next_z
@@ -395,9 +400,9 @@ class AMDP(gym.Env, nn.Module):
         next_z = next_z.reshape(int(b_size), -1)[:batch_size]
 
         next_z_1 = next_z + torch.randn_like(next_z) * self.SMOOTHING_NOISE_STD
-        next_z_2 = next_z + torch.randn_like(next_z) * self.SMOOTHING_NOISE_STD
+        next_z_2 = next_z + torch.randn_like(next_z)# * self.SMOOTHING_NOISE_STD
 
-        _norm = ((next_z_1[:, None, :] - next_z_2[None, :, :]) / std) ** 2 
+        _norm = ((next_z_1[:, None, :] - next_z_1[None, :, :]) / std) ** 2 
         _norm = -_norm.sum(-1) # b_size x b_size
         _loss =  torch.diag(_norm) - (torch.logsumexp(_norm, dim=-1) - np.log(b_size))
         return -_loss.mean()
@@ -511,8 +516,9 @@ class AMDP(gym.Env, nn.Module):
                                     loggers = loggers,
                                 )
         self.device = cfg_fabric.accelerator
+    
     def configure_optimizers(self):
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
         
     def setup_trainer(self, cfg=None):
         if self.fabric is None:

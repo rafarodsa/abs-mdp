@@ -245,6 +245,12 @@ class MixtureDiagonalNormal(torch.distributions.Distribution):
         mixture_mode = torch.argmax(self._pis, dim=-1)
         return self._means[mixture_mode]
 
+    def sample_mode(self):
+        categorical = Categorical(probs=self._pis)
+        mixture_mode = categorical.sample((1,))[0]
+        # mixture_mode = torch.argmax(self._pis, dim=-1)
+        return self._means[mixture_mode]
+
     @property
     def var(self):
         weighted_vars_plus_means = [self._pis[..., i:i+1] * (self.vars[i] + self._means[i]**2) for i in range(len(self._components))]

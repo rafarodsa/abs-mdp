@@ -150,7 +150,7 @@ def train_agent_with_evaluation(
     world_model.setup_trainer(config)
     # world_model.set_task_reward(task_reward)
     world_model.setup_replay(offline_data_path)
-    
+    world_model.sample_transition = config.world_model.sample_transition
 
     # world_model.set_init_state_sampler(test_env.init_state_sampler if init_state_sampler is None else init_state_sampler)
 

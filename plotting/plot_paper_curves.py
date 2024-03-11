@@ -31,15 +31,20 @@ def format_ticks(value, _):
         return str(int(value))
 
 
-def plot_curve_groups(curve_groups, curve_group_names, x_offsets=None, add_baseline=True):
+def plot_curve_groups(curve_groups, curve_group_names, x_offsets=None, add_baseline=True, max_x_value=1e30):
 
     for i, (group, group_name, offset) in enumerate(zip(curve_groups, curve_group_names, x_offsets)):
         for curve, name, xoffset in zip(group, group_name, offset):
             identifier = name if name is not None else f"group_{i}"
             # label = f"{identifier}_{curve['label']}"
-            plt.plot(curve["xs"] + xoffset, curve["mean"], linewidth=3, label=identifier, alpha=1)
+            xs = curve["xs"] + xoffset
+            _xs = xs[xs < max_x_value]
+            ys = curve["mean"][xs < max_x_value]
+            plt.plot(_xs, ys, linewidth=3, label=identifier, alpha=1)
             # plt.xscale('log')
-            plt.fill_between(curve["xs"] + xoffset, curve["top"], curve["bottom"], alpha=0.2)
+            _top = curve["top"][xs <  max_x_value]
+            _bottom = curve["bottom"][xs <  max_x_value]
+            plt.fill_between(_xs, _top, _bottom, alpha=0.2)
             if xoffset > 0:
                 plt.axvspan(0, xoffset, color='gray', alpha=0.2, linewidth=0)
     
@@ -50,18 +55,23 @@ def plot_curve_groups(curve_groups, curve_group_names, x_offsets=None, add_basel
         plt.gca().axhline(xmin=0., xmax=1., y=y_value, color='k', linewidth=2, alpha=0.7, linestyle='--')
         plt.gca().axvline(x=x_value, color='k', linewidth=2, alpha=0.7, linestyle='--')
 
-    plt.legend()
-    sns.move_legend(plt.gca(), "lower center", ncol=4, bbox_to_anchor=(0.5, -0.25), frameon=False)
-    plt.subplots_adjust(bottom=0.3) 
+    # plt.legend()
+    # sns.move_legend(plt.gca(), "lower center", ncol=4, bbox_to_anchor=(0.5, -0.25), frameon=False)
+    # plt.subplots_adjust(bottom=0.3) 
+        
+
 def compare_pfrl_experiments(args):
     curves_groups, curve_names, offsets, groupbys = get_curves(args)
 
-    plt.figure(figsize=(11, 7))
+    # plt.figure(figsize=(11, 7))
+    # plt.figure(figsize=(8, 9))
+    plt.figure(figsize=(10, 8))
     sns.set_context("talk", font_scale=1.2)
     sns.set_style("white")
     sns.color_palette()
+    
     plt.gca().xaxis.set_major_formatter(FuncFormatter(format_ticks))
-    plot_curve_groups(curves_groups, curve_names, x_offsets=offsets)
+    plot_curve_groups(curves_groups, curve_names, x_offsets=offsets, max_x_value=args.max_x_value)
     
     
     if args.xlabel is not None:
@@ -203,7 +213,7 @@ def plot_subplots(args):
     h, l = fig.get_axes()[0].get_legend_handles_labels()
     plt.tight_layout()
     fig.subplots_adjust(bottom=0.1)
-    legend = fig.legend(h, l, loc='lower center', ncol=2, fancybox=True, shadow=False)
+    legend = fig.legend(h, l, loc='lower center', ncol=3, fancybox=True, shadow=False)
     legend.get_frame().set_alpha(0.7)
     
     if args.save_path is not None:

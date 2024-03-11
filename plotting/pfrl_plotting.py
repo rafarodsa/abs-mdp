@@ -389,7 +389,7 @@ def get_curves(args):
                 ylabel=args.ylabel,
                 xlabel=args.xlabel,
                 show=args.show,
-                truncate_max_frames=args.max_x_value,
+                truncate_max_frames=args.max_x_value-args.x_offset[i],
                 min_len_curve=args.min_len_curve
             )
             for c in curves:
