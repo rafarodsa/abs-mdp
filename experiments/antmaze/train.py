@@ -176,6 +176,10 @@ def make_ppo_agent(cfg, world_model):
     agent = PFRLAgent(cfg, agent)
     return agent
 
+def make_dist_ac(cfg):
+    from src.agents.ac import DistributionalActorCritic
+    agent = DistributionalActorCritic(cfg)
+    return agent
 
 def get_goal_examples(goal, n_samples=10000, device='cpu', envname='antmaze-umaze-v2', abstract_tol=0.1):        
     goal = np.array(goal).astype(np.float32)
@@ -209,7 +213,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='experiments/antmaze/online_planner.yaml')
     parser.add_argument('--exp-id', type=str, default=None)
-    parser.add_argument('--agent', type=str, choices=['rainbow', 'ddqn', 'ppo'])
+    parser.add_argument('--agent', type=str, choices=['rainbow', 'ddqn', 'ppo', 'dist-ac'])
     parser.add_argument('--data-path', type=str, default=None)
     
     args, unknown = parser.parse_known_args()
@@ -262,6 +266,8 @@ def main():
     elif args.agent == 'ddqn':
         use_initset = False
         agent, grounded_agent = make_ddqn_agent(agent_cfg, experiment_cfg=cfg.experiment, world_model=world_model)
+    elif args.agent == 'dist-ac':
+        agent = make_dist_ac(cfg)
     else:
         raise ValueError(f'Agent {args.agent} not implemented')
     

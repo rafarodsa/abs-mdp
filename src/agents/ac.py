@@ -1,6 +1,8 @@
 
 import torch
+from torch.nn import functional as F
 import numpy as np
+
 
 from src.models.factories import build_model
 from jax import tree_map
@@ -8,8 +10,11 @@ from jax import tree_map
 from contextlib import contextmanager
 from src.utils.symlog import symlog, symexp
 
+import statistics
 from copy import deepcopy
+import time, logging
 
+from src.utils.printarr import printarr
 
 def twohot(value, nbins, bmin=-1, bmax=1):
     '''
@@ -23,10 +28,10 @@ def twohot(value, nbins, bmin=-1, bmax=1):
     for _ in range(nbatchdims):
         bins = bins.unsqueeze(0)
     normalized_value = (value - bmin) / (bmax-bmin) # [0,1]
-    normalized_value = torch.abs(normalized_value - bins) 
-    twohot = (1-normalized_value / delta) * (normalized_value  < delta)
-    # TODO what happens in the extremes?
-    assert torch.allclose(twohot.sum(-1, keepdims=True), torch.ones_like(value)), twohot.sum(-1)
+    distances = torch.abs(normalized_value - bins) 
+    twohot = (1-distances / delta) * (distances  < delta) 
+    twohot = twohot * (value < bmax) * (value > bmin) + ((value > bmax) + (value < bmin)) * (twohot > 0) 
+    assert torch.allclose(twohot.sum(-1, keepdims=True), torch.ones_like(value), rtol=1e-4), twohot.sum(-1)
     return twohot
 
 
@@ -50,13 +55,13 @@ class EMA:
     def __init__(self, alpha, initialization):
         self.alpha = alpha
         self._mean = initialization
+    
     def __call__(self, data):
         self._mean = tree_map(lambda current, target: self.alpha * current + (1-self.alpha) * target, self._mean, data)
+    
     def get_value(self):
         return self._mean
     
-
-
 class DistributionalCritic:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -72,7 +77,6 @@ class DistributionalCritic:
         assert self.bmin < self.bmax
         self.slow_critic = build_model(cfg.critic)
         self.fast_critic = build_model(cfg.critic)
-        self.optimizer = torch.optim.Adam(self.fast_critic.parameters(), lr=cfg.lr, eps=1e-5)
         self.param_updater = EMA(cfg.slow_ema_decay, self.slow_critic.state_dict())
 
     def logprobs(self, states):
@@ -92,20 +96,25 @@ class DistributionalCritic:
         values = (probs * bins).sum(-1)
         return values
 
-    def loss(self, states, rewards, dones):
+    def loss(self, states, rewards, dones, masks):
         '''
-            states: torch.Tensor (B, H+1, D)
+            H is the padded temporal dimension.
+            masks.sum(-1) is the last valid transition. 
+            masks.sum(-1)+1 is the final state of the ep
+
+            states: torch.Tensor (B, H, D)
             rewards: torch.Tensor (B, H, 1)
             dones: torch.Tensor(B, H)
+            masks: torch.Tensor(B, H)
             return: (loss, return, value)
 
         '''        
         # compute values v(s)
-        
         values = self.compute_values(states, self.fast_critic).detach()
 
         # compute target returns G^lambda & 2hot encode y_t
-        returns = compute_lambda_return(rewards, dones, values, self.gamma, self.lambd)
+        masked_dones = ((dones + (1-masks)) > 0).float()
+        returns = compute_lambda_return(rewards, masked_dones, values, self.gamma, self.lambd)
         y_t = self.twohot(symlog(returns.unsqueeze(-1))).detach()
 
         # compute logprobs of bins ln P(b|s_t)
@@ -115,64 +124,121 @@ class DistributionalCritic:
         # choosing option (2)
         slow_values = self.twohot(self.compute_values(states, self.slow_critic).unsqueeze(-1)).detach()
         reg = -(slow_values * logprobs).sum(-1)
-
         # loss = -y_t^T ln P(b_i|s_t) 
-        loss = (-y_t * logprobs[:, :-1]).sum(-1).sum(-1) + (self.reg_const * reg).sum(-1)
 
-        return loss.mean(), returns, symexp(values)
+        loss = (-y_t * logprobs).sum(-1) + (self.reg_const * reg) ##
+        loss = (loss * masks).sum(-1)
+        return loss.mean(), (returns, symexp(values))
     
     def update_critic(self):
         with torch.no_grad():
             self.param_updater(deepcopy(self.fast_critic.state_dict()))
             self.slow_critic.load_state_dict(self.param_updater.get_value())
+    
+    def get_params(self):
+        return self.fast_critic.parameters()
 
 class Actor:
-
     def __init__(self, cfg):
         self.policy = build_model(cfg.actor)
+        self.entropy_const = cfg.entropy_const
         # batch statistics
         self.perclow = EMA(cfg.normalizer_ema_decay, 0.)
         self.perchigh = EMA(cfg.normalizer_ema_decay, 0.)
 
     def logpi(self, obs):
-        pass
+        return torch.nn.functional.log_softmax(self.policy(obs), dim=-1)
 
-    def loss(self, states, actions, returns, values):
+    def loss(self, states, actions, returns, values, masks):
         '''
-
+            states: torch.Tensor (B, H, D)
+            actions: torch.Tensor (B, H, N_ACTIONS)
+            returns: torch.Tensor (B, H)
+            values: torch.Tensor (B, H)
+            return:
+                actor_loss: \E ln\pi(a_t|s_t)A(s_t, a_t) + entropy_const * H[\pi(\dot|s_t)]
+        '''
+        # compute stats 
+        quantiles = torch.quantile(returns[masks>0], torch.Tensor([0.05, 0.95]))
+        self.perclow(quantiles[0])
+        self.perchigh(quantiles[1])
         
-        '''
-        pass
-        # values v(s_t)
-        # compute returns G^lambda_t & Normalize
+        # normalize
+        scale = torch.maximum(torch.tensor(1.0), self.perchigh.get_value() - self.perclow.get_value())
+        normalized_returns = returns if scale == 1. else (returns-self.perclow.get_value()) / scale
+        normalized_values = values if scale == 1. else (values - self.perclow.get_value()) / scale
         # Adv_t = G^\lambda_t - V_t
+        adv = normalized_returns - normalized_values
         # compute ln\pi(a_t|s_t) * adv_t
+        logpis = self.logpi(states) # ln\pi(\dot|s_t)
+
+        logpis_a = (logpis * actions).sum(-1) # ln\pi(a_t|s_t)
+        reinforce =  logpis_a * adv * masks
         # compute entropy 
+        entropy = -(logpis.exp() * logpis).sum(-1) * masks
+
+        loss = -reinforce - self.entropy_const * entropy
+        return loss.sum(-1).mean()
+
+    def get_params(self):
+        return self.policy.parameters()
 
 class DistributionalActorCritic:
-
     def __init__(self, model_cfg):
-
+        self.cfg = model_cfg
         self.training = True
         # build model
         # initialize critic to predict zeros
-        self.critic = DistributionalCritic(model_cfg)
-        self.actor = build_model(model_cfg.actor)
+        self.critic = DistributionalCritic(model_cfg.planner.dist_ac)
+        self.actor = Actor(model_cfg.planner.dist_ac)
+        self.actor_lr = model_cfg.planner.dist_ac.actor_lr
+        self.critic_lr = model_cfg.planner.dist_ac.critic_lr
+        self.n_actions = model_cfg.planner.dist_ac.n_actions
+        self.optimizers = []
 
-        # stats
-        # self.return_percentiles = ??
+        # trainer params
+        self.max_episode_len = self.cfg.experiment.max_episode_len
+        self.eval_max_episode_len = self.cfg.experiment.max_episode_len
+        self.ground_step = 0
+        self.imagination_steps = 0 
+        self.n_episodes = 0
+        self.start_time = time.time()
 
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel('INFO')
 
     def setup(self, outdir):
-        pass
         # output logger
-        # setup optimizers
+        
+        # optimizers
+        optimizer_actor = torch.optim.Adam(self.actor.get_params(), lr=self.actor_lr, eps=1e-5)
+        optimizer_critic = torch.optim.Adam(self.critic.get_params(), lr=self.critic_lr, eps=1e-5)
+        self.optimizers = [optimizer_actor, optimizer_critic]
 
     def act(self, obs, encoder):
-        pass
+        if isinstance(obs, list):
+            z = torch.stack([encoder(o) for o in obs])
+        else:
+            z = encoder(obs)
+        action_probs = self.actor.logpi(z).exp()
+        if self.training:
+            # sample
+            actions = torch.distributions.Categorical(probs=action_probs).sample((1,))[0]
+        else:
+            # Greedy
+            actions = action_probs.argmax(-1)
+
+        return actions.tolist() if isinstance(obs, list) else actions.item()
 
     def act_in_imagination(self, obs, initset=None):
-        pass
+        action_probs = self.actor.logpi(torch.from_numpy(obs)).exp()
+        if self.training:
+            # sample
+            actions = torch.distributions.Categorical(probs=action_probs).sample((1,))[0]
+        else:
+            # Greedy
+            actions = actions.argmax(-1)
+        return actions.item()
 
     def compute_metrics(self, episodes):
         logs = []
@@ -204,7 +270,7 @@ class DistributionalActorCritic:
             scores.append(sum(rewards))
             lengths.append(len(actions))
             taus = [info['tau'] for info in infos]
-            discounts =  self.agent.gamma ** np.cumsum([0] + taus)
+            discounts =  self.critic.gamma ** np.cumsum([0] + taus)
             discounted_rewards = np.array(rewards) * discounts[:-1]
             exec_time.append(sum(taus))
             discounted_scores.append(float(discounted_rewards.sum()))
@@ -212,7 +278,7 @@ class DistributionalActorCritic:
         print(f'Evaluation: mean return {sum(scores) / len(scores)}, mean length {sum(lengths) / len(lengths)}')
         return scores, lengths, exec_time, discounted_scores
 
-    def rollout(self, env, policy_fn, max_episode_len, n_episodes=None, n_steps=None, name='eval', stats_fn=None):
+    def rollout(self, env, policy_fn, max_episode_len, n_episodes=None, n_steps=None, name='eval'):
         logger = self.logger
         timestep = 0
         tau_total = 0
@@ -249,9 +315,8 @@ class DistributionalActorCritic:
             if 'tau' not in info:
                 info['tau'] = 1 
 
-            self.agent.observe(obs, r, done, reset, info)
             test_r += r
-            discounted_test_r += (self.agent.gamma ** tau_total) * r
+            discounted_test_r += (self.critic.gamma ** tau_total) * r
             tau_total += info['tau']
             if reset:
                 logger.info(
@@ -263,30 +328,122 @@ class DistributionalActorCritic:
         # If all steps were used for a single unfinished episode
         if len(episodes) == 0:
             episodes.append(ep) # non terminated episode
-        return None if not stats_fn else stats_fn(episodes)
+        return episodes
+    
+    def preprocess(self, episodes, maxlen=64):
+        def pad(tensor, padding_len):
+            if len(tensor.shape) == 1:
+                tensor = tensor.unsqueeze(-1)
+            padded = F.pad(tensor, (0,0,0, padding_len))
+            return padded
+        def totensor(t):
+            if isinstance(t, (float, int)):
+                return torch.tensor(t)
+            if isinstance(t, (np.ndarray, list, tuple)):
+                return torch.from_numpy(np.array(t))
+            if isinstance(t, torch.Tensor):
+                return t
+            raise ValueError(f'Unknown type {type(t)}')
+        
+        masks = torch.stack(list(map(lambda ep: torch.Tensor([1] * len(ep) + [0] * (maxlen-len(ep))), episodes)))
+        episodes = [tree_map(totensor, list(zip(*ep))[:-1]) for ep in episodes]
+        episodes = [list(map(torch.stack, ep)) for ep in episodes]
+        obss, acts, rews, next_obss, dones = list(zip(*episodes))
+        ss = tree_map(lambda ss, next_ss: torch.cat([ss, next_ss[-1:]], dim=0), obss, next_obss) # (maxlen + 1, D)
+        acts = tree_map(lambda a: F.one_hot(a, self.n_actions), acts)
+        
+        ss, acts, rews, dones = tree_map(lambda t: pad(t, maxlen-t.shape[0]), [ss, acts, rews, dones])
+
+        
+        return torch.stack(ss), torch.stack(acts), torch.stack(rews).squeeze(-1), torch.stack(dones).float().squeeze(-1), masks
+
  
     def train(self, world_model, steps_budget):
-        self.agent.batch_last_episode = None
-        stats = self.rollout(
+        # rollout
+        episodes = self.rollout(
                             world_model, 
                             self.act_in_imagination, 
                             self.max_episode_len, 
-                            n_steps=steps_budget, 
-                            stats_fn=self.compute_metrics
+                            n_steps=steps_budget
                         )
         self.imagination_steps += steps_budget
-        self.n_episodes += stats['n_episodes']
-        del stats['n_episodes']
+        self.n_episodes += len(episodes)
+        states, actions, rewards, dones, masks = self.preprocess(episodes)
+        # compute losses
+
+        critic_loss, (returns, values) = self.critic.loss(states, rewards, dones, masks)
+        actor_loss = self.actor.loss(states, actions, returns, values, masks)
+        # take step
+        loss = actor_loss + critic_loss
+        [opt.zero_grad() for opt in self.optimizers]
+        loss.backward()
+        [opt.step() for opt in self.optimizers]
+
+        # update target
+        self.critic.update_critic()
+        return self.compute_metrics(episodes)
+
+    def evaluate(self, env, encoder, n_episodes):
+        with self.eval_mode():
+            episodes = self.rollout(
+                                        env,
+                                        lambda obs, initset: self.act(obs, encoder),
+                                        self.eval_max_episode_len,
+                                        n_episodes=n_episodes
+                                    )
+            
+        eval_stats = self.compute_eval_stats(episodes)
+        scores, lengths, exec_times, discounted_scores = eval_stats
+        option_duration_mean = np.array(exec_times)/np.array(lengths)
+
+        stats = dict(
+            episodes=len(scores),
+            mean=statistics.mean(scores),
+            median=statistics.median(scores),
+            stdev=statistics.stdev(scores) if len(scores) >= 2 else 0.0,
+            max=np.max(scores),
+            min=np.min(scores),
+            length_mean=statistics.mean(lengths),
+            length_median=statistics.median(lengths),
+            length_stdev=statistics.stdev(lengths) if len(lengths) >= 2 else 0,
+            length_max=np.max(lengths),
+            length_min=np.min(lengths),
+            option_len_mean = statistics.mean(option_duration_mean),
+            option_len_median = statistics.median(option_duration_mean),
+            option_len_std = statistics.stdev(option_duration_mean) if len(option_duration_mean) >= 2 else 0.0,
+            option_len_min = option_duration_mean.min(),
+            option_len_max = option_duration_mean.max(),
+            discounted_mean = statistics.mean(discounted_scores),
+            discounted_median = statistics.median(discounted_scores),
+            discounted_std = statistics.stdev(discounted_scores) if len(discounted_scores) >= 2 else 0.0,
+            discounted_min = np.min(discounted_scores),
+            discounted_max = np.max(discounted_scores),
+        )
+
+        agent_stats = [] #self.agent.get_statistics()
+        custom_values = tuple(tup[1] for tup in agent_stats)
+
+        mean = stats["mean"]
+        elapsed = time.time() - self.start_time
+        values = (
+            (
+                self.ground_step,
+                self.n_episodes,
+                elapsed,
+                mean,
+                stats["median"],
+                stats["stdev"],
+                stats["max"],
+                stats["min"],
+            )
+            + custom_values
+        )
+
+        # record_stats(self.outdir, values)
+        # if self.tb_writer:
+        #     record_tb_stats(self.tb_writer, agent_stats, stats, [], self.ground_step)
+
         return stats
-    
-    def agent_train(self, eps):
-        pass
-        # rollout
-        # compute returns & 2hot encode
-        # compute & update statistics batch statistics
-        # critic train
-        # actor train
-        # update target 
 
     @contextmanager
     def eval_mode(self):
@@ -374,9 +531,44 @@ def test_critic():
     print('Critic Forward pass!')
 
 def test_actor():
-    pass
+    from omegaconf import OmegaConf as oc
+
+    config = {
+        'nbins': 255,
+        'bmin': -20,
+        'bmax': 20,
+        'reg_const': 1.0,
+        'gamma': 0.99,
+        'lambd': 0.95,
+        'lr': 1e-4,
+        'slow_ema_decay': 0.98,
+        'normalizer_ema_decay': 0.98,
+        'entropy_const': 3e-4,
+        'n_actions': 5,
+        'actor':{
+            'type': 'mlp',
+            'output_dim': '${n_actions}',
+            'input_dim': 5,
+            'hidden_dims': [128, 128],
+            'normalize': True,
+            'activation': 'mish'
+        }   
+    }
+    cfg = oc.create(config)
+    H = 5
+    states = torch.randn((2, H+1, 5))
+    dones = torch.nn.functional.one_hot(torch.randint(0, H, (2,)), H)
+    rewards = torch.randint(0, 5, (2, H)).float()
+    values = torch.randn((2, H+1))
+    actions = torch.nn.functional.one_hot(torch.randint(0, cfg.n_actions, (2,H)), cfg.n_actions)
+    returns = compute_lambda_return(rewards, dones, values, gamma=cfg.gamma, lambd=cfg.lambd)
+    actor = Actor(cfg)
+    actor.loss(states, actions, returns, values)
+
+    print('Actor Forward pass!')
 
 if __name__ == '__main__':
+    test_actor()
     test_critic()
     test_lambda_return()
     test_twohot()

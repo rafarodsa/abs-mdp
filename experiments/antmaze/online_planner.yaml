@@ -62,7 +62,7 @@ world_model:
         output_dim: ${model.latent_dim}
         input_dim: ${model.transition.features.output_dim}
         min_std: 0.001
-        max_std: 10
+        max_std: 1.
     termination:
       type: mlp
       input_dim: ${model.latent_dim}
@@ -162,3 +162,31 @@ planner:
     activation: mish
     normalize: false
     output_dim: 1024
+
+  dist_ac:
+    nbins: 255
+    bmin: -20
+    bmax: 20
+    gamma: ${planner.env.gamma}
+    lambd: 0.95
+    actor_lr: 1e-4
+    critic_lr: 1e-4
+    slow_ema_decay: 0.98
+    normalizer_ema_decay: 0.98
+    entropy_const: 3e-4
+    reg_const: 1.
+    n_actions: ${world_model.model.n_options}
+    actor:
+        type: 'mlp'
+        output_dim: ${world_model.model.n_options}
+        input_dim: ${world_model.model.latent_dim}
+        hidden_dims: [256, 256]
+        normalize: True
+        activation: 'mish'
+    critic:
+        type: 'mlp'
+        output_dim: ${planner.dist_ac.nbins}
+        input_dim: ${world_model.model.latent_dim}
+        hidden_dims: [256, 256]
+        normalize: True
+        activation: 'mish'
