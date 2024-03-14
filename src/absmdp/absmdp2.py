@@ -239,6 +239,7 @@ class AMDP(gym.Env, nn.Module):
     
     @torch.no_grad()
     def encode(self, obs):
+        obs = self.preprocess(obs)
         z = self.encoder(obs)
         # if self.count > 1:
         #     z = (z - torch.from_numpy(self.obs_mean).to(z.device)) / torch.sqrt((torch.from_numpy(self.m2).to(z.device) / (self.count-1)))
@@ -518,7 +519,8 @@ class AMDP(gym.Env, nn.Module):
         self.device = cfg_fabric.accelerator
     
     def configure_optimizers(self):
-        self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
+        if self.optimizer is None:
+            self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
         
     def setup_trainer(self, cfg=None):
         if self.fabric is None:
@@ -596,6 +598,10 @@ class AMDP(gym.Env, nn.Module):
         state = mdp.get_model_state()
         for mdl in mdp._models.keys():
             state[mdl].load_state_dict(loaded_ckpt[mdl])
+
+        mdp.configure_optimizers()
+        mdp.optimizer.load_state_dict(loaded_ckpt['optimizer'])
+
         return mdp
     
     def to(self, device):
