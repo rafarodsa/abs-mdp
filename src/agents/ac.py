@@ -5,6 +5,7 @@ import numpy as np
 
 
 from src.models.factories import build_model
+from src.models.factories import ModuleFactory
 from jax import tree_map
 
 from contextlib import contextmanager
@@ -14,7 +15,27 @@ import statistics
 from copy import deepcopy
 import time, logging
 
+
+from src.agents.evaluator import record_stats, record_tb_stats, create_tb_writer, write_header
 from src.utils.printarr import printarr
+
+
+from collections import deque
+
+def mean(lst):
+    if len(lst) == 0:
+        return 0.
+    else:
+        return statistics.mean(lst)
+    
+def ortho_init(layer, gain=1.):
+    torch.nn.init.orthogonal_(layer.weight, gain=gain)
+    torch.nn.init.zeros_(layer.bias)
+    return layer
+def zeros_init(layer):
+    torch.nn.init.zeros_(layer.weight)
+    torch.nn.init.zeros_(layer.bias)
+    return layer
 
 def twohot(value, nbins, bmin=-1, bmax=1):
     '''
@@ -62,6 +83,8 @@ class EMA:
     def get_value(self):
         return self._mean
     
+
+
 class DistributionalCritic:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -75,8 +98,10 @@ class DistributionalCritic:
         self.lambd = cfg.lambd
         self.twohot = lambda values: twohot(values, self.nbins, self.bmin, self.bmax)
         assert self.bmin < self.bmax
-        self.slow_critic = build_model(cfg.critic)
-        self.fast_critic = build_model(cfg.critic)
+
+        
+        self.slow_critic = ModuleFactory.build(cfg.critic, out_init_fn=zeros_init)
+        self.fast_critic = ModuleFactory.build(cfg.critic, out_init_fn=zeros_init)
         self.param_updater = EMA(cfg.slow_ema_decay, self.slow_critic.state_dict())
 
     def logprobs(self, states):
@@ -114,7 +139,7 @@ class DistributionalCritic:
 
         # compute target returns G^lambda & 2hot encode y_t
         masked_dones = ((dones + (1-masks)) > 0).float()
-        returns = compute_lambda_return(rewards, masked_dones, values, self.gamma, self.lambd)
+        returns = compute_lambda_return(rewards, masked_dones, symexp(values), self.gamma, self.lambd)
         y_t = self.twohot(symlog(returns.unsqueeze(-1))).detach()
 
         # compute logprobs of bins ln P(b|s_t)
@@ -159,7 +184,11 @@ class Actor:
                 actor_loss: \E ln\pi(a_t|s_t)A(s_t, a_t) + entropy_const * H[\pi(\dot|s_t)]
         '''
         # compute stats 
+        returns = returns.detach().float()
+
+
         quantiles = torch.quantile(returns[masks>0], torch.Tensor([0.05, 0.95]))
+        
         self.perclow(quantiles[0])
         self.perchigh(quantiles[1])
         
@@ -198,22 +227,47 @@ class DistributionalActorCritic:
 
         # trainer params
         self.max_episode_len = self.cfg.experiment.max_episode_len
-        self.eval_max_episode_len = self.cfg.experiment.max_episode_len
+        self.eval_max_episode_len = self.cfg.experiment.max_episode_len*2
         self.ground_step = 0
         self.imagination_steps = 0 
         self.n_episodes = 0
+        self.n_updates = 0
         self.start_time = time.time()
 
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel('INFO')
 
+        self.value_record = EMA(alpha=0.99, initialization=0.)
+        self.entropy_record = EMA(alpha=0.99, initialization=0.)
+        self.value_loss_record = EMA(alpha=0.99, initialization=0.)
+        self.policy_loss_record = EMA(alpha=0.99, initialization=0.)
+
+
     def setup(self, outdir):
         # output logger
-        
+        self.outdir = outdir
+        self.tb_writer = None
+        if self.cfg.experiment.log_tensorboard:
+            self.tb_writer = create_tb_writer(self.outdir)
+        write_header(self.outdir, self, None)
         # optimizers
-        optimizer_actor = torch.optim.Adam(self.actor.get_params(), lr=self.actor_lr, eps=1e-5)
-        optimizer_critic = torch.optim.Adam(self.critic.get_params(), lr=self.critic_lr, eps=1e-5)
-        self.optimizers = [optimizer_actor, optimizer_critic]
+        # optimizer_actor = torch.optim.Adam(self.actor.get_params(), lr=self.actor_lr, eps=1e-5)
+        # optimizer_critic = torch.optim.Adam(self.critic.get_params(), lr=self.critic_lr, eps=1e-5)
+        # self.optimizers = [optimizer_actor, optimizer_critic]
+        optimizer = torch.optim.Adam(list(self.critic.get_params()) + list(self.actor.get_params()), lr=self.critic_lr, eps=1e-5)
+        self.optimizers = [optimizer]
+
+    def get_statistics(self):
+        stats = (
+            ('value', float(self.value_record.get_value())),
+            ('entropy', float(self.entropy_record.get_value())),
+            ('value_loss', float(self.value_loss_record.get_value())),
+            ('policy_loss', float(self.policy_loss_record.get_value())),
+            ('return_perc_low', float(self.actor.perclow.get_value())),
+            ('return_perc_high', float(self.actor.perchigh.get_value())),
+            ('n_updates', self.n_updates)
+        )
+        return stats
 
     def act(self, obs, encoder):
         if isinstance(obs, list):
@@ -234,20 +288,29 @@ class DistributionalActorCritic:
         action_probs = self.actor.logpi(torch.from_numpy(obs)).exp()
         if self.training:
             # sample
+            self.entropy_record(-(action_probs * torch.log(action_probs)).sum(-1).mean().item())
             actions = torch.distributions.Categorical(probs=action_probs).sample((1,))[0]
         else:
             # Greedy
             actions = actions.argmax(-1)
         return actions.item()
 
-    def compute_metrics(self, episodes):
+    def compute_metrics(self, episodes, world_model):
         logs = []
+        successful_eps_len = []
         for ep in episodes:
             obss, actions, rewards, next_obss, dones, infos = zip(*ep)
             ep = np.array(obss + next_obss[-1:])
             norm2 = (ep ** 2).sum(-1, keepdims=True)
             residual = ((ep[1:]-ep[:-1])**2).sum(-1, keepdims=True)
+            if sum(rewards) != 0.:
+                successful_eps_len.append(len(rewards))
 
+            acts = torch.nn.functional.one_hot(torch.from_numpy(np.array(actions)).long(), self.n_actions)
+            ss = torch.from_numpy(np.array(obss))
+            next_ss = torch.from_numpy(np.array(next_obss))
+            with torch.no_grad():
+                likelihood = world_model.transition.distribution(torch.cat([ss, acts], dim=-1)).log_prob(next_ss-ss).sum(-1) / len(rewards)
 
             logs.append({
                 'sim_rollout/norm2_mean': norm2.mean(),
@@ -258,9 +321,13 @@ class DistributionalActorCritic:
                 'sim_rollout/residual_norm2_std': residual.std(),
                 'sim_rollout/residual_norm2_max': residual.max(),
                 'sim_rollout/residual_norm2_min': residual.min(),
-            })  
-        stats = tree_map(lambda *ep_stats: np.median(np.array(ep_stats)), *logs)
+                'sim_rollout/return': sum(rewards),
+                'sim_rollout/lengths': len(rewards),
+                'sim_rollout/ep_likelihood': likelihood.cpu().item()
+            })
+        stats = tree_map(lambda *ep_stats: np.mean(np.array(ep_stats)), *logs)
         stats['n_episodes'] = len(episodes)
+        stats['sim_rollout/steps_to_success'] = mean(successful_eps_len)
         return stats
     
     def compute_eval_stats(self, episodes):
@@ -344,7 +411,7 @@ class DistributionalActorCritic:
             if isinstance(t, torch.Tensor):
                 return t
             raise ValueError(f'Unknown type {type(t)}')
-        
+
         masks = torch.stack(list(map(lambda ep: torch.Tensor([1] * len(ep) + [0] * (maxlen-len(ep))), episodes)))
         episodes = [tree_map(totensor, list(zip(*ep))[:-1]) for ep in episodes]
         episodes = [list(map(torch.stack, ep)) for ep in episodes]
@@ -358,30 +425,49 @@ class DistributionalActorCritic:
         return torch.stack(ss), torch.stack(acts), torch.stack(rews).squeeze(-1), torch.stack(dones).float().squeeze(-1), masks
 
  
-    def train(self, world_model, steps_budget):
+    def train(self, world_model, steps_budget, epochs=5, max_ep_len=64):
         # rollout
-        episodes = self.rollout(
-                            world_model, 
-                            self.act_in_imagination, 
-                            self.max_episode_len, 
-                            n_steps=steps_budget
-                        )
-        self.imagination_steps += steps_budget
-        self.n_episodes += len(episodes)
-        states, actions, rewards, dones, masks = self.preprocess(episodes)
-        # compute losses
+        _stats = []
+        for _ in range(epochs):
+            episodes = self.rollout(
+                                world_model, 
+                                self.act_in_imagination, 
+                                self.max_episode_len, 
+                                # n_steps=steps_budget // epochs,
+                                n_episodes=3
+                            )
+            self.imagination_steps += steps_budget
+            self.n_episodes += len(episodes)
+            states, actions, rewards, dones, masks = self.preprocess(episodes, max_ep_len)
+            # compute losses
+            critic_loss, (returns, values) = self.critic.loss(states, rewards, dones, masks)
+            actor_loss = self.actor.loss(states, actions, returns, values, masks)
+            # take step
+            loss = actor_loss + critic_loss
+            [opt.zero_grad() for opt in self.optimizers]
+            loss.backward()
 
-        critic_loss, (returns, values) = self.critic.loss(states, rewards, dones, masks)
-        actor_loss = self.actor.loss(states, actions, returns, values, masks)
-        # take step
-        loss = actor_loss + critic_loss
-        [opt.zero_grad() for opt in self.optimizers]
-        loss.backward()
-        [opt.step() for opt in self.optimizers]
+            torch.nn.utils.clip_grad_norm_(self.actor.get_params(), 100)
+            torch.nn.utils.clip_grad_norm_(self.critic.get_params(), 100)
 
-        # update target
-        self.critic.update_critic()
-        return self.compute_metrics(episodes)
+            [opt.step() for opt in self.optimizers]
+
+            # update target
+            self.critic.update_critic()
+
+            # agent stats
+            self.policy_loss_record(actor_loss.item())
+            self.value_loss_record(critic_loss.item())
+            self.value_record(returns[masks==1].mean().item())
+            stats = self.compute_metrics(episodes, world_model)
+            print(f'[agent training] critic_loss: {critic_loss}, actor_loss: {actor_loss}, return {returns[masks==1].mean()}, value_estimates {values[masks==1].mean()}, success rate {rewards.sum(-1).mean().item()}, loglikelihood {stats["sim_rollout/ep_likelihood"]}')
+            self.n_updates += 1
+            _stats.append({**stats, **{f"agent/{k}":v for k,v in self.get_statistics()}})
+
+            
+
+        return tree_map(lambda *s: mean(s), *_stats)
+
 
     def evaluate(self, env, encoder, n_episodes):
         with self.eval_mode():
@@ -420,7 +506,8 @@ class DistributionalActorCritic:
             discounted_max = np.max(discounted_scores),
         )
 
-        agent_stats = [] #self.agent.get_statistics()
+        # agent_stats = [] #self.agent.get_statistics()
+        agent_stats = self.get_statistics()
         custom_values = tuple(tup[1] for tup in agent_stats)
 
         mean = stats["mean"]
@@ -439,9 +526,9 @@ class DistributionalActorCritic:
             + custom_values
         )
 
-        # record_stats(self.outdir, values)
-        # if self.tb_writer:
-        #     record_tb_stats(self.tb_writer, agent_stats, stats, [], self.ground_step)
+        record_stats(self.outdir, values)
+        if self.tb_writer:
+            record_tb_stats(self.tb_writer, agent_stats, stats, [], self.ground_step)
 
         return stats
 

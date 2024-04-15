@@ -14,6 +14,9 @@ import datetime
 import io
 
 import functools
+from collections import Counter
+import re
+
 
 @dataclass
 class Transition:
@@ -303,22 +306,76 @@ class TrajectoryReplayBuffer:
 class TrajectoryReplayBufferStored(TrajectoryReplayBuffer, Dataset):
     EPISODE_ELEMS = ['state', 'action', 'reward', 'next_state', 'duration', 'success', 'done', 'info']
 
-    def __init__(self, capacity, device='cpu', save_path='.', length=64):
+    def __init__(self, capacity, device='cpu', save_path='.', length=64, validation_size=0.005):
         super().__init__(capacity=capacity, device=device)
         self.save_path = pathlib.Path(save_path).expanduser()
         self.episodes = []
+        self.validation_episodes = []
+        self.validation_lengths = []
+        self.validation_transitions = 0
+        self.n_transitions = 0
+        self.lengths = []
         self.prepare_storage()
         self.loaded = set()
         self.length = length
         self.buffer = {}
+        self.validation_size = int(validation_size * self.capacity)
+        self.val_task_reward_pos = deque(maxlen=capacity)
+        self.val_task_reward_neg = deque(maxlen=capacity)
+        
 
     def prepare_storage(self):
         if os.path.exists(self.save_path / 'replay'):
             self.episodes = sorted((self.save_path / 'replay').glob('*.npz'))
-            print(f'Replay buffer exists at {self.save_path}. Loading {len(self.episodes)} episodes')
+            self.lengths = self.get_episode_lengths(self.episodes)
+            self.n_transitions = sum(self.lengths)
+            print(f'Replay buffer exists at {self.save_path}. Loading {len(self.episodes)} episodes / {self.n_transitions} transitions')
         else:
             os.makedirs(self.save_path / 'replay')
             print(f'Replay buffer at {self.save_path / "replay"}')
+        
+        if os.path.exists(self.save_path / 'validation_replay'):
+            self.validation_episodes = sorted((self.save_path / 'validation_replay').glob('*.npz'))
+            self.validation_lengths = self.get_episode_lengths(self.validation_episodes)
+            self.validation_transitions = sum(self.validation_lengths)
+            print(f'Validation replay buffer exists at {self.save_path}. Loading {len(self.validation_episodes)} episodes / {self.validation_transitions} transitions')
+
+        else:
+            os.makedirs(self.save_path / 'validation_replay')
+            print(f'Replay buffer at {self.save_path / "validation_replay"}')
+
+
+    def push_task_reward_sample(self, state, pos=True, validation=False):
+        if not isinstance(state, torch.Tensor):
+            state = self._to_torch(state)
+        lsts = [self.task_reward_pos, self.task_reward_neg] if not validation else [self.val_task_reward_pos, self.val_task_reward_neg]
+        if pos:
+            lsts[0].append(state)
+        else:
+            lsts[1].append(state)
+
+
+    def sample_task_reward(self, batch_size, validation=False):
+        pos_samples = []
+        neg_samples = []
+
+        lsts = [self.task_reward_pos, self.task_reward_neg] if not validation else [self.val_task_reward_pos, self.val_task_reward_neg]
+        if len(lsts[0]) > 0:
+            pos_samples_idx = np.random.choice(len(lsts[0]), batch_size // 2)
+            pos_samples = [lsts[0][pos_samples_idx[i]] for i in range(len(pos_samples_idx))]
+        if len(lsts[1]) > 0:
+            neg_samples_idx = np.random.choice(len(lsts[1]), batch_size // 2)
+            neg_samples = [lsts[1][neg_samples_idx[i]] for i in range(len(neg_samples_idx))]
+        samples = pos_samples + neg_samples
+        labels = torch.zeros(len(samples))
+        labels[:len(pos_samples)] = 1.
+        return tree_map(lambda *tensors: torch.stack(tensors).to(self.device), *samples), labels.to(self.device)
+    
+
+    def get_episode_lengths(self, episodes):
+        pattern = re.compile(r'.*-([0-9]+).npz')
+        lengths =  [int(pattern.findall(str(ep))[0]) for ep in episodes]
+        return lengths
 
     def _sample_eps(self, num_trajectories, min_length=8):
         sampled = set()
@@ -347,19 +404,33 @@ class TrajectoryReplayBufferStored(TrajectoryReplayBuffer, Dataset):
         timestamp = datetime.datetime.now().strftime('%Y%m%dT%H%M%S')
         identifier = str(uuid.uuid4().hex)
         eplen = len(episode['action'])
-        filename = self.save_path / 'replay' / f'{timestamp}-{identifier}-{eplen}.npz'
+
+        validation = np.random.uniform(0, 1, 1) > 0.9
+        if validation and len(self.validation_episodes) < self.validation_size:
+            _folder = 'validation_replay'
+        else:
+            _folder = 'replay'
+
+        filename = self.save_path / _folder / f'{timestamp}-{identifier}-{eplen}.npz'
 
         with io.BytesIO() as f1:
             np.savez_compressed(f1, **{k: v for k,v in episode.items()})
             f1.seek(0)
             with filename.open('wb') as f2:
                 f2.write(f1.read())
+
+        if _folder == 'validation_replay':
+            self.validation_episodes.append(filename)
+            self.validation_lengths.append(eplen)
+            self.validation_transitions += eplen
+        else:
+            self.episodes.append(filename)
+            self.n_transitions += eplen
+            self.lengths.append(eplen)
         return filename
 
-    def load_episode(self, episode_idx, allow_pickle=True):
-        filename = self.episodes[episode_idx]
-        # if str(filename) in self.buffer:
-            # return self.buffer[str(filename)]
+    def load_episode(self, episode_idx, allow_pickle=True, validation=False):
+        filename = self.episodes[episode_idx] if not validation else self.validation_episodes[episode_idx]
         try:
             with filename.open('rb') as f:
                 episode = np.load(f, allow_pickle=allow_pickle)
@@ -372,8 +443,7 @@ class TrajectoryReplayBufferStored(TrajectoryReplayBuffer, Dataset):
         if not str(filename) in self.loaded:
             self.loaded.add(str(filename))
             state, info = ep[-1][3], ep[-1][-1]
-            self.push_task_reward_sample(state, info['goal_reached'] > 0)
-        # self.buffer[str(filename)] = ep
+            self.push_task_reward_sample(state, info['goal_reached'] > 0, validation=validation)
         return ep
     
     def end_trajectory(self):
@@ -383,7 +453,7 @@ class TrajectoryReplayBufferStored(TrajectoryReplayBuffer, Dataset):
         if len(self.current_trajectory) > 0:
             episode = {k:v for k, v in zip(self.EPISODE_ELEMS, self.current_trajectory)}
             episode_filename = self.save_episode(episode)
-            self.episodes.append(episode_filename)
+            # self.episodes.append(episode_filename)
             self.buffer.append(self.current_trajectory)
             self.current_trajectory = []
 
@@ -394,7 +464,7 @@ class TrajectoryReplayBufferStored(TrajectoryReplayBuffer, Dataset):
             if dones[i]:
                 episode = {k:v for k, v in zip(self.EPISODE_ELEMS, zip(*traj))}
                 episode_filename = self.save_episode(episode)
-                self.episodes.append(episode_filename)
+                # self.episodes.append(episode_filename)
                 # self.buffer.append(traj)
                 self.current_trajectories[i] = []
 
@@ -435,3 +505,112 @@ class TrajectoryReplayBufferStored(TrajectoryReplayBuffer, Dataset):
 
 
 
+    def sample_validation(self, num_trajectories):
+        """
+        Sample trajectories from the buffer and return PyTorch tensors, padding shorter trajectories.
+        
+        Args:
+        - num_trajectories (int): Number of trajectories to sample.
+        
+        Returns:
+        - List of trajectories. Each trajectory is a tuple containing:
+            - List of transitions represented as PyTorch tensors.
+            - Mask indicating the non-padded elements.
+        """
+
+        if len(self) < num_trajectories:
+            return None  # Not enough trajectories in the buffer.
+        
+        sampled_trajectories = self._sample_eps(num_trajectories, validation=True)
+
+        # Find the maximum trajectory length for padding
+        max_length = max([len(trajectory) for trajectory in sampled_trajectories])
+
+        tensor_trajectories = []
+        infos = []
+        for trajectory in sampled_trajectories:
+            # Unpack the trajectory
+            states, actions, rewards, next_states, durations, success, done, info = zip(*trajectory)
+            # Create mask for this trajectory
+            mask = torch.Tensor([1] * len(trajectory) + [0] * (max_length - len(trajectory)))
+            # Pad each component of the trajectory
+            states = self._pad_sequence(states, max_length)
+            actions = self._pad_sequence(actions, max_length)
+            rewards = self._pad_sequence(rewards, max_length)
+            next_states = self._pad_sequence(next_states, max_length)
+            durations = self._pad_sequence(durations, max_length)
+            success = self._pad_sequence(success, max_length, dtype=torch.float32)
+            done = self._pad_sequence(done, max_length, dtype=torch.float32)
+            # printarr(states, actions, rewards, next_states, durations, success, done, mask)
+            tensor_trajectory = (states, actions, rewards, next_states, durations, success, done, mask)
+            tensor_trajectories.append(tensor_trajectory)
+            infos.append(info)
+        
+        tensor_trajectories = [tree_map(lambda *tensors: torch.stack(tensors).to(self.device), *t) for t in zip(*tensor_trajectories)]
+        return tensor_trajectories, infos
+
+
+
+class MarkovReplayBuffer(TrajectoryReplayBufferStored):
+
+    def load_episode(self, episode_idx, allow_pickle=True, validation=False, buffer=False):
+        filename = self.episodes[episode_idx] if not validation else self.validation_episodes[episode_idx]
+
+        if buffer and filename in self.buffer:
+            return self.buffer[filename]
+        
+        try:
+            with filename.open('rb') as f:
+                episode = np.load(f, allow_pickle=allow_pickle)
+                episode = {k: episode[k] for k in episode.keys()}
+        except Exception as e:
+            raise ValueError(f'Could not load episode {str(filename)}: {e}')
+
+        ep = list(zip(*[episode[k] for k in self.EPISODE_ELEMS]))
+        if buffer:
+            self.buffer[filename] = ep
+        if not str(filename) in self.loaded:
+            self.loaded.add(str(filename))
+            state, info = ep[-1][3], ep[-1][-1]
+            self.push_task_reward_sample(state, info['goal_reached'] > 0, validation=validation)
+        return ep
+    
+
+    def _sample_transitions(self, n_samples, validation=False):
+        n_transitions = self.validation_transitions if validation else self.n_transitions
+        lengths = self.validation_lengths if validation else self.lengths
+        _transitions = np.random.choice(n_transitions, n_samples)
+        _t = np.cumsum(np.array(lengths))[:, None]
+        _trajectories = (_t < _transitions[None]).sum(0)
+        samples = []
+        for i in range(n_samples):
+            ep = self.load_episode(_trajectories[i], validation=validation, buffer=True)
+            transition = int(_transitions[i] - _t[_trajectories[i]] + lengths[_trajectories[i]] - 1)
+            try:
+                samples.append(ep[transition])
+            except:
+                import ipdb; ipdb.set_trace()
+
+        return samples
+    
+    def sample(self, n_samples, validation=False):
+        
+        '''
+            return batch of transitions sampled uniformly from dataset
+        '''
+        transitions = self._sample_transitions(n_samples=n_samples, validation=validation)
+        # Unpack the trajectory
+        states, actions, rewards, next_states, durations, success, done, infos = zip(*transitions)
+        transitions_elems = (states, actions, rewards, next_states, durations, success, done)
+        transitions_elems = [tree_map(lambda s: self._to_torch(s), elem) for elem in transitions_elems]
+        transitions = [tree_map(lambda *s: torch.stack(s).to(self.device), *t) for t in transitions_elems]
+        return transitions, infos
+    
+    def sample_validation(self, n_samples):
+        transitions = self._sample_transitions(n_samples=n_samples, validation=True)
+        # Unpack the trajectory
+        states, actions, rewards, next_states, durations, success, done, infos = zip(*transitions)
+        transitions_elems = (states, actions, rewards, next_states, durations, success, done)
+        transitions_elems = [tree_map(lambda s: self._to_torch(s), elem) for elem in transitions_elems]
+        transitions = [tree_map(lambda *s: torch.stack(s).to(self.device), *t) for t in transitions_elems]
+        return transitions, infos

@@ -36,15 +36,18 @@ class DiagonalNormal(torch.distributions.Distribution):
     def std(self):
         return torch.exp(self._log_var/2)
 
-    def sample(self, n_samples=1):
-        return self.dist.rsample(torch.zeros(n_samples).size())
+    def sample(self, n_samples=1, std_limit=3):
+        sample = torch.randn_like(self.mean) * self.std * std_limit / 3  + self.mean
+        # return self.dist.rsample(torch.zeros(n_samples).size())
+        return sample
     
     def log_prob(self, x, batched=False):
         
         if batched:
             batch_size = x.shape[0] // self.mean.shape[0]
-            _mean = self.mean.repeat(batch_size, 1, 1)
-            _var = self.var.repeat(batch_size, 1, 1)
+            repeats = [batch_size] + [1] * (len(self.mean.shape) - 1)
+            _mean = self.mean.repeat(*repeats)
+            _var = self.var.repeat(*repeats)
             _log_prob = -(x - _mean) ** 2 / _var - 0.5 * (torch.log(_var) + float(np.log(2 * np.pi)))
             _log_prob = _log_prob.sum(-1)
         else:
@@ -261,7 +264,6 @@ class MixtureDiagonalNormal(torch.distributions.Distribution):
     def std(self):
         return torch.sqrt(self.var)
 
-
     # def sample(self, n_samples=1):
     #     # Sampling using Categorical Distribution
     #     # TODO Test
@@ -274,12 +276,12 @@ class MixtureDiagonalNormal(torch.distributions.Distribution):
     #         samples.append(sample_from_chosen_component)
     #     return torch.stack(samples)
 
-    def sample(self, n_samples=1):
+    def sample(self, n_samples=1, std_limit=3):
         # Sampling using Categorical Distribution
         event_shape = self._pis.shape[:-1]
         categorical = Categorical(probs=self._pis)
         indices = categorical.sample((n_samples,)) # n_samples x event_size
-        samples = torch.stack([normal.sample(n_samples) for normal in self._components]) # n_components x n_samples x event_size x dim_sample
+        samples = torch.stack([normal.sample(n_samples, std_limit=std_limit) for normal in self._components]) # n_components x n_samples x event_size x dim_sample
         indices = indices.reshape(-1)
         x = samples.reshape(len(self._components), -1, samples.shape[-1])
         x = x[indices, range(len(indices))]
@@ -288,7 +290,6 @@ class MixtureDiagonalNormal(torch.distributions.Distribution):
 
     def log_prob(self, x, batched=False):
         # Compute log prob for each component and then combine with log(pis)
-        # import ipdb; ipdb.set_trace()
         batch_size = x.shape[0] // self._means[0].shape[0]
         repeats = [batch_size] + [1] * (len(self._means[0].shape) - 1)
         log_probs = torch.stack([component.log_prob(x, batched=batched) for component in self._components], dim=-1)

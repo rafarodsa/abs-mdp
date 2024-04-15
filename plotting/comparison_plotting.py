@@ -8,11 +8,11 @@ from .comparison_plotting_utils import *
 from .plotting_utils import get_summary_data, extract_exploration_amounts, load_count_dict, get_true_vs_approx
 
 
-def get_config(acme_id, group_key):
+def get_config(exp_id, group_key):
     try:
-        return re.search(f".*?([+-]+{group_key}|{group_key}_[^_]*)_.*", acme_id).group(1)
+        return re.search(f".*?([+-]+{group_key}|{group_key}_[^_]*)_.*", exp_id).group(1)
     except: # if its at the end of the id name
-        return re.search(f".*?([+-]+{group_key}|{group_key}_[^_]*)$", acme_id).group(1)
+        return re.search(f".*?([+-]+{group_key}|{group_key}_[^_]*)$", exp_id).group(1)
 
 
 def default_make_key(log_dir_name, group_keys):
@@ -191,6 +191,7 @@ def generate_learning_curves(
         print(config)
         for curve in curves:
             print(f"\t{len(curve[0])}")
+            print(curve)
         curves = [curve for curve in curves if len(curve[0]) >= min_len_curve]
         truncated_xs, truncated_all_ys = truncate_and_interpolate(curves, max_frames=truncate_max_frames, min_frames=truncate_min_frames)
 

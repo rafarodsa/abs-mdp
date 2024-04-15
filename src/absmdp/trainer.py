@@ -70,15 +70,17 @@ class Trainer:
         self.world_model.setup_replay(self.offline_data)
 
 
-
     def checkpoint(self):
         self.world_model.save_checkpoint()
 
     def load_checkpoint(self, ckpt_path):
         if (pathlib.Path(ckpt_path) / 'checkpoints/world_model.ckpt').exists():
+            warmup_steps = self.world_model.warmup_steps
+            sample_transition = self.world_model.sample_transition
             self.world_model = self.world_model.load_checkpoint(pathlib.Path(ckpt_path) / 'checkpoints/world_model.ckpt')
             print(f"Loading checkpoint at {pathlib.Path(ckpt_path) / 'checkpoints/world_model.ckpt'}")
-    
+            self.world_model.warmup_steps = warmup_steps
+            self.world_model.sample_transition = sample_transition
     
     def log(self):
         pass
@@ -92,6 +94,7 @@ class Trainer:
 
         ss = self.train_env.reset()
         timer.tic()
+
         while self.world_model.timestep < self.max_steps:
             
             # rollout & observe
@@ -139,7 +142,7 @@ class Trainer:
 
                 self.world_model.train_world_model(timestep=self.world_model.timestep, steps=self.gradient_steps)
             
-            if self.should_train_agent(self.world_model.timestep):
+            if self.should_train_agent(self.world_model.timestep) and self.world_model.n_gradient_steps > self.world_model.warmup_steps:
                 ep_logs = self.agent.train(self.world_model, steps_budget=self.config.planner.agent.rollout_len)
                 self.world_model.log(ep_logs, step=self.world_model.timestep)
                 print(f'[simulation stats] {" | ".join([f"{k}: {v}" for k,v in ep_logs.items()])}')

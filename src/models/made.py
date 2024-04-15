@@ -18,7 +18,7 @@ class MaskedLinear(nn.Linear):
 
 
 class MADE(nn.Module):
-    def __init__(self, input_dim, hidden_dims, order=None, activation='relu', permute=False, sample=False):
+    def __init__(self, input_dim, hidden_dims, order=None, activation='silu', permute=False, sample=False):
         super(MADE, self).__init__()
         self.input_dim = input_dim
         self.output_dim = input_dim
@@ -94,6 +94,10 @@ class MADE(nn.Module):
             return nn.LeakyReLU()
         elif name == 'elu':
             return nn.ELU()
+        elif name == 'silu':
+            return nn.SiLU()
+        elif name == 'mish':
+            return nn.Mish()
         else:
             raise NotImplementedError('Activation function not implemented')
 

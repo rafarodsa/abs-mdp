@@ -43,26 +43,33 @@ world_model:
     obs_dims: 29
     latent_dim: 8
     trajectory_len: 64
-    encoder: ${loadcfg:${model.model_config_dir}/config/models/encoder_mlp.yaml}
+    encoder:
+      features:
+        type: mlp
+        input_dim: ${model.obs_dims}
+        output_dim: ${model.latent_dim}
+        hidden_dims: [256, 256]
+        activation: mish
+        normalize: true
     decoder: ${loadcfg:${model.model_config_dir}/config/models/decoder_mlp_critic.yaml}
     # transition: ${loadcfg:${model.model_config_dir}/config/models/transition_gaussian.yaml}
     transition:
       features:
         type: mlp
         input_dim: ${eval:${model.n_options} + ${model.latent_dim}}
-        output_dim: 1024
+        output_dim: 2048
         n_options: ${model.n_options}
         hidden_dims: [512, 512]
         activation: mish
         normalize: true
       dist:
         type: mixture_gaussian
-        n_components: 2
+        n_components: 4
         activation: mish
         output_dim: ${model.latent_dim}
         input_dim: ${model.transition.features.output_dim}
         min_std: 0.001
-        max_std: 1.
+        max_std: 10.
     termination:
       type: mlp
       input_dim: ${model.latent_dim}
@@ -169,10 +176,10 @@ planner:
     bmax: 20
     gamma: ${planner.env.gamma}
     lambd: 0.95
-    actor_lr: 1e-4
-    critic_lr: 1e-4
+    actor_lr: 3e-5
+    critic_lr: 3e-5
     slow_ema_decay: 0.98
-    normalizer_ema_decay: 0.98
+    normalizer_ema_decay: 0.99
     entropy_const: 3e-4
     reg_const: 1.
     n_actions: ${world_model.model.n_options}

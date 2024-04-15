@@ -20,3 +20,4 @@ jupyter.sh
 tensorboard.sh
 vis/
 venv/
+tests/

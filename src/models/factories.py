@@ -31,9 +31,9 @@ class ModuleFactory:
     }
     
     @staticmethod
-    def build(cfg: ModuleConfig, init_fn=lambda l: l):
+    def build(cfg: ModuleConfig, init_fn=lambda l: l, out_init_fn=None):
         if cfg.type == 'mlp':
-            return ModuleFactory.factories[cfg.type](cfg, init_fn=init_fn)
+            return ModuleFactory.factories[cfg.type](cfg, init_fn=init_fn, out_init_fn=out_init_fn)
         return ModuleFactory.factories[cfg.type](cfg)
     
     @staticmethod

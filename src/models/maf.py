@@ -13,25 +13,25 @@ from src.utils.printarr import printarr
 from functools import partial
 
 class MAFBlock(nn.Module):
-    def __init__(self, input_dim, hidden_dims, reverse=True, sample=False):
+    def __init__(self, input_dim, hidden_dims, reverse=True, sample=False, activation='silu'):
         super().__init__()
         self.input_dim = input_dim
         self.hidden_dims = hidden_dims
         self.reverse = reverse
         self.order = torch.arange(1, input_dim + 1) if not reverse else torch.arange(input_dim, 0, -1)
-        self.mean = MADE(input_dim, hidden_dims, order=self.order, sample=sample)
-        self.scale = MADE(input_dim, hidden_dims, order=self.order, sample=sample)
+        self.mean = MADE(input_dim, hidden_dims, order=self.order, sample=sample, activation=activation)
+        self.scale = MADE(input_dim, hidden_dims, order=self.order, sample=sample,  activation=activation)
 
-    def forward(self, x):
+    def forward(self, x, ldj=0):
         '''
             x: sample from desired distribution
         '''
         m, log_s = self.mean(x), self.scale(x)
         s = torch.exp(log_s)
         u = (x - m) / s
-        return u, m, log_s
+        return u, m, log_s + ldj
     
-    def inverse(self, u):
+    def inverse(self, u, ldj=0):
         '''
             u: sample from initial distribution
         '''
@@ -42,8 +42,47 @@ class MAFBlock(nn.Module):
             log_s = self.scale(x)
             s = torch.exp(log_s)
             x[:, i-1] += u[:, i-1] * s[:, i-1] + self.mean(x)[:, i-1]
-        return x, log_s.sum(-1)
+        return x, log_s.sum(-1) + ldj
     
+
+class MAFBlock2(nn.Module):
+    def __init__(self, input_dim, hidden_dims, reverse=True, sample=False, activation='silu'):
+        super().__init__()
+        self.input_dim = input_dim
+        self.hidden_dims = hidden_dims
+        self.reverse = reverse
+        self.order = torch.arange(1, input_dim + 1) if not reverse else torch.arange(input_dim, 0, -1)
+        self.mean = MADE(input_dim, hidden_dims, order=self.order, sample=sample, activation=activation)
+        self.scale = MADE(input_dim, hidden_dims, order=self.order, sample=sample,  activation=activation)
+        self.max_scaling = 3.0
+        self.scaling = nn.Parameter(torch.zeros(self.input_dim))
+
+    def forward(self, x, ldj=0):
+        '''
+            x: sample from desired distribution
+        '''
+        m, log_s = self.mean(x), self.scale(x)
+        _s = torch.maximum(torch.ones_like(self.scaling), torch.tanh(self.scaling.exp() / self.max_scaling) * self.max_scaling)
+        log_s = _s * torch.tanh(log_s / _s)
+        s = torch.exp(log_s)
+        u = (x - m) / s
+        return u, -log_s.sum(-1) + ldj
+    
+    def inverse(self, u, ldj=0):
+        '''
+            u: sample from initial distribution
+        '''
+        x = torch.zeros_like(u)
+        for j in range(self.input_dim):
+            i = self.order[j]
+            log_s = self.scale(x)
+            _s = torch.maximum(torch.ones_like(self.scaling), torch.tanh(self.scaling.exp() / self.max_scaling) * self.max_scaling)
+            log_s = _s * torch.tanh(log_s / _s)
+            s = torch.exp(log_s)
+            x[:, i-1] += u[:, i-1] * s[:, i-1] + self.mean(x)[:, i-1]
+        return x, log_s.sum(-1) + ldj
+    
+
 
 class MAF(nn.Module):
     def __init__(self, input_dim, hidden_dims, num_blocks, sample=False):

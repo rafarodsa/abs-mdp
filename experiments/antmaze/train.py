@@ -12,7 +12,8 @@ import numpy as np
 from omegaconf import OmegaConf as oc
 from experiments.antmaze.plan import make_ground_env, parse_oc_args, GOAL_TOL, DATA_PATH
 from src.absmdp.trainer import Trainer
-from src.absmdp.absmdp2 import AMDP
+# from src.absmdp.absmdp2 import AMDP
+from src.absmdp.markov_absmdp import MarkovAMDP as AMDP
 from src.models import ModuleFactory
 from src.agents.abstract_ddqn import AbstractDDQNGrounded, AbstractDoubleDQN, AbstractLinearDecayEpsilonGreedy
 from src.agents.rainbow import Rainbow, AbstractRainbow

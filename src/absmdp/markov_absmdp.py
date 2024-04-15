@@ -8,7 +8,7 @@ from src.utils.symlog import symlog, symexp
 
 from src.models.factories import build_distribution, build_model
 
-from .buffer import TrajectoryReplayBufferStored
+from .buffer import MarkovReplayBuffer
 
 from functools import partial
 from src.absmdp.utils import Every
@@ -22,6 +22,10 @@ from lightning.pytorch.utilities.model_summary import ModelSummary
 from omegaconf import OmegaConf as oc
 from jax import tree_map
 
+from src.agents.ac import EMA
+from collections import deque
+import statistics
+
 
 def get_config(cfg):
     model_cfg = oc.masked_copy(cfg, 'model') 
@@ -30,7 +34,20 @@ def get_config(cfg):
     oc.update(cfg, 'model', model_cfg.model)
     return cfg
 
-class AMDP(gym.Env, nn.Module):
+
+class WindowMeanVar:
+    def __init__(self, capacity=100000):
+        self.values = deque(maxlen=capacity)
+
+    def update(self, z):
+        self.values.append(z)
+
+    def get_stats(self):
+        mean = sum(self.values) / len(self.values)
+        var = sum([(v-mean)**2 for v in self.values]) / (len(self.values)-1)
+        return mean, var
+    
+class MarkovAMDP(gym.Env, nn.Module):
     SMOOTHING_NOISE_STD = 0.2
     def __init__(self, cfg, name='world_model'):
         nn.Module.__init__(self)
@@ -93,9 +110,13 @@ class AMDP(gym.Env, nn.Module):
         self.obs_mean = np.zeros(self.n_feats)
         self.m2 = np.zeros(self.n_feats) + 1e-9
         self.count = 0
+
+        self.zs_stats = [WindowMeanVar() for i in range(self.n_options)]
+
         self.once=True
+
     
-    def stats(self, zs):
+    def stats(self, zs, acts, next_zs):
         batch_size = zs.shape[0]
         
         if batch_size == 0:
@@ -106,8 +127,21 @@ class AMDP(gym.Env, nn.Module):
         self.m2 += np.sum((zs - new_mean) * (zs - self.obs_mean), axis=0)
 
         self.count += batch_size
-        # print(self.obs_mean, self.m2 / (self.count-1))
 
+        # # p(z|a)
+
+        # _acts_idx = acts.argmax(-1)
+        # for i in range(_acts_idx.shape[0]):
+        #     next_z = next_zs[i]
+        #     self.zs_stats[_acts_idx[i]].update(next_z)
+
+    def compute_marginal_stats(self, action=None):
+        stats = [z.get_stats() for z in self.zs_stats]
+        means, vars = list(zip(*stats))
+        stds = [np.sqrt(var) for var in vars]
+        if action is not None:
+            return {'stats/rep_mean': means[action], 'stats/rep_std': stds[action]}
+        return {'stats/rep_mean': sum(means)/self.n_options, 'stats/rep_std': sum(stds)/self.n_options}
 
     ############### Gym Interface / World Model rollout ################
 
@@ -146,7 +180,7 @@ class AMDP(gym.Env, nn.Module):
     def get_initial_state(self):
         ep, _ = self.data.sample(1)
         state = ep[0]
-        return tree_map(lambda x: x[0][0], state, is_leaf=lambda s: isinstance(s, (np.ndarray, torch.Tensor)))
+        return tree_map(lambda x: x[0], state, is_leaf=lambda s: isinstance(s, (np.ndarray, torch.Tensor)))
 
 
     @property
@@ -193,9 +227,8 @@ class AMDP(gym.Env, nn.Module):
             self.once = False
         next_z_dist = self.transition.distribution(torch.cat([z, action], dim=-1))
         if self.sample_transition:
-            next_z = next_z_dist.sample()
+            next_z = next_z_dist.sample(std_limit=1.5)
         else:
-            # next_z = next_z_dist.mode()
             next_z = next_z_dist.sample_mode()
         if self.residual_transition:
             next_z = next_z + z
@@ -236,6 +269,8 @@ class AMDP(gym.Env, nn.Module):
             z = self.encoder(ground_state) 
             initset = self.initset(z)
             done = initset.sum().item() > 0
+            if not done:
+                ground_state = None
         self.simulation_state = dict(z=z, initset=initset)
         return self.postprocess(z)
     
@@ -275,7 +310,7 @@ class AMDP(gym.Env, nn.Module):
 
         # validate
         if self.n_gradient_steps % 1000 == 0: 
-            self.validate(32)
+            self.validate(2048)
 
         for _ in range(steps):
             batch = self.data.sample(self.batch_size)
@@ -316,32 +351,31 @@ class AMDP(gym.Env, nn.Module):
         
         # compute average likelihood of trajectories
         
-        (state, action, reward, next_state, duration, success, done, masks), info = eps
+        (state, action, reward, next_state, duration, success, done), info = eps
         action = F.one_hot(action.long(), self.n_options)
         
         z = self.encoder(state)
         next_z = self.encoder(next_state)
         next_z_dist = self.transition.distribution(torch.cat([z, action], dim=-1))
-        loglikelihood = (next_z_dist.log_prob(next_z-z) * masks).sum(-1) / masks.sum(-1)
+        loglikelihood = next_z_dist.log_prob(next_z-z)
         loglikelihood = loglikelihood.mean()
 
-        lengths = masks.sum(-1)
-        masks = masks == 1
 
-        grounding_loss = self.grounding_loss(next_z[masks])
-        reward_loss = self.reward_loss(reward[masks], z[masks], action[masks], next_z[masks])
-        tau_loss = self.duration_loss(duration[masks], z[masks], action[masks])
-        termination_loss, termination_log = self.termination_loss(done[masks], next_z[masks])
-        transition_loss = self.transition_loss(z, next_z, next_z_dist, mask=masks)
-        tpc_loss = self.predictibility_loss(z, next_z, next_z_dist, min_length=int(lengths.min().item()), mask=masks)
-        initset_loss = self.initset_loss_from_executed(z, action, success, masks)
-        gamma_loss = self.gamma_loss(z[masks], action[masks], duration[masks])
+        grounding_loss = self.grounding_loss(next_z)
+        reward_loss = self.reward_loss(reward, z, action, next_z)
+        tau_loss = self.duration_loss(duration, z, action)
+        termination_loss, termination_log = self.termination_loss(done, next_z)
+        transition_loss = self.transition_loss(z, next_z, next_z_dist)
+        tpc_loss = self.predictibility_loss(z, next_z, next_z_dist)
+        initset_loss = self.initset_loss_from_executed(z, action, success)
+        gamma_loss = self.gamma_loss(z, action, duration)
         
         # goal loss
-        z, goal = self._get_goal_reward_from_traj(z, info, lengths, masks)
-        goal_loss, goal_log = self.goal_loss(z, goal)
+        states, goal_reward = self._get_task_reward_examples(validation=True)
+        feats = self.encoder(states)
+        goal_loss, goal_log = self.goal_loss(feats, goal_reward)
 
-
+        
         logs = {
             'grounding_loss': grounding_loss.mean(),
             'transition_loss': transition_loss.mean(),
@@ -353,7 +387,7 @@ class AMDP(gym.Env, nn.Module):
              **termination_log,
             'gamma_loss': gamma_loss.mean(),
             'goal_loss': goal_loss.mean(),
-            **goal_log
+            **goal_log,
         }
 
 
@@ -368,11 +402,11 @@ class AMDP(gym.Env, nn.Module):
 
         self.log(logs, self.timestep)
 
-    def _get_task_reward_examples(self):
-        return  self.data.sample_task_reward(1024)
+    def _get_task_reward_examples(self, validation=False):
+        return  self.data.sample_task_reward(1024, validation=validation)
 
     def training_loss(self, batch):
-        (state, action, reward, next_state, duration, success, done, masks), info = batch
+        (state, action, reward, next_state, duration, success, done), info = batch
         action = F.one_hot(action.long(), self.n_options)
         # encode
         z_c = self.encoder(state)
@@ -381,19 +415,15 @@ class AMDP(gym.Env, nn.Module):
         next_z = next_z_c + self.SMOOTHING_NOISE_STD * torch.randn_like(next_z_c)
         # transition
         next_z_dist = self.transition.distribution(torch.cat([z, action], dim=-1))
-        lengths = masks.sum(-1)
-        _mask = masks.bool()
 
-        grounding_loss = self.grounding_loss(next_z_c[_mask])
-        reward_loss = self.reward_loss(reward[_mask], z_c[_mask], action[_mask], next_z_c[_mask])
-        tau_loss = self.duration_loss(duration[_mask], z_c[_mask], action[_mask])
-        termination_loss, termination_log = self.termination_loss(done[_mask], next_z_c[_mask])
-        transition_loss = self.transition_loss(z, next_z, next_z_dist, mask=_mask)
-        tpc_loss = self.predictibility_loss(z, next_z, next_z_dist, min_length=int(lengths.min().item()), mask=_mask)
-        initset_loss = self.initset_loss_from_executed(z_c, action, success, _mask)
-        gamma_loss = self.gamma_loss(z_c[_mask], action[_mask], duration[_mask])
-
-        
+        grounding_loss = self.grounding_loss(next_z_c)
+        reward_loss = self.reward_loss(reward, z_c, action, next_z_c)
+        tau_loss = self.duration_loss(duration, z_c, action)
+        termination_loss, termination_log = self.termination_loss(done, next_z_c)
+        transition_loss = self.transition_loss(z, next_z, next_z_dist)
+        tpc_loss = self.predictibility_loss(z, next_z, next_z_dist)
+        initset_loss = self.initset_loss_from_executed(z_c, action, success)
+        gamma_loss = self.gamma_loss(z_c, action, duration)
 
         loss =  self.hyperparams.grounding_const * grounding_loss.mean() + \
                 self.hyperparams.transition_const * transition_loss.mean() + \
@@ -415,7 +445,10 @@ class AMDP(gym.Env, nn.Module):
             loss += goal_loss.mean()
   
         
-        self.stats(z_c.detach().cpu().numpy().reshape(-1, z_c.shape[-1]))
+        self.stats(z_c.detach().cpu().numpy(), action.detach().cpu().numpy(), next_z_c.detach().cpu().numpy())
+
+        # embed_stats = self.compute_marginal_stats()
+        # print(embed_stats)
 
         log_dict = {
             'loss': loss,
@@ -431,8 +464,8 @@ class AMDP(gym.Env, nn.Module):
             'norm2': (z_c ** 2).sum(-1).mean(),
             'stats/mean': (self.obs_mean ** 2).sum(-1),
             'stats/var': (self.m2 / (self.count -1)).sum(-1),
-            'stats/count': self.count, 
-            **termination_log
+            'stats/count': self.count,
+            **termination_log,
         }
 
         if self.n_gradient_steps > 5000:
@@ -450,7 +483,6 @@ class AMDP(gym.Env, nn.Module):
         done_pred = self.termination(next_z).squeeze(-1)
         loss = nn.functional.binary_cross_entropy_with_logits(done_pred, done, pos_weight=pos_weight)
         # loss = nn.functional.binary_cross_entropy_with_logits(done_pred, done)
-
 
         # accuracy
         done_pred = (done_pred.sigmoid() > 0.5).float() 
@@ -500,24 +532,23 @@ class AMDP(gym.Env, nn.Module):
         return -_loss.mean()
 
 
-    def predictibility_loss(self, z, next_z, next_z_dist, min_length, mask):
+    def predictibility_loss(self, z, next_z, next_z_dist):
         '''
             -MI(z'; z, a)
         '''
-        b = next_z.shape[:-1]
-        n_traj, length = b[0], b[1]
-        _next_z = torch.repeat_interleave(next_z, n_traj, dim=0)
-        _z = z.repeat(n_traj, 1, 1)
+        bsize = z.shape[0] # bsize x state_dim
+        _next_z = torch.repeat_interleave(next_z, bsize, dim=0)
+        _z = z.repeat(bsize, 1)
+
         if not self.residual_transition:
-            _log_t = next_z_dist.log_prob(_next_z, batched=True).reshape(n_traj, n_traj, length)[..., :min_length]
+            _log_t = next_z_dist.log_prob(_next_z, batched=True).reshape(bsize, bsize)
         else:
-            _log_t = next_z_dist.log_prob(_next_z-_z, batched=True).reshape(n_traj, n_traj, length)[..., :min_length]
-        _diag = torch.diagonal(_log_t).T 
-        _loss = _diag - (torch.logsumexp(_log_t, dim=1) - np.log(n_traj)) # n_traj x length
+            _log_t = next_z_dist.log_prob(_next_z-_z, batched=True).reshape(bsize, bsize)
+        _diag = torch.diagonal(_log_t)
+        _loss = _diag - (torch.logsumexp(_log_t, dim=1) - np.log(bsize)) # n_traj
 
-        return -_loss[..., 1:].mean(-1)
+        return -_loss.mean()
 
-    
     def reward_loss(self, r_target, z, a, next_z, feats=None):
         r = symlog(r_target)
         r_pred = self.reward_fn(torch.cat([z, a, next_z], dim=-1).detach()).squeeze() if not self.recurrent else self.reward_fn(feats.detach()).squeeze() 
@@ -532,26 +563,26 @@ class AMDP(gym.Env, nn.Module):
         loss = F.mse_loss(t.reshape(-1), tau.reshape(-1), reduction='none')
         return loss
     
-    def transition_loss(self, z, next_z, next_z_dist, mask):
+    def transition_loss(self, z, next_z, next_z_dist):
         '''
             -log T(z'|z, a) 
         '''
-        loss = -(next_z_dist.log_prob(next_z) * mask).sum(-1) / mask.sum(-1) if not self.residual_transition \
-                else -(next_z_dist.log_prob(next_z-z) * mask).sum(-1) / mask.sum(-1)
+        loss = -next_z_dist.log_prob(next_z).mean() if not self.residual_transition \
+                else -next_z_dist.log_prob(next_z-z).mean()
         
         return loss
 
-    def initset_loss_from_executed(self, z, action, executed, mask, feats=None):
+    def initset_loss_from_executed(self, z, action, executed):
         _act_idx = action.argmax(-1, keepdim=True)
-        _inp = feats if self.recurrent else z
+        _inp = z #feats if self.recurrent else z
         initset_pred = torch.gather(self.initsets(_inp), -1, _act_idx).squeeze(-1)
         n_pos = executed.sum(-1, keepdim=True)
-        n_neg = executed.shape[1] - n_pos
+        n_neg = executed.shape[0] - n_pos
         if torch.all(n_neg==0):
             pos_weight = torch.tensor(1.)
         else:
             pos_weight = torch.where(n_pos > 0, n_neg / n_pos, 1.)
-        initset_loss = (F.binary_cross_entropy_with_logits(initset_pred, executed, pos_weight=pos_weight, reduction='none') * mask).sum(-1) / mask.sum(-1)
+        initset_loss = F.binary_cross_entropy_with_logits(initset_pred, executed, pos_weight=pos_weight)
         return initset_loss
     
     def goal_loss(self, z, target):
@@ -628,7 +659,7 @@ class AMDP(gym.Env, nn.Module):
 
     def setup_replay(self, data_path=None):
         data_path = f'{self.outdir}/data' if not data_path else data_path
-        self.data = TrajectoryReplayBufferStored(int(self.cfg.data.buffer_size), save_path=data_path, device=self.device)
+        self.data = MarkovReplayBuffer(int(self.cfg.data.buffer_size), save_path=data_path, device=self.device)
 
     def _get_goal_reward_from_traj(self, z, info, lengths, mask):
         goal_reached = []
