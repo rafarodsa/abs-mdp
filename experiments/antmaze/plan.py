@@ -62,8 +62,8 @@ GOALS = {
 }
 
 DATA_PATH = {
-    'antmaze-umaze-v2': 'exp_results/antmaze/antmaze-umaze-v2/data/trajectories_128_uniform.zip',
-    'antmaze-medium-play-v2': 'exp_results/antmaze/antmaze-medium-play-v2/data/trajectories_512_uniform.zip'
+    'antmaze-umaze-v2': 'experiments/antmaze/antmaze-umaze-v2/trajectories_128_uniform.zip',
+    'antmaze-medium-play-v2': 'experiments/antmaze/antmaze-medium-play-v2/trajectories_128_uniform.zip'
 }
 
 
@@ -150,8 +150,6 @@ def gaussian_ball_goal_fn(phi, goal, goal_tol, n_samples=10000, device='cpu', en
     samples = np.array([np.concatenate((samples[i], states[sample[i]][2:])) for i in range(n_samples)]).astype(np.float32)
     sample = np.random.choice(len(states), n_samples)
     goal = np.array([np.concatenate((goal, states[sample[i]][2:])) for i in range(n_samples)]).astype(np.float32)
-    
-    printarr(goal,  samples)
 
     # env = antmaze.make_env(envname)
     # _s = env.reset()

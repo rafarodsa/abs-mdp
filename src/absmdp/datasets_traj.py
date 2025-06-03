@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data._utils.collate import default_collate
 
 import lightning as pl
 from functools import partial, reduce
@@ -196,7 +197,33 @@ class PinballDatasetTrajectory_(torch.utils.data.Dataset):
         duration = torch.cat([torch.Tensor(duration), torch.zeros(padding)], dim=0)
         initsets = torch.stack(list(initsets) + [torch.zeros_like(initsets[0]) for _ in range(padding)])
         p0 = torch.cat([torch.Tensor(p0), torch.zeros(padding)], dim=0)
-        info = list(info) + [dict() for _ in range(padding)]
+        
+        # Create consistent padding for info dictionaries
+        if padding > 0:
+            if len(info) > 0:
+                # Get all keys from existing info dictionaries to use as template
+                template_keys = set()
+                for info_dict in info:
+                    if isinstance(info_dict, dict) and info_dict:  # if not empty dict
+                        template_keys.update(info_dict.keys())
+                
+                # Create padding dicts with the same keys, using None as default values
+                if template_keys:
+                    padding_info = []
+                    for _ in range(padding):
+                        padding_dict = {key: None for key in template_keys}
+                        padding_info.append(padding_dict)
+                    info = list(info) + padding_info
+                else:
+                    # All existing info dicts are empty, so use empty dicts for padding
+                    info = list(info) + [dict() for _ in range(padding)]
+            else:
+                # No existing info, just add empty dicts
+                info = [dict() for _ in range(padding)]
+        else:
+            # No padding needed, just convert to list
+            info = list(info)
+        
         # info = {}
 
         return Trajectory(s, a, next_s, rewards, done, executed, duration, initsets, p0, length, info)
@@ -265,13 +292,13 @@ class PinballDatasetTrajectory(pl.LightningDataModule):
         self.train, self.val, self.test = torch.utils.data.random_split(self.dataset, [self.train_split, self.val_split, self.test_split])
 
     def train_dataloader(self):
-        return torch.utils.data.DataLoader(self.train, batch_size=self.batch_size, shuffle=self.shuffle, num_workers=self.num_workers-1)
+        return torch.utils.data.DataLoader(self.train, batch_size=self.batch_size, shuffle=self.shuffle, num_workers=self.num_workers-1, collate_fn=trajectory_collate_fn)
 
     def val_dataloader(self):
-        return torch.utils.data.DataLoader(self.val, batch_size=self.batch_size, shuffle=self.shuffle, num_workers=self.num_workers-1)
+        return torch.utils.data.DataLoader(self.val, batch_size=self.batch_size, shuffle=self.shuffle, num_workers=self.num_workers-1, collate_fn=trajectory_collate_fn)
 
     def test_dataloader(self):
-        return torch.utils.data.DataLoader(self.test, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers-1)
+        return torch.utils.data.DataLoader(self.test, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers-1, collate_fn=trajectory_collate_fn)
     
     def _load_linear_transform(self):
         if os.path.isfile(f'{self.cfg.save_path}/lintransform.pt'):
@@ -292,4 +319,51 @@ class PinballDatasetTrajectory(pl.LightningDataModule):
     def load_state_dict(self, state_dict):
         if self.cfg.linear_transform:
             self.linear_transform = state_dict['weights']
+    
+
+def trajectory_collate_fn(batch):
+    """
+    Custom collate function for Trajectory NamedTuple objects.
+    Converts list of Trajectory objects into a single batched Trajectory.
+    """
+    if len(batch) == 0:
+        return batch
+    
+    # Get the first item to understand the structure
+    first_item = batch[0]
+    
+    if isinstance(first_item, Trajectory):
+        # Stack each field of the Trajectory separately
+        obs_batch = torch.stack([item.obs for item in batch])
+        action_batch = torch.stack([item.action for item in batch])
+        next_obs_batch = torch.stack([item.next_obs for item in batch])
+        rewards_batch = torch.stack([item.rewards for item in batch])
+        done_batch = torch.stack([item.done for item in batch])
+        executed_batch = torch.stack([item.executed for item in batch])
+        duration_batch = torch.stack([item.duration for item in batch])
+        initsets_batch = torch.stack([item.initsets for item in batch])
+        p0_batch = torch.stack([item.p0 for item in batch])
+        
+        # Handle length field - convert scalars to tensor
+        length_batch = torch.tensor([item.length for item in batch])
+        
+        # Handle info field (list of dicts) - just combine the lists
+        info_batch = [item.info for item in batch]
+        
+        return Trajectory(
+            obs=obs_batch,
+            action=action_batch,
+            next_obs=next_obs_batch,
+            rewards=rewards_batch,
+            done=done_batch,
+            executed=executed_batch,
+            duration=duration_batch,
+            initsets=initsets_batch,
+            p0=p0_batch,
+            length=length_batch,
+            info=info_batch
+        )
+    else:
+        # Fall back to default collate for other types
+        return default_collate(batch)
     

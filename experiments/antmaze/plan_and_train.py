@@ -18,7 +18,7 @@ from experiments.antmaze.plan import make_ground_env, parse_oc_args, gaussian_ba
 from src.absmdp.absmdp import AbstractMDPGoal, AbstractMDP
 from src.models import ModuleFactory
 from src.agents.abstract_ddqn import AbstractDDQNGrounded, AbstractDoubleDQN, AbstractLinearDecayEpsilonGreedy
-from src.agents.rainbow import Rainbow, AbstractRainbow
+
 from src.absmdp.datasets_traj import PinballDatasetTrajectory_
 import pfrl
 from pfrl.q_functions import DiscreteActionValueHead
@@ -90,41 +90,6 @@ def make_ddqn_agent(agent_cfg, experiment_cfg, world_model):
     return agent, grounded_agent
 
 
-def make_rainbow_agent(agent_cfg, experiment_cfg, world_model):
-    agent_cfg.q_func_rainbow.input_dim = world_model.latent_dim
-    q_func = ModuleFactory.build(agent_cfg.q_func_rainbow)
-
-    training_steps = experiment_cfg.steps // experiment_cfg.train_every
-    agent_total_steps = agent_cfg.agent.rollout_len * training_steps
-
-    betasteps = agent_total_steps / agent_cfg.agent.update_interval
-
-
-    explorer = explorers.LinearDecayEpsilonGreedy(
-            1.0,
-            agent_cfg.agent.final_epsilon,
-            agent_total_steps * agent_cfg.agent.final_exploration_steps,
-            lambda: np.random.choice(agent_cfg.q_func.n_actions)
-    )
-
-    agent = Rainbow(
-        q_func, # TODO change config for this
-        n_actions=agent_cfg.q_func.n_actions,
-        betasteps=betasteps,
-        lr=agent_cfg.agent.lr,
-        n_steps=agent_cfg.agent.num_step_return,
-        replay_start_size=agent_cfg.agent.replay_start_size,
-        target_update_interval=agent_cfg.agent.update_interval,
-        gamma=agent_cfg.env.gamma,
-        gpu=experiment_cfg.gpu,
-        update_interval=agent_cfg.agent.update_interval,
-        explorer=explorer
-    )
-    device = f'cuda:{experiment_cfg.gpu}' if experiment_cfg.gpu >= 0 else 'cpu'
-
-    grounded_agent = AbstractRainbow(agent=agent, encoder=world_model.encoder, action_mask=world_model.initset, device=device)
-
-    return agent, grounded_agent
 
 def get_goal_examples(goal, n_samples=10000, device='cpu', envname='antmaze-umaze-v2', abstract_tol=0.1):        
     goal = np.array(goal).astype(np.float32)
@@ -223,11 +188,7 @@ def main():
 
     # make grounded agent
     use_initset = True
-    if args.agent == 'rainbow':
-        agent, grounded_agent = make_rainbow_agent(agent_cfg, experiment_cfg=cfg.experiment, world_model=world_model)
-        use_initset = False
-        # world_model.set_no_initset()
-    elif args.agent == 'ddqn':
+    if args.agent == 'ddqn':
         agent, grounded_agent = make_ddqn_agent(agent_cfg, experiment_cfg=cfg.experiment, world_model=world_model)
     else:
         raise ValueError(f'Agent {args.agent} not implemented')
