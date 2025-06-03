@@ -21,3 +21,9 @@ tensorboard.sh
 vis/
 venv/
 tests/
+director/
+mediummaze_vis/
+dreamerv2/
+dreamerv3/
+config_node.txt
+pixel_critic.sh
