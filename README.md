@@ -1,10 +1,9 @@
 # Abstract MDP Learning
 
-This repository contains implementations for learning abstract Markov Decision Processes (MDPs) with applications to robotics navigation tasks, particularly in AntMaze environments.
+This repository contains implementations for learning abstract Markov Decision Processes (MDPs) from the paper "Learning Abstract World Models for Value-preserving Planning with Options"
 
 ## Overview
 
-The project implements hierarchical reinforcement learning through abstract MDPs that learn to decompose complex tasks into manageable sub-problems. The approach includes:
 
 - **Data Generation**: Collecting trajectory data using option-based policies
 - **Model Pretraining**: Training abstract world models using temporal predictive coding (TPC)
