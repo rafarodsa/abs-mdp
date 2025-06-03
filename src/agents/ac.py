@@ -37,7 +37,7 @@ def zeros_init(layer):
     torch.nn.init.zeros_(layer.bias)
     return layer
 
-def twohot(value, nbins, bmin=-1, bmax=1):
+def twohot(value, nbins, bmin=-1, bmax=1, device='cpu'):
     '''
         value: torch.Tensor (B0,B1...,1)
         return: (B0,B1,...,nbins)
@@ -45,7 +45,7 @@ def twohot(value, nbins, bmin=-1, bmax=1):
     assert bmin < bmax
     delta = 1/(nbins-1)
     nbatchdims = len(value.shape[:-1])
-    bins = torch.arange(0, 1+delta/2, delta) 
+    bins = torch.arange(0, 1+delta/2, delta).to(device)
     for _ in range(nbatchdims):
         bins = bins.unsqueeze(0)
     normalized_value = (value - bmin) / (bmax-bmin) # [0,1]
@@ -82,6 +82,9 @@ class EMA:
     
     def get_value(self):
         return self._mean
+
+    def to(self, device):
+        self._mean = self._mean.to(device)
     
 
 
@@ -96,13 +99,14 @@ class DistributionalCritic:
         self.reg_const = cfg.reg_const
         self.gamma = cfg.gamma
         self.lambd = cfg.lambd
-        self.twohot = lambda values: twohot(values, self.nbins, self.bmin, self.bmax)
+        self.twohot = lambda values, device: twohot(values, self.nbins, self.bmin, self.bmax, device=device)
         assert self.bmin < self.bmax
 
         
         self.slow_critic = ModuleFactory.build(cfg.critic, out_init_fn=zeros_init)
         self.fast_critic = ModuleFactory.build(cfg.critic, out_init_fn=zeros_init)
         self.param_updater = EMA(cfg.slow_ema_decay, self.slow_critic.state_dict())
+        self.device = 'cpu'
 
     def logprobs(self, states):
         return torch.nn.functional.log_softmax(self.fast_critic(states), dim=-1)
@@ -116,7 +120,7 @@ class DistributionalCritic:
     def compute_values(self, states, critic):
         nbatchdims = len(states.shape[:-1])
         for _ in range(nbatchdims):
-            bins = self.bins.unsqueeze(0)
+            bins = self.bins.unsqueeze(0).to(self.device)
         probs = torch.softmax(critic(states), dim=-1)
         values = (probs * bins).sum(-1)
         return values
@@ -140,14 +144,14 @@ class DistributionalCritic:
         # compute target returns G^lambda & 2hot encode y_t
         masked_dones = ((dones + (1-masks)) > 0).float()
         returns = compute_lambda_return(rewards, masked_dones, symexp(values), self.gamma, self.lambd)
-        y_t = self.twohot(symlog(returns.unsqueeze(-1))).detach()
+        y_t = self.twohot(symlog(returns.unsqueeze(-1)), self.device).detach()
 
         # compute logprobs of bins ln P(b|s_t)
         logprobs = self.logprobs(states)
         # regularizer
         # regularizer: (1) cross-entropy: slow_y_t^T ln P(b|s_t) or (2) -log P(slow_v(s_t)|s_t)
         # choosing option (2)
-        slow_values = self.twohot(self.compute_values(states, self.slow_critic).unsqueeze(-1)).detach()
+        slow_values = self.twohot(self.compute_values(states, self.slow_critic).unsqueeze(-1), self.device).detach()
         reg = -(slow_values * logprobs).sum(-1)
         # loss = -y_t^T ln P(b_i|s_t) 
 
@@ -163,6 +167,12 @@ class DistributionalCritic:
     def get_params(self):
         return self.fast_critic.parameters()
 
+    def to(self, device):
+        self.fast_critic.to(device)
+        self.slow_critic.to(device)
+        self.param_updater = EMA(self.cfg.slow_ema_decay, self.slow_critic.state_dict())
+        self.device = device
+
 class Actor:
     def __init__(self, cfg):
         self.policy = build_model(cfg.actor)
@@ -170,6 +180,7 @@ class Actor:
         # batch statistics
         self.perclow = EMA(cfg.normalizer_ema_decay, 0.)
         self.perchigh = EMA(cfg.normalizer_ema_decay, 0.)
+        self.device='cpu'
 
     def logpi(self, obs):
         return torch.nn.functional.log_softmax(self.policy(obs), dim=-1)
@@ -187,13 +198,13 @@ class Actor:
         returns = returns.detach().float()
 
 
-        quantiles = torch.quantile(returns[masks>0], torch.Tensor([0.05, 0.95]))
+        quantiles = torch.quantile(returns[masks>0], torch.Tensor([0.05, 0.95]).to(self.device))
         
         self.perclow(quantiles[0])
         self.perchigh(quantiles[1])
         
         # normalize
-        scale = torch.maximum(torch.tensor(1.0), self.perchigh.get_value() - self.perclow.get_value())
+        scale = torch.maximum(torch.tensor(1.0).to(self.device), self.perchigh.get_value() - self.perclow.get_value())
         normalized_returns = returns if scale == 1. else (returns-self.perclow.get_value()) / scale
         normalized_values = values if scale == 1. else (values - self.perclow.get_value()) / scale
         # Adv_t = G^\lambda_t - V_t
@@ -211,6 +222,12 @@ class Actor:
 
     def get_params(self):
         return self.policy.parameters()
+    
+    def to(self, device):
+        self.policy.to(device)
+        # self.perchigh.to(device)
+        # self.perclow.to(device)
+        self.device=device
 
 class DistributionalActorCritic:
     def __init__(self, model_cfg):
@@ -227,7 +244,7 @@ class DistributionalActorCritic:
 
         # trainer params
         self.max_episode_len = self.cfg.experiment.max_episode_len
-        self.eval_max_episode_len = self.cfg.experiment.max_episode_len*2
+        self.eval_max_episode_len = self.cfg.experiment.max_episode_len
         self.ground_step = 0
         self.imagination_steps = 0 
         self.n_episodes = 0
@@ -241,6 +258,7 @@ class DistributionalActorCritic:
         self.entropy_record = EMA(alpha=0.99, initialization=0.)
         self.value_loss_record = EMA(alpha=0.99, initialization=0.)
         self.policy_loss_record = EMA(alpha=0.99, initialization=0.)
+        self.device='cpu'
 
 
     def setup(self, outdir):
@@ -285,7 +303,7 @@ class DistributionalActorCritic:
         return actions.tolist() if isinstance(obs, list) else actions.item()
 
     def act_in_imagination(self, obs, initset=None):
-        action_probs = self.actor.logpi(torch.from_numpy(obs)).exp()
+        action_probs = self.actor.logpi(torch.from_numpy(obs).to(self.device)).exp()
         if self.training:
             # sample
             self.entropy_record(-(action_probs * torch.log(action_probs)).sum(-1).mean().item())
@@ -306,9 +324,9 @@ class DistributionalActorCritic:
             if sum(rewards) != 0.:
                 successful_eps_len.append(len(rewards))
 
-            acts = torch.nn.functional.one_hot(torch.from_numpy(np.array(actions)).long(), self.n_actions)
-            ss = torch.from_numpy(np.array(obss))
-            next_ss = torch.from_numpy(np.array(next_obss))
+            acts = torch.nn.functional.one_hot(torch.from_numpy(np.array(actions)).long(), self.n_actions).to(self.device)
+            ss = torch.from_numpy(np.array(obss)).to(self.device)
+            next_ss = torch.from_numpy(np.array(next_obss)).to(self.device)
             with torch.no_grad():
                 likelihood = world_model.transition.distribution(torch.cat([ss, acts], dim=-1)).log_prob(next_ss-ss).sum(-1) / len(rewards)
 
@@ -405,11 +423,11 @@ class DistributionalActorCritic:
             return padded
         def totensor(t):
             if isinstance(t, (float, int)):
-                return torch.tensor(t)
+                return torch.tensor(t).to(self.device)
             if isinstance(t, (np.ndarray, list, tuple)):
-                return torch.from_numpy(np.array(t))
+                return torch.from_numpy(np.array(t)).to(self.device)
             if isinstance(t, torch.Tensor):
-                return t
+                return t.to(self.device)
             raise ValueError(f'Unknown type {type(t)}')
 
         masks = torch.stack(list(map(lambda ep: torch.Tensor([1] * len(ep) + [0] * (maxlen-len(ep))), episodes)))
@@ -422,7 +440,7 @@ class DistributionalActorCritic:
         ss, acts, rews, dones = tree_map(lambda t: pad(t, maxlen-t.shape[0]), [ss, acts, rews, dones])
 
         
-        return torch.stack(ss), torch.stack(acts), torch.stack(rews).squeeze(-1), torch.stack(dones).float().squeeze(-1), masks
+        return torch.stack(ss).to(self.device), torch.stack(acts).to(self.device), torch.stack(rews).squeeze(-1).to(self.device), torch.stack(dones).float().squeeze(-1).to(self.device), masks.to(self.device)
 
  
     def train(self, world_model, steps_budget, epochs=5, max_ep_len=64):
@@ -469,7 +487,8 @@ class DistributionalActorCritic:
         return tree_map(lambda *s: mean(s), *_stats)
 
 
-    def evaluate(self, env, encoder, n_episodes):
+    def evaluate(self, env, encoder, n_episodes, timestep):
+        self.ground_step = timestep
         with self.eval_mode():
             episodes = self.rollout(
                                         env,
@@ -540,6 +559,11 @@ class DistributionalActorCritic:
             yield
         finally:
             self.training = orig_mode
+
+    def to(self, device):
+        self.actor.to(device)
+        self.critic.to(device)
+        self.device = device
 
 ############ TESTING ############
 

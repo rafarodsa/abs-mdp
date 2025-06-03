@@ -150,6 +150,8 @@ class MarkovAMDP(gym.Env, nn.Module):
             return torch.from_numpy(np.array(x)).to(self.device)
         elif isinstance(x, torch.Tensor):
             return x.to(self.device)
+        elif isinstance(x, (bool, int, float)):
+            return torch.tensor(x).float()
         elif isinstance(x, dict):
             # complex state
             return tree_map(self.preprocess, x)
@@ -204,7 +206,7 @@ class MarkovAMDP(gym.Env, nn.Module):
         rew = self._reward(z, action, next_z) # low level reward
         r_g = self.task_reward(next_z)
         duration = self._tau(z, action)
-        termination = self._termination(next_z)
+        termination = False#self._termination(next_z)
         initset = self.initset(z)
         reward = self.reward_scale * rew + r_g
         done = termination or r_g > 0
@@ -268,7 +270,8 @@ class MarkovAMDP(gym.Env, nn.Module):
             ground_state = self.preprocess(ground_state)
             z = self.encoder(ground_state) 
             initset = self.initset(z)
-            done = initset.sum().item() > 0
+            # done = initset.sum().item() > 0
+            done = True
             if not done:
                 ground_state = None
         self.simulation_state = dict(z=z, initset=initset)
@@ -318,6 +321,7 @@ class MarkovAMDP(gym.Env, nn.Module):
                 print("WARNING: not enough trajectories in the buffer")
                 break
             self.optimizer.zero_grad()
+
             loss, logs = self.training_loss(batch)
             
             # train 
@@ -712,10 +716,11 @@ class MarkovAMDP(gym.Env, nn.Module):
     
     
     @classmethod
-    def load_checkpoint(cls, ckpt_path, fabric=None):
+    def load_checkpoint(cls, ckpt_path, fabric=None, device='cpu'):
         if fabric is None:
-            fabric = L.Fabric()
+            fabric = L.Fabric(accelerator=device)
         loaded_ckpt = fabric.load(ckpt_path, {})
+
         cfg = loaded_ckpt['cfg']
         mdp = cls(cfg)
         mdp.timestep = loaded_ckpt['timestep']
@@ -724,8 +729,8 @@ class MarkovAMDP(gym.Env, nn.Module):
         for mdl in mdp._models.keys():
             state[mdl].load_state_dict(loaded_ckpt[mdl])
 
-        mdp.configure_optimizers()
-        mdp.optimizer.load_state_dict(loaded_ckpt['optimizer'])
+        # mdp.configure_optimizers()
+        # mdp.optimizer.load_state_dict(loaded_ckpt['optimizer'])
 
         return mdp
     

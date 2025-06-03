@@ -61,23 +61,25 @@ class Trainer:
 
     def setup(self):
         # mkdirs
+        device = f'cuda:{self.config.experiment.gpu}' if self.config.experiment.gpu >= 0 else 'cpu'
         _, world_model_outdir, agent_outdir = makeoutdirs(self.config)
-        self.load_checkpoint(world_model_outdir)
+        self.load_checkpoint(world_model_outdir, device=self.config.fabric.accelerator)
 
         self.agent.setup(agent_outdir)
         self.world_model.set_outdir(world_model_outdir)
         self.world_model.setup_trainer(self.config)
         self.world_model.setup_replay(self.offline_data)
-
+        
+        self.agent.to(device)
 
     def checkpoint(self):
         self.world_model.save_checkpoint()
 
-    def load_checkpoint(self, ckpt_path):
+    def load_checkpoint(self, ckpt_path, device):
         if (pathlib.Path(ckpt_path) / 'checkpoints/world_model.ckpt').exists():
             warmup_steps = self.world_model.warmup_steps
             sample_transition = self.world_model.sample_transition
-            self.world_model = self.world_model.load_checkpoint(pathlib.Path(ckpt_path) / 'checkpoints/world_model.ckpt')
+            self.world_model = self.world_model.load_checkpoint(pathlib.Path(ckpt_path) / 'checkpoints/world_model.ckpt', device=device)
             print(f"Loading checkpoint at {pathlib.Path(ckpt_path) / 'checkpoints/world_model.ckpt'}")
             self.world_model.warmup_steps = warmup_steps
             self.world_model.sample_transition = sample_transition
@@ -148,7 +150,7 @@ class Trainer:
                 print(f'[simulation stats] {" | ".join([f"{k}: {v}" for k,v in ep_logs.items()])}')
             # evaluate
             if self.should_evaluate(self.world_model.timestep):
-                stats = self.agent.evaluate(self.test_env, self.world_model.encode, self.config.experiment.eval_n_runs)
+                stats = self.agent.evaluate(self.test_env, self.world_model.encode, self.config.experiment.eval_n_runs, timestep=self.world_model.timestep)
                 print(f"[evaluation stats] reward {stats['mean']} | length {stats['length_mean']}")
             # stats
             if self.should_checkpoint(self.world_model.timestep):

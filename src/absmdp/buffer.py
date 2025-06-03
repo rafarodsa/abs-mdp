@@ -369,6 +369,7 @@ class TrajectoryReplayBufferStored(TrajectoryReplayBuffer, Dataset):
         samples = pos_samples + neg_samples
         labels = torch.zeros(len(samples))
         labels[:len(pos_samples)] = 1.
+        samples = tree_map(self._to_torch, samples)
         return tree_map(lambda *tensors: torch.stack(tensors).to(self.device), *samples), labels.to(self.device)
     
 
