@@ -144,6 +144,96 @@ python experiments/antmaze/plan_and_train.py \
 **Available Environments:**
 - AntMaze: `experiments/antmaze/online_planner.yaml`
 
+**File Flow Between Steps:**
+- **Step 1** → **Step 2**: `trajectories.zip`
+- **Step 2** → **Step 3**: `last.ckpt` + `trajectories.zip`
+
+## Pinball Pixels Workflow
+
+### 1. Data Generation
+
+Generate pixel-based trajectory data for Pinball environment:
+
+```bash
+python scripts/generate_trajectories.py \
+    --observation pixel \
+    --image-size 50 \
+    --uniform \
+    --save-path exp_results/reproduce/pinball.zip \
+    --num-traj 32 \
+    --n-jobs 4
+```
+
+**Parameters:**
+- `--observation`: Observation type (`pixel` for image-based observations)
+- `--image-size`: Size of the pixel observations (50x50)
+- `--uniform`: Use uniform sampling for data collection
+- `--save-path`: Path to save the generated trajectory data
+- `--num-traj`: Number of trajectories to generate
+- `--n-jobs`: Number of parallel jobs for data collection
+
+### 2. Model Pretraining
+
+Train abstract world models for pixel-based Pinball:
+
+```bash
+python experiments/pretrain_mdp.py \
+    --config experiments/pb_obstacles/pixel/config/tpc_cfg_critic.yaml \
+    --experiment_cwd exp_results/reproduce/pinball \
+    --data.data_path exp_results/reproduce/pinball.zip \
+    --accelerator gpu \
+    --epochs 1 \
+    --model.latent_dim 16 \
+    --tag test_reproduce
+```
+
+**Parameters:**
+- `--config`: Configuration file for pixel-based Pinball model
+- `--experiment_cwd`: Experiment working directory for saving results
+- `--data.data_path`: Path to the trajectory data generated in step 1
+- `--accelerator`: Training accelerator (`gpu` or `cpu`)
+- `--epochs`: Number of training epochs
+- `--model.latent_dim`: Dimensionality of the latent representation
+- `--tag`: Experiment tag for organization
+
+### 3. Planning & Training
+
+Train agents using the pretrained abstract models for Pinball navigation:
+
+```bash
+python experiments/pb_obstacles/plan_and_train.py \
+    --config experiments/pb_obstacles/pixel/config/online_planner.yaml \
+    --experiment_name pinball \
+    --planner.agent.replay_buffer_size 1000000 \
+    --experiment.steps 100000 \
+    --experiment.eval_interval 5000 \
+    --planner.env.goal 9 \
+    --experiment.seed 19 \
+    --planner.agent.lr 1e-5 \
+    --exp_id test \
+    --experiments_cwd exp_results/reproduce/pinball/ \
+    --world_model.ckpt exp_results/reproduce/pinball/mdps/test_reproduce/phi_train/ckpts/last.ckpt \
+    --world_model.data_path exp_results/reproduce/pinball.zip
+```
+
+**Parameters:**
+- `--config`: Configuration file for the Pinball planner
+- `--experiment_name`: Name for the experiment
+- `--planner.agent.replay_buffer_size`: Size of the replay buffer
+- `--experiment.steps`: Total training steps
+- `--experiment.eval_interval`: Evaluation frequency
+- `--planner.env.goal`: Goal configuration ID (9 for specific goal location)
+- `--experiment.seed`: Random seed for reproducibility
+- `--planner.agent.lr`: Learning rate for the agent
+- `--exp_id`: Experiment identifier
+- `--experiments_cwd`: Experiment working directory
+- `--world_model.ckpt`: Path to the pretrained world model checkpoint from step 2
+- `--world_model.data_path`: Path to the trajectory data used for training
+
+**Pinball File Flow Between Steps:**
+- **Step 1** → **Step 2**: `pinball.zip`
+- **Step 2** → **Step 3**: `last.ckpt` + `pinball.zip`
+
 ## Configuration
 
 The project uses YAML configuration files to manage experiment parameters. Key configuration directories:

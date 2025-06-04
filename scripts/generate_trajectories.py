@@ -80,7 +80,7 @@ if __name__== "__main__":
     parser.add_argument('--save-path', type=str, default=dataset_file_path)
     parser.add_argument('--env-config', type=str, default=configuration_file)
     parser.add_argument('--num-traj', type=int, default=num_traj)
-    parser.add_argument('--max-horizon', type=int, default=100)
+    parser.add_argument('--max-horizon', type=int, default=64)
     parser.add_argument('--observation', type=str, default=observation_type)
     parser.add_argument('--n-jobs', type=int, default=1)
     parser.add_argument('--max-exec-time', type=int, default=100)
@@ -258,3 +258,4 @@ if __name__== "__main__":
     torch.save(debug, bs)
     zfile.writestr('debug.pt', bs.getvalue())
     print(f'Debug info saved at {args.save_path}/debug.pt')
+    zfile.close()
